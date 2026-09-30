@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="kaido_dark" data-mode="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PVE VM Studio</title>
+<link rel="icon" id="favicon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2018%2018%22%3E%3C%2Fsvg%3E">
+<link rel="stylesheet" href="studio.css">
+<link rel="stylesheet" href="server.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <img data-icon="mark.svg" src="" width="22" height="22" alt="">
+    PVE VM Studio
+  </div>
+  <div class="lab-anchor">
+    <button class="btn ghost lab-btn" id="labBtn" type="button" title="Labs">
+      <img data-icon="servers.svg" src="" alt=""><span id="labName">No lab</span>
+      <span class="save-state" id="saveState"></span>
+    </button>
+    <div class="theme-popover lab-popover" id="labPopover">
+      <div class="theme-panel lab-panel">
+        <div class="tp-title">Labs</div>
+        <div id="labList"></div>
+        <div class="lab-new"><input id="labNewName" placeholder="New lab name"><button class="btn sm" type="button" id="labNewBtn">Create</button></div>
+      </div>
+    </div>
+  </div>
+  <div class="actions">
+    <div class="theme-anchor">
+      <button class="btn ghost" id="themeBtn" type="button" title="Appearance">
+        <span id="themeSwatch" class="swatch"></span>
+        <span id="themeName">Default</span>
+      </button>
+      <div class="theme-popover" id="themePopover">
+        <div class="theme-panel">
+          <div class="tp-title">Appearance</div>
+          <div class="theme-tabs">
+            <button type="button" class="btn tab active" id="tabDark"></button>
+            <button type="button" class="btn tab" id="tabLight"></button>
+          </div>
+          <div class="theme-list" id="themeList"></div>
+        </div>
+      </div>
+    </div>
+    <button class="btn ghost" type="button" onclick="openStateModal('load')" title="Take over a Hyper-V VM Studio state token (HVSS1.)"><img data-icon="download.svg" src="" alt=""> Import token</button>
+    <span class="user-chip" id="userChip"></span>
+    <button class="btn ghost" type="button" id="logoutBtn">Sign out</button>
+    <button class="btn primary" type="button" id="deployBtn"><img data-icon="first-boot.svg" data-icon-on-accent="1" src="" alt=""> Deploy</button>
+  </div>
+</header>
+
+<div class="layout" id="layout">
+  <nav class="nav" id="nav"></nav>
+  <main class="content" id="main"></main>
+</div>
+
+<div class="login-wrap" id="login" hidden>
+  <form class="card login-card" id="loginForm" autocomplete="on">
+    <div class="login-head"><img data-icon="mark.svg" src="" alt=""><div><h2>PVE VM Studio</h2><p class="hint">Sign in with your Proxmox VE account</p></div></div>
+    <label class="field"><span class="field-label">User name</span>
+      <input id="loginUser" name="username" autocomplete="username" required placeholder="root"></label>
+    <label class="field"><span class="field-label">Password</span>
+      <input id="loginPass" name="password" type="password" autocomplete="current-password" required></label>
+    <label class="field"><span class="field-label">Realm</span>
+      <select id="loginRealm"></select></label>
+    <div class="hint err" id="loginError" hidden></div>
+    <button class="btn primary" type="submit" id="loginBtn">Sign in</button>
+  </form>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<div class="overlay" id="stateOverlay">
+  <div class="modal">
+    <h2 id="stateModalTitle">Save state</h2>
+    <p class="hint" id="stateModalHelp" style="margin-bottom:10px"></p>
+    <textarea id="stateText"></textarea>
+    <div class="actions">
+      <button class="btn" type="button" onclick="closeStateModal()">Cancel</button>
+      <button class="btn" type="button" id="stateCopyBtn" onclick="copyStateText()">Copy</button>
+      <button class="btn primary" type="button" id="stateActionBtn" onclick="handleStateModalAction()">Save</button>
+    </div>
+  </div>
+</div>
+
+
+<div class="overlay" id="exportGateOverlay">
+  <div class="modal" style="width:min(560px,96vw)">
+    <h2 style="margin-bottom:6px" id="exportGateTitle">Review and validate found problems</h2>
+    <p class="hint" id="exportGateHelp" style="margin-bottom:10px"></p>
+    <div id="exportGateList" class="issue-list" style="max-height:280px;overflow:auto"></div>
+    <div class="actions">
+      <button class="btn" type="button" id="exportGateCancel">Close</button>
+      <button class="btn primary" type="button" id="exportGateConfirm"><img data-icon="export.svg" data-icon-on-accent="1" src="" alt=""> Download anyway</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="vmImportOverlay">
+  <div class="modal" style="width:min(720px,96vw)">
+    <h2 style="margin-bottom:12px">Import virtual machines JSON</h2>
+    <div class="import-howto">
+      <strong>Paste or load a JSON file</strong>
+      <ul>
+        <li>Full <code>config.json</code> (<code>servers</code> array) or a bare array of server objects</li>
+        <li>Matching computer names are updated; new names are added</li>
+      </ul>
+    </div>
+    <input type="file" id="vmImportFile" accept=".json,.txt,application/json" style="margin-bottom:10px">
+    <textarea id="vmImportText" placeholder='[ { "name": "app-01", ... } ]'></textarea>
+    <div class="actions">
+      <button class="btn" type="button" id="vmImportCancel">Cancel</button>
+      <button class="btn primary" type="button" id="vmImportConfirm">Import</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="memberPickerOverlay">
+  <div class="modal ou-picker-modal">
+    <h2 style="margin-bottom:4px" id="memberPickerTitle">Attach to virtual machines</h2>
+    <p class="hint" id="memberPickerHint" style="margin-bottom:8px">Select guest cluster nodes that share this VHD Set.</p>
+    <div class="ou-picker-search"><input id="memberPickerFilter" placeholder="Filter VMs…"></div>
+    <div class="ou-picker-tree" id="memberPickerList"></div>
+    <div class="actions">
+      <button class="btn" type="button" id="memberPickerClear">Clear</button>
+      <button class="btn" type="button" id="memberPickerCancel">Cancel</button>
+      <button class="btn primary" type="button" id="memberPickerApply">Apply</button>
+    </div>
+  </div>
+</div>
+<script src="studio.js"></script>
+<script src="server.js"></script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+# PVE VM Studio - /etc/pve-vm-studio/config.toml
+
+listen = "0.0.0.0:8443"
+data_dir = "/var/lib/pve-vm-studio"
+
+# Leave this section out to serve plain HTTP (development only - PVE passwords cross it).
+[tls]
+cert = "/etc/pve-vm-studio/tls.crt"
+key  = "/etc/pve-vm-studio/tls.key"
+
+[pve]
+# Any node of the cluster; the API is cluster-wide.
+url = "https://pve-01.lab.local:8006"
+# Printed by deploy/pve-setup.sh.
+token_id = "pve-vm-studio@pve!studio"
+token_secret = "00000000-0000-0000-0000-000000000000"
+# A copy of the cluster CA (/etc/pve/pve-root-ca.pem). The node certificate must name the
+# host used in `url`.
+ca_file = "/etc/pve-vm-studio/pve-root-ca.pem"
+# insecure = true   # skip certificate checks - development only

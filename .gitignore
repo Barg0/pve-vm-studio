@@ -1,0 +1,10 @@
+# Cloud images and ISOs are hundreds of MB to GB; run logs are per machine.
+media/*
+!media/.gitkeep
+logs/
+
+# Rust build output, local databases, dev config.
+/target
+*.db
+*.db-*
+/dev/

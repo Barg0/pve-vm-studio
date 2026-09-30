@@ -1,0 +1,139 @@
+/* What PVE VM Studio adds to the Hyper-V studio's stylesheet (studio.css): the lab picker,
+   sign-in, tables of the server blades, the job log and the chomp bar. Same tokens as the
+   studio - nothing here invents a colour. */
+
+[hidden] { display: none !important; }
+
+.user-chip { color: var(--fg-muted); font-size: 12px; padding: 0 8px; font-family: var(--mono); }
+.lab-anchor { position: relative; margin-left: 12px; }
+.lab-btn { gap: 8px; }
+.lab-btn img { width: 16px; height: 16px; }
+.save-state { font-size: 10.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--fg-muted); margin-left: 4px; }
+.save-state.ok { color: var(--success-text); }
+.save-state.warn { color: var(--warn); }
+.save-state.err { color: var(--danger-text); }
+.lab-popover { left: 0; right: auto; }
+.lab-panel { width: 320px; }
+.lab-panel .btn.row .hint { margin-left: auto; }
+.lab-new { display: flex; gap: 6px; padding: 8px 10px 10px; border-top: 1px solid var(--divider); }
+.lab-new input { flex: 1; height: 28px; }
+
+.login-wrap { height: calc(100% - 48px); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.login-card { width: min(400px, 100%); display: flex; flex-direction: column; gap: 12px; padding: 22px !important; }
+.login-head { display: flex; gap: 12px; align-items: center; margin-bottom: 6px; }
+.login-head img { width: 34px; height: 34px; }
+.login-head h2 { font-size: 17px; }
+.login-card .btn.primary { justify-content: center; font-weight: 700; }
+
+.table-wrap { overflow-x: auto; }
+table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.data th { text-align: left; font-size: 10.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+  color: var(--fg-muted); padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.data td { padding: 8px 10px; border-bottom: 1px solid var(--divider); vertical-align: middle; }
+table.data tr:last-child td { border-bottom: none; }
+table.data td.mono, .mono { font-family: var(--mono); font-size: 12px; }
+table.data td.muted { color: var(--fg-muted); }
+table.data tr.clickable { cursor: pointer; }
+table.data tr.clickable:hover td { background: var(--bg-hover); }
+table.data tr.selected td { background: var(--accent-soft); }
+.row-actions { white-space: nowrap; text-align: right; }
+.name-cell { display: flex; align-items: center; gap: 8px; }
+.name-cell img { width: 18px; height: 18px; flex-shrink: 0; }
+
+.pill.status.ok { color: var(--success-text); background: color-mix(in srgb, var(--success) 14%, transparent); }
+.pill.status.bad { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.pill.status.run { color: var(--accent); background: var(--accent-soft); }
+.pill.status.idle { color: var(--fg-muted); background: var(--bg-subtle); }
+.pill.status.warn { color: var(--warn); background: var(--warn-soft); }
+
+/* Jobs: a rail of jobs grouped by day, the selected one's log beside it. The page is one
+   screen - the rail and the log scroll, the page does not. */
+.jobs-split { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 14px; align-items: stretch;
+  height: calc(100vh - 150px); min-height: 420px; }
+.job-rail { padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.job-filters { display: flex; gap: 4px; padding: 10px; border-bottom: 1px solid var(--divider); flex-wrap: wrap; }
+.job-filter { font: inherit; font-size: 12px; color: var(--fg-muted); background: transparent; border: 1px solid transparent;
+  border-radius: 999px; padding: 3px 10px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.job-filter .n { font-family: var(--mono); font-size: 11px; opacity: .8; }
+.job-filter:hover { background: var(--bg-hover); color: var(--fg); }
+.job-filter.on { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-border); }
+.job-filter.f-failed.on { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 14%, transparent); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.job-filter.f-succeeded.on { color: var(--success-text); background: color-mix(in srgb, var(--success) 12%, transparent); border-color: color-mix(in srgb, var(--success) 35%, transparent); }
+.job-list { overflow-y: auto; min-height: 0; padding: 4px 0 8px; }
+.job-day { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-muted); padding: 10px 14px 4px; }
+.job-none { padding: 14px; }
+.job-item { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%;
+  text-align: left; font: inherit; color: var(--fg); background: transparent; border: 0; border-left: 3px solid transparent;
+  padding: 8px 12px 8px 11px; cursor: pointer; }
+.job-item:hover { background: var(--bg-hover); }
+.job-item.selected { background: var(--accent-soft); border-left-color: var(--accent); }
+.job-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-muted); }
+.job-item.s-running .job-dot { background: var(--accent); box-shadow: 0 0 0 0 var(--accent); animation: job-pulse 1.6s infinite; }
+.job-item.s-succeeded .job-dot { background: var(--success); }
+.job-item.s-failed .job-dot { background: var(--danger); }
+@keyframes job-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+@media (prefers-reduced-motion: reduce) { .job-item.s-running .job-dot { animation: none; } }
+.job-main { display: flex; flex-direction: column; min-width: 0; }
+.job-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-sub { font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-took { font-family: var(--mono); font-size: 11.5px; color: var(--fg-muted); }
+
+.job-detail { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-height: 0; min-width: 0; }
+.job-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.job-title { min-width: 0; }
+.job-head h3 { margin: 0 0 3px; font-size: 16px; overflow-wrap: anywhere; }
+.job-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--fg-muted); }
+#jobError:empty { display: none; }
+.log-bar { display: flex; align-items: center; gap: 16px; font-size: 12.5px; }
+.log-opt { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--fg-muted); }
+.log-opt input { accent-color: var(--accent); }
+.log-bar-fill { flex: 1; }
+
+.job-log { flex: 1; min-height: 0; margin: 0; background: var(--ps-editor-bg); color: var(--fg); font-family: var(--mono); font-size: 12px;
+  line-height: 1.6; border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 0; overflow: auto; white-space: normal; }
+/* clock [ tag ] message - a grid, so a wrapped message keeps under itself, not under the clock. */
+.job-log .ln { display: grid; grid-template-columns: 8ch 1ch 5ch 1ch minmax(0, 1fr); column-gap: .6ch; padding: 0 12px; white-space: pre-wrap; }
+.job-log .ln:hover { background: rgba(255,255,255,.03); }
+.job-log .ln > :only-child { grid-column: 1 / -1; }
+.job-log .ln-msg { overflow-wrap: anywhere; padding-left: .6ch; }
+.job-log .ln-f { color: var(--fg-muted); }
+.job-log .ln-tag { font-weight: 700; text-align: center; }
+.job-log .t-start .ln-tag, .job-log .t-end .ln-tag { color: var(--accent); }
+.job-log .t-get .ln-tag { color: var(--band-host); }
+.job-log .t-run .ln-tag { color: var(--band-ident); }
+.job-log .t-info .ln-tag { color: var(--log-yellow); }
+.job-log .t-warn .ln-tag, .job-log .t-warn .ln-msg { color: var(--warn); }
+.job-log .t-ok .ln-tag { color: var(--success); }
+.job-log .t-error .ln-tag, .job-log .t-error .ln-msg { color: var(--danger-text); }
+.job-log .t-debug .ln-tag, .job-log .t-debug .ln-msg { color: var(--fg-muted); }
+.job-log .echoed .ln-msg { border-left: 2px solid var(--border-strong); padding-left: 1ch; }
+.job-log .marker .ln-msg { color: var(--log-yellow); }
+.job-log .t-start, .job-log .t-end { margin: 2px 0; }
+.job-log.hide-debug .t-debug { display: none; }
+
+.chomp { padding: 10px 12px; background: var(--ps-editor-bg); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.chomp-head { display: flex; gap: 10px; align-items: baseline; font-size: 12.5px; margin-bottom: 4px; min-width: 0; }
+.chomp-label { font-weight: 600; white-space: nowrap; }
+.chomp-detail { color: var(--fg-muted); font-family: var(--mono); font-size: 11.5px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chomp-pct { font-family: var(--mono); font-weight: 700; color: var(--fg); }
+.chomp-line { font-family: var(--mono); font-size: 13px; white-space: pre; overflow: hidden; }
+.chomp-br, .chomp .c-track { color: var(--fg); }
+.chomp .c-mouth { color: var(--log-yellow); font-weight: 700; }
+.chomp .c-dots { color: var(--accent); }
+
+.meter { display: flex; align-items: center; gap: 8px; min-width: 140px; }
+.meter-track { flex: 1; height: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.meter-fill { height: 100%; background: var(--accent); }
+.meter-fill.warn { background: var(--warn); }
+.meter-fill.danger { background: var(--danger); }
+.meter-text { font-family: var(--mono); font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; }
+
+.provider-help { margin: 10px 0; padding: 10px 12px; background: var(--ps-editor-bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; max-height: 240px; overflow: auto; }
+
+@media (max-width: 900px) { .jobs-split { grid-template-columns: 1fr; height: auto; } .job-list { max-height: 40vh; } .job-log { height: 60vh; flex: none; } }
+
+/* Actions under a card's fields: their own row, right-aligned, a rule above. */
+.gs-actions { justify-content: flex-end; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--divider); }
+.gs-actions .btn img { width: 16px; height: 16px; }
+.gs-actions-note { margin-right: auto; align-self: center; }

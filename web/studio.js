@@ -1,0 +1,10479 @@
+/* icons.js — Hyper-V VM Studio icon system.
+   Replaces the ICONS map of Microsoft Azure SVGs. Every glyph here is an original drawing.
+
+   HOW IT WORKS
+   Each entry is a TEMPLATE, not a finished SVG. Two placeholders:
+     @H  the band hue for the active theme
+     @S  the seam colour, derived: mix(hue, ink, 45%)
+   tintIcon(name, theme) substitutes both and returns a data URI. That is the whole reason
+   six themes cost six cache keys instead of six icon sets; a seventh theme costs five hex
+   values in themes.js and no new artwork.
+
+   CONSTRUCTION RULES (do not break these when adding an icon)
+   - 18x18 viewBox. Live area 1.4-16.6; pins and stems may enter the outer half-unit.
+   - Exactly two elements: ONE solid silhouette filled @H, plus seams stroked @S at 1.2
+     units, round joins and caps. Seams carry all interior detail.
+   - No gradients, no opacity, no third colour, no outline around the silhouette.
+   - Radii: 1 to 1.2 on small shapes, 1.4 on panels, 2 to 3 on full-bleed squares.
+   - Every glyph must stay legible at 12px. Test before shipping.
+
+   LEGAL CONSTRAINT — READ THIS
+   These replace Microsoft's Azure portal icons, which is the point of the exercise. Do not
+   reintroduce vendor artwork, and do not "tint" or otherwise modify a vendor logo to match
+   the palette: a recoloured logo is a modified logo and is worse than using the original.
+   There are no logo slots left. Every OS glyph draws the machine - a rack of units for a
+   server, a monitor on its stand for a client - and nothing draws a vendor mark, including
+   the four-pane grid that reads as one. Do not add one back.
+*/
+
+const S = '<g fill="none" stroke="@S" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round">';
+
+/* ---- the fifty drop-in replacements. Same keys as the old ICONS map: [band, markup] ---- */
+const DEFS = {
+  "overview.svg": ["studio", '<g fill="@H"><rect x="1.8" y="1.8" width="6.6" height="6.6" rx="1"/><rect x="9.6" y="1.8" width="6.6" height="6.6" rx="1"/><rect x="1.8" y="9.6" width="6.6" height="6.6" rx="1"/><rect x="9.6" y="9.6" width="6.6" height="6.6" rx="1"/></g>'],
+  "help.svg": ["studio", '<g fill="@H"><circle cx="9" cy="9" r="7.2"/></g>' + S + '<path d="M6.9 7a2.2 2.2 0 1 1 2.1 2.8v.9"/><path d="M9 13.2h.01" stroke-width="1.7"/></g>'],
+  "language.svg": ["studio", '<g fill="@H"><circle cx="9" cy="9" r="7.2"/></g>' + S + '<path d="M1.9 9h14.2M9 1.9c3.4 3.8 3.4 10.4 0 14.2M9 1.9c-3.4 3.8-3.4 10.4 0 14.2"/></g>'],
+  "monitor.svg": ["studio", '<g fill="@H"><rect x="1.6" y="2.6" width="14.8" height="10" rx="1.4"/><rect x="6.4" y="14.4" width="5.2" height="1.8" rx=".9"/></g>' + S + '<path d="M1.6 5.8h14.8M9 12.6v1.8"/></g>'],
+  "settings.svg": ["host", '<g fill="@H"><rect x="1.8" y="3" width="14.4" height="2.4" rx="1.2"/><rect x="1.8" y="7.8" width="14.4" height="2.4" rx="1.2"/><rect x="1.8" y="12.6" width="14.4" height="2.4" rx="1.2"/></g>' + S + '<circle cx="5.4" cy="4.2" r="1.6"/><circle cx="11.4" cy="9" r="1.6"/><circle cx="7" cy="13.8" r="1.6"/></g>'],
+  "vnet.svg": ["host", '<g fill="@H"><rect x="6.6" y="6.6" width="4.8" height="4.8" rx="1"/><rect x="1.4" y="1.4" width="3.8" height="3.8" rx="1"/><rect x="12.8" y="1.4" width="3.8" height="3.8" rx="1"/><rect x="1.4" y="12.8" width="3.8" height="3.8" rx="1"/><rect x="12.8" y="12.8" width="3.8" height="3.8" rx="1"/></g>' + S + '<path d="M5.2 5.2l1.6 1.6M12.8 5.2l-1.6 1.6M5.2 12.8l1.6-1.6M12.8 12.8l-1.6-1.6"/></g>'],
+  "nic.svg": ["host", '<g fill="@H"><rect x="4" y="4" width="10" height="10" rx="1.4"/><rect x="6" y="1.2" width="1.4" height="2.4" rx=".7"/><rect x="10.6" y="1.2" width="1.4" height="2.4" rx=".7"/><rect x="6" y="14.4" width="1.4" height="2.4" rx=".7"/><rect x="10.6" y="14.4" width="1.4" height="2.4" rx=".7"/><rect x="1.2" y="6" width="2.4" height="1.4" rx=".7"/><rect x="1.2" y="10.6" width="2.4" height="1.4" rx=".7"/><rect x="14.4" y="6" width="2.4" height="1.4" rx=".7"/><rect x="14.4" y="10.6" width="2.4" height="1.4" rx=".7"/></g>' + S + '<rect x="6.9" y="6.9" width="4.2" height="4.2" rx=".7"/></g>'],
+  "vpn.svg": ["host", '<g fill="@H"><rect x="4.4" y="7.6" width="9.2" height="8.2" rx="1.4"/><path d="M6.4 7.6V5.9a2.6 2.6 0 0 1 5.2 0v1.7" fill="none" stroke="@H" stroke-width="1.7"/></g>' + S + '<path d="M9 10.4v2.6"/></g>'],
+  "dhcp.svg": ["host", '<g fill="@H"><rect x="1.6" y="3.8" width="14.8" height="10.4" rx="1.4"/></g>' + S + '<path d="M1.6 7h14.8"/><path d="M5 10.6h.01M9 10.6h.01M13 10.6h.01" stroke-width="1.8"/></g>'],
+  "dns.svg": ["host", '<g fill="@H"><circle cx="7.8" cy="7.8" r="6.2"/><rect x="10.4" y="10.4" width="6.2" height="6.2" rx="1.3"/></g>' + S + '<path d="M1.6 7.8h9.4M7.8 1.6c3 3.2 3 9 0 12.4M7.8 1.6c-3 3.2-3 9 0 12.4"/><path d="M13.5 12.4v2.2" stroke-width="1.4"/></g>'],
+  "hyperv.svg": ["host", '<g fill="@H"><polygon points="9,1.4 15.6,4.6 9,7.8 2.4,4.6"/><polygon points="9,5.8 15.6,9 9,12.2 2.4,9"/><polygon points="9,10.2 15.6,13.4 9,16.6 2.4,13.4"/></g>' + S + '<path d="M2.4 9L9 5.8 15.6 9M2.4 13.4L9 10.2l6.6 3.2"/></g>'],
+  "storage.svg": ["host", '<g fill="@H"><ellipse cx="9" cy="4.2" rx="6.4" ry="2.5"/><path d="M2.6 4.2v9.6c0 1.4 2.9 2.5 6.4 2.5s6.4-1.1 6.4-2.5V4.2z"/></g>' + S + '<path d="M2.9 8.4c1.4.9 3.6 1.5 6.1 1.5s4.7-.6 6.1-1.5M2.9 12c1.4.9 3.6 1.5 6.1 1.5s4.7-.6 6.1-1.5"/></g>'],
+  "disk.svg": ["host", '<g fill="@H"><path d="M2.6 4.6c0-1.6 2.9-2.9 6.4-2.9s6.4 1.3 6.4 2.9v8.8c0 1.6-2.9 2.9-6.4 2.9s-6.4-1.3-6.4-2.9z"/></g>' + S + '<path d="M2.9 4.6c0 1.5 2.8 2.7 6.1 2.7s6.1-1.2 6.1-2.7"/></g>'],
+  "disk-pool.svg": ["host", '<g fill="@H"><path d="M1.6 4.2c0-1.4 2.4-2.5 5.4-2.5s5.4 1.1 5.4 2.5v4.4c0 1.4-2.4 2.5-5.4 2.5S1.6 10 1.6 8.6z"/><path d="M5.6 9.4c0-1.4 2.4-2.5 5.4-2.5s5.4 1.1 5.4 2.5v4.4c0 1.4-2.4 2.5-5.4 2.5s-5.4-1.1-5.4-2.5z"/></g>' + S + '<path d="M1.9 4.2c0 1.3 2.3 2.3 5.1 2.3M5.9 9.4c0 1.3 2.3 2.3 5.1 2.3s5.1-1 5.1-2.3"/></g>'],
+  "disk-snapshot.svg": ["host", '<g fill="@H"><path d="M4 5.6c0-1.4 2.2-2.5 5-2.5s5 1.1 5 2.5v6.8c0 1.4-2.2 2.5-5 2.5s-5-1.1-5-2.5z"/></g>' + S + '<path d="M4.3 5.6c0 1.3 2.1 2.3 4.7 2.3s4.7-1 4.7-2.3"/><path d="M1.5 4.4V1.6h2.6M16.5 4.4V1.6h-2.6M1.5 13.6v2.8h2.6M16.5 13.6v2.8h-2.6"/></g>'],
+  "virtual-clusters.svg": ["host", '<g fill="@H"><rect x="1.6" y="1.6" width="14.8" height="14.8" rx="2.4"/></g>' + S + '<rect x="4.4" y="4.4" width="4" height="4" rx=".8"/><rect x="9.6" y="4.4" width="4" height="4" rx=".8"/><rect x="4.4" y="9.6" width="4" height="4" rx=".8"/><rect x="9.6" y="9.6" width="4" height="4" rx=".8"/></g>'],
+  "shared-gallery.svg": ["host", '<g fill="@H"><rect x="1.6" y="6" width="10" height="9.4" rx="1.3"/><rect x="6.4" y="2.6" width="10" height="9.4" rx="1.3"/></g>' + S + '<rect x="6.7" y="2.9" width="9.4" height="8.8" rx="1.1"/><circle cx="9.6" cy="6" r="1.2"/></g>'],
+  "print.svg": ["work", '<g fill="@H"><rect x="2.4" y="6.2" width="13.2" height="6.8" rx="1.2"/><rect x="5" y="1.8" width="8" height="4" rx="1"/><rect x="5" y="11.8" width="8" height="4.4" rx="1"/></g>' + S + '<path d="M6.6 13.8h4.8M13.2 8.6h1"/></g>'],
+  "vm.svg": ["work", '<g fill="@H"><polygon points="9,1.6 16.2,5.6 16.2,12.4 9,16.4 1.8,12.4 1.8,5.6"/></g>' + S + '<path d="M1.8 5.6L9 9.6l7.2-4M9 9.6v6.6"/></g>'],
+  "servers.svg": ["work", '<g fill="@H"><rect x="1.8" y="2.2" width="14.4" height="4" rx="1"/><rect x="1.8" y="7" width="14.4" height="4" rx="1"/><rect x="1.8" y="11.8" width="14.4" height="4" rx="1"/></g>' + S + '<path d="M12.6 4.2h1.4M12.6 9h1.4M12.6 13.8h1.4M4.2 4.2h3M4.2 9h3M4.2 13.8h3"/></g>'],
+  "rds.svg": ["work", '<g fill="@H"><rect x="1.6" y="2.8" width="11.2" height="9" rx="1.3"/><rect x="9.2" y="8.4" width="7.2" height="7.2" rx="1.3"/></g>' + S + '<rect x="9.5" y="8.7" width="6.6" height="6.6" rx="1.1"/><path d="M11.4 12h2.8M12.8 10.6l1.4 1.4-1.4 1.4"/><path d="M4.2 5.6h4"/></g>'],
+  "paw.svg": ["host", '<g fill="@H"><rect x="2.4" y="2.8" width="13.2" height="8.8" rx="1.2"/><rect x="1" y="12.6" width="16" height="2.2" rx="1.1"/></g>' + S + '<path d="M9 5l2.6 1v1.9c0 1.4-1.2 2.4-2.6 2.9-1.4-.5-2.6-1.5-2.6-2.9V6z"/></g>'],
+  "client-apps.svg": ["work", '<g fill="@H"><rect x="1.8" y="1.8" width="3.6" height="3.6" rx=".9"/><rect x="7.2" y="1.8" width="3.6" height="3.6" rx=".9"/><rect x="12.6" y="1.8" width="3.6" height="3.6" rx=".9"/><rect x="1.8" y="7.2" width="3.6" height="3.6" rx=".9"/><rect x="7.2" y="7.2" width="3.6" height="3.6" rx=".9"/><rect x="12.6" y="7.2" width="3.6" height="3.6" rx=".9"/><rect x="1.8" y="12.6" width="3.6" height="3.6" rx=".9"/><rect x="7.2" y="12.6" width="3.6" height="3.6" rx=".9"/><rect x="12.6" y="12.6" width="3.6" height="3.6" rx=".9"/></g>'],
+  "files.svg": ["work", '<g fill="@H"><path d="M1.6 4.6a1.2 1.2 0 0 1 1.2-1.2h4l1.6 1.8h6.8a1.2 1.2 0 0 1 1.2 1.2v7.6a1.2 1.2 0 0 1-1.2 1.2H2.8a1.2 1.2 0 0 1-1.2-1.2z"/></g>' + S + '<path d="M1.6 7.6h14.8"/></g>'],
+  "file-shares.svg": ["work", '<g fill="@H"><path d="M1.4 5a1.1 1.1 0 0 1 1.1-1.1h3.6l1.4 1.7h4.6a1.1 1.1 0 0 1 1.1 1.1v5.8a1.1 1.1 0 0 1-1.1 1.1H2.5A1.1 1.1 0 0 1 1.4 12.5z"/><circle cx="14.6" cy="14.6" r="1.9"/></g>' + S + '<path d="M1.4 7.6h11.2M12.2 12.4l1.3 1.3"/></g>'],
+  "web.svg": ["work", '<g fill="@H"><rect x="1.6" y="2.6" width="14.8" height="12.8" rx="1.4"/></g>' + S + '<path d="M1.6 6.2h14.8"/><path d="M4.2 4.4h.01M6.4 4.4h.01" stroke-width="1.6"/><path d="M9 8.6c2.4 2.4 2.4 3.8 0 4.6M9 8.6c-2.4 2.4-2.4 3.8 0 4.6"/></g>'],
+  "backup.svg": ["work", '<g fill="@H"><rect x="1.8" y="1.8" width="14.4" height="14.4" rx="2"/></g>' + S + '<path d="M12.4 7.4a4 4 0 1 0 .6 4.4"/><path d="M12.8 4.8v2.8h-2.8"/></g>'],
+  "identity.svg": ["ident", '<g fill="@H"><circle cx="9" cy="5.6" r="3.4"/><path d="M2.6 16.4c0-3.6 2.9-5.7 6.4-5.7s6.4 2.1 6.4 5.7z"/></g>'],
+  "users.svg": ["ident", '<g fill="@H"><circle cx="6.6" cy="5.8" r="3.2"/><path d="M1 16.4c0-3.4 2.5-5.3 5.6-5.3s5.6 1.9 5.6 5.3z"/><circle cx="13.4" cy="6.4" r="2.3"/><path d="M12 11.6c2.9-.5 5 1.3 5 4.8h-3.6z"/></g>'],
+  "key.svg": ["ident", '<g fill="@H"><circle cx="6.2" cy="6.2" r="4.2"/><path d="M8.8 8.8l6.2 6.2-1.6 1.6-1.2-1.2-1.1 1.1-1.3-1.3 1.1-1.1-2-2z"/></g>' + S + '<circle cx="6.2" cy="6.2" r="1.5"/></g>'],
+  "keys.svg": ["ident", '<g fill="@H"><circle cx="5.6" cy="6.4" r="3.7"/><path d="M7.9 8.7l5.9 5.9-1.5 1.5-1.1-1.1-1 1-1.2-1.2 1-1-1.9-1.9z"/><circle cx="12.4" cy="4" r="2.4"/></g>' + S + '<circle cx="5.6" cy="6.4" r="1.4"/><circle cx="12.4" cy="4" r=".9"/></g>'],
+  "security.svg": ["ident", '<g fill="@H"><path d="M9 1.4l6.4 2.4v5.4c0 3.6-2.8 6.2-6.4 7.4-3.6-1.2-6.4-3.8-6.4-7.4V3.8z"/></g>' + S + '<path d="M6 8.8l2.3 2.3 4-4.3"/></g>'],
+  "certificate.svg": ["ident", '<g fill="@H"><rect x="2.4" y="1.4" width="13.2" height="9.6" rx="1.2"/><circle cx="6.2" cy="12.6" r="3.2"/></g>' + S + '<path d="M5 4.4h8M5 7h5.6"/><circle cx="6.2" cy="12.6" r="1.2"/></g>'],
+  "active-directory.svg": ["ident", '<g fill="@H"><rect x="6.6" y="1.4" width="4.8" height="4" rx="1"/><rect x="1.4" y="12.6" width="4.4" height="4" rx="1"/><rect x="12.2" y="12.6" width="4.4" height="4" rx="1"/></g>' + S + '<path d="M9 5.4v3.4M3.6 12.6V8.8h10.8v3.8"/></g>'],
+  "entra.svg": ["ident", '<g fill="@H"><rect x="2.6" y="1.8" width="12.8" height="14.4" rx="1.4"/></g>' + S + '<circle cx="9" cy="7.2" r="2.2"/><path d="M5.6 13.4c0-1.9 1.5-3 3.4-3s3.4 1.1 3.4 3M7.2 4.2h3.6"/></g>'],
+  "administrative-units.svg": ["ident", '<g fill="@H"><rect x="5.6" y="5.6" width="6.8" height="6.8" rx="1.2"/></g>' + S + '<path d="M1.6 5.2V1.6h3.6M16.4 5.2V1.6h-3.6M1.6 12.8v3.6h3.6M16.4 12.8v3.6h-3.6"/></g>'],
+  "abs-member.svg": ["ident", '<g fill="@H"><rect x="1.8" y="1.8" width="14.4" height="14.4" rx="3"/></g>' + S + '<circle cx="6.4" cy="6.4" r="1.6"/><circle cx="11.6" cy="6.4" r="1.6"/><circle cx="9" cy="11.6" r="1.6"/></g>'],
+  "gpo.svg": ["ident", '<g fill="@H"><rect x="2.4" y="1.8" width="9.4" height="14.4" rx="1.3"/><circle cx="14.2" cy="12.8" r="2.4"/></g>' + S + '<path d="M4.8 5.4h4.6M4.8 8.2h4.6M4.8 11h3"/></g>'],
+  "arc.svg": ["ident", '<g fill="@H"><rect x="1.4" y="11.4" width="4" height="4.6" rx="1"/><rect x="7" y="11.4" width="4" height="4.6" rx="1"/><rect x="12.6" y="11.4" width="4" height="4.6" rx="1"/></g>' + S + '<path d="M2.6 8.4a7.8 7.8 0 0 1 12.8 0"/><path d="M3.4 11.4V9.7M9 11.4V8.4M14.6 11.4V9.7"/></g>'],
+  "azure.svg": ["ident", '<g fill="@H"><path d="M4.9 14.6a3.7 3.7 0 0 1-.4-7.4 4.9 4.9 0 0 1 9.3-1.2 3.8 3.8 0 0 1 .6 8.6z"/></g>' + S + '<path d="M6.6 11.6h4.8"/></g>'],
+  "export.svg": ["deploy", '<g fill="@H"><path d="M2.4 2.6h6v2.4H4.8v8.4h8.4V9.6h2.4v6.2H2.4z"/><path d="M10.2 2.6h5.6v5.6l-2-2-3.4 3.4-1.6-1.6 3.4-3.4z"/></g>'],
+  "download.svg": ["deploy", '<g fill="@H"><rect x="7.8" y="1.6" width="2.4" height="8.6" rx="1"/><path d="M9 13L4.4 8h9.2z"/><rect x="1.8" y="14" width="14.4" height="2.4" rx="1.1"/></g>'],
+  "save.svg": ["deploy", '<g fill="@H"><path d="M2.6 3.6a1.2 1.2 0 0 1 1.2-1.2h8.4l3.2 3.2v8.8a1.2 1.2 0 0 1-1.2 1.2H3.8a1.2 1.2 0 0 1-1.2-1.2z"/></g>' + S + '<path d="M6.2 2.6v3.4h4.8M6.4 15.4v-4.2h5.2v4.2"/></g>'],
+  "search.svg": ["deploy", '<g fill="none" stroke="@H" stroke-width="2.2" stroke-linecap="round"><circle cx="7.6" cy="7.6" r="5.4"/><path d="M11.7 11.7l4.1 4.1"/></g>' + S + '<circle cx="7.6" cy="7.6" r="2.2"/></g>'],
+  "update.svg": ["deploy", '<g fill="@H"><circle cx="9" cy="9" r="7.2"/></g>' + S + '<path d="M12.4 9.4a3.5 3.5 0 1 1-1.1-2.6"/><path d="M12.6 4.8v2.4h-2.4"/></g>'],
+  "code.svg": ["deploy", '<g fill="@H"><rect x="1.6" y="3.2" width="14.8" height="11.6" rx="1.4"/></g>' + S + '<path d="M1.6 6.4h14.8M6.6 8.8L4.8 10.9l1.8 2.1M11.4 8.8l1.8 2.1-1.8 2.1"/></g>'],
+  "powershell.svg": ["deploy", '<g fill="@H"><rect x="1.6" y="3.2" width="14.8" height="11.6" rx="1.4"/></g>' + S + '<path d="M1.6 6.4h14.8M4.8 9.2l2.2 2.1-2.2 2.1M8.8 13.4h4.4"/></g>'],
+  "extensions.svg": ["deploy", '<g fill="@H"><rect x="1.8" y="1.8" width="9" height="9" rx="1.2"/><rect x="9" y="9" width="7.2" height="7.2" rx="1.2"/></g>' + S + '<rect x="9.3" y="9.3" width="6.6" height="6.6" rx="1"/></g>']
+};
+
+/* ---- new vocabulary the old set could not express: [band, note, markup] ---- */
+const FRESH = {
+  "cpu.svg": ["host", "vCPU count — was a generic tile", '<g fill="@H"><rect x="3.6" y="3.6" width="10.8" height="10.8" rx="1.4"/><rect x="5.4" y="1" width="1.3" height="2.2" rx=".65"/><rect x="8.35" y="1" width="1.3" height="2.2" rx=".65"/><rect x="11.3" y="1" width="1.3" height="2.2" rx=".65"/><rect x="5.4" y="14.8" width="1.3" height="2.2" rx=".65"/><rect x="8.35" y="14.8" width="1.3" height="2.2" rx=".65"/><rect x="11.3" y="14.8" width="1.3" height="2.2" rx=".65"/><rect x="1" y="5.4" width="2.2" height="1.3" rx=".65"/><rect x="1" y="8.35" width="2.2" height="1.3" rx=".65"/><rect x="1" y="11.3" width="2.2" height="1.3" rx=".65"/><rect x="14.8" y="5.4" width="2.2" height="1.3" rx=".65"/><rect x="14.8" y="8.35" width="2.2" height="1.3" rx=".65"/><rect x="14.8" y="11.3" width="2.2" height="1.3" rx=".65"/></g>' + S + '<rect x="6" y="6" width="2.6" height="2.6" rx=".5"/><rect x="9.4" y="6" width="2.6" height="2.6" rx=".5"/><rect x="6" y="9.4" width="2.6" height="2.6" rx=".5"/><rect x="9.4" y="9.4" width="2.6" height="2.6" rx=".5"/></g>'],
+  "ram.svg": ["host", "Memory in GB — a real DIMM", '<g fill="@H"><rect x="1.2" y="4.4" width="15.6" height="6.4" rx=".8"/><rect x="2.2" y="11.4" width="1.8" height="2.2" rx=".4"/><rect x="5.2" y="11.4" width="1.8" height="2.2" rx=".4"/><rect x="8.2" y="11.4" width="1.8" height="2.2" rx=".4"/><rect x="11.2" y="11.4" width="1.8" height="2.2" rx=".4"/><rect x="14.2" y="11.4" width="1.8" height="2.2" rx=".4"/></g>' + S + '<rect x="3.2" y="6.2" width="3.6" height="2.8" rx=".5"/><rect x="8" y="6.2" width="3.6" height="2.8" rx=".5"/><path d="M13.6 6.2v2.8"/></g>'],
+  "vtpm.svg": ["host", "Virtual TPM — was the padlock", '<g fill="@H"><rect x="2.6" y="2.6" width="12.8" height="12.8" rx="1.6"/></g>' + S + '<circle cx="9" cy="7.6" r="1.8"/><path d="M9 9.4v2.8M5.4 5.2h1.4M11.2 5.2h1.4M5.4 12.8h1.4M11.2 12.8h1.4"/></g>'],
+  "secure-boot.svg": ["host", "Secure Boot — was the same shield as security", '<g fill="@H"><path d="M9 1.4l6.4 2.4v5.4c0 3.6-2.8 6.2-6.4 7.4-3.6-1.2-6.4-3.8-6.4-7.4V3.8z"/></g>' + S + '<path d="M9 5.4v3.2M6.8 6.8a3.1 3.1 0 1 0 4.4 0"/></g>'],
+  "nested-virt.svg": ["host", "Nested virtualization — a host inside a guest", '<g fill="@H"><polygon points="9,1.6 16.2,5.6 16.2,12.4 9,16.4 1.8,12.4 1.8,5.6"/></g>' + S + '<polygon points="9,5.4 13,7.6 13,11.4 9,13.6 5,11.4 5,7.6"/></g>'],
+  "vlan.svg": ["host", "VLAN tag — was borrowed from vnet", '<g fill="@H"><rect x="1.4" y="3" width="9.4" height="2.6" rx="1.3"/><rect x="1.4" y="7.7" width="9.4" height="2.6" rx="1.3"/><rect x="1.4" y="12.4" width="9.4" height="2.6" rx="1.3"/><path d="M11.8 6.2h4.8v5.6h-4.8L10 9z"/></g>' + S + '<path d="M13.2 9h2"/></g>'],
+  "gateway.svg": ["host", "Default gateway — one route out", '<g fill="@H"><rect x="1.2" y="6.2" width="4" height="5.6" rx="1.2"/><rect x="12.8" y="6.2" width="4" height="5.6" rx="1.2"/><path d="M6 8.2h3.6V6.4l2.8 2.6-2.8 2.6V9.8H6z"/></g>'],
+  "static-ip.svg": ["host", "A fixed address on a subnet", '<g fill="@H"><path d="M9 1.6a5.2 5.2 0 0 1 5.2 5.2c0 3.6-5.2 9.6-5.2 9.6S3.8 10.4 3.8 6.8A5.2 5.2 0 0 1 9 1.6z"/></g>' + S + '<circle cx="9" cy="6.8" r="1.9"/></g>'],
+  "iso-media.svg": ["host", "The Windows ISO, not a vendor logo", '<g fill="@H"><circle cx="9" cy="9" r="6.4"/></g>' + S + '<circle cx="9" cy="9" r="2"/><path d="M1.4 4.6V1.6h3M16.6 13.4v3h-3"/></g>'],
+  "gold-image.svg": ["host", "A generalized gold VHDX", '<g fill="@H"><path d="M3 5c0-1.5 2.7-2.7 6-2.7s6 1.2 6 2.7v8c0 1.5-2.7 2.7-6 2.7S3 14.5 3 13z"/></g>' + S + '<path d="M3.3 5c0 1.4 2.6 2.5 5.7 2.5S14.7 6.4 14.7 5"/><path d="M9 9.6l1.9 1.9L9 13.4l-1.9-1.9z"/></g>'],
+  "differencing.svg": ["host", "A child disk on its parent", '<g fill="@H"><path d="M1.6 4.4c0-1.3 2.2-2.3 4.9-2.3s4.9 1 4.9 2.3v4c0 1.3-2.2 2.3-4.9 2.3S1.6 9.7 1.6 8.4z"/><path d="M7.6 11.2c0-1.2 2-2.1 4.4-2.1s4.4.9 4.4 2.1v3.6c0 1.2-2 2.1-4.4 2.1s-4.4-.9-4.4-2.1z"/></g>' + S + '<path d="M1.9 4.4c0 1.2 2.1 2.1 4.6 2.1M7.9 11.2c0 1.1 1.9 1.9 4.1 1.9s4.1-.8 4.1-1.9"/></g>'],
+  "checkpoint.svg": ["host", "Checkpoints on or off", '<g fill="@H"><rect x="3" y="1.6" width="1.9" height="14.8" rx=".9"/><path d="M5.6 2.6h9.6l-2.2 3.4 2.2 3.4H5.6z"/></g>' + S + '<path d="M8.6 4.4h3.4"/></g>'],
+  "integration.svg": ["host", "Integration Services — was a gear", '<g fill="@H"><rect x="6" y="1.4" width="1.8" height="4" rx=".9"/><rect x="10.2" y="1.4" width="1.8" height="4" rx=".9"/><path d="M3.8 5.6h10.4v3.2a5.2 5.2 0 0 1-10.4 0z"/><rect x="8.1" y="13.6" width="1.8" height="2.8" rx=".9"/></g>' + S + '<path d="M6.4 8.2h5.2"/></g>'],
+  "start-action.svg": ["host", "Automatic start action", '<g fill="@H"><rect x="1.8" y="1.8" width="14.4" height="14.4" rx="2.4"/></g>' + S + '<path d="M7.4 6.4l4.6 2.6-4.6 2.6z"/><path d="M6 13.6h6"/></g>'],
+  "first-boot.svg": ["host", "What happens on first boot", '<g fill="@H"><circle cx="9" cy="9" r="7.2"/></g>' + S + '<path d="M9 4.8v4.4l3 1.9"/></g>'],
+  "session-host.svg": ["work", "An RDS session host — screen plus its users", '<g fill="@H"><rect x="1.6" y="2.6" width="14.8" height="10.4" rx="1.4"/><rect x="6.4" y="14.8" width="5.2" height="1.6" rx=".8"/></g>' + S + '<circle cx="6.8" cy="7" r="1.5"/><path d="M4.3 11.2c0-1.5 1.1-2.4 2.5-2.4s2.5.9 2.5 2.4"/><circle cx="11.8" cy="7.6" r="1.1"/><path d="M10.4 11.2c0-1.2.7-1.9 1.6-1.9s1.6.7 1.6 1.9"/></g>'],
+  "live-migration.svg": ["work", "Moving a VM between hosts", '<g fill="@H"><rect x="1.2" y="4.6" width="5.4" height="8.8" rx="1.2"/><rect x="11.4" y="4.6" width="5.4" height="8.8" rx="1.2"/></g>' + S + '<path d="M7.6 7.4h3.2M9.4 6l1.6 1.4-1.6 1.4M10.4 11H7.2M8.6 9.6L7 11l1.6 1.4"/></g>'],
+  "domain-controller.svg": ["work", "A DC, distinct from any other server", '<g fill="@H"><rect x="4.6" y="5" width="8.8" height="11.4" rx="1.3"/><path d="M9 1l2 2-2 2-2-2z"/></g>' + S + '<path d="M6.6 7.6h4.8M6.6 9.8h4.8"/><circle cx="9" cy="13.2" r="1.4"/></g>'],
+  "rsat-tools.svg": ["work", "RSAT admin tools as a toolbox", '<g fill="@H"><path d="M1.6 6.8h14.8v8a1.2 1.2 0 0 1-1.2 1.2H2.8a1.2 1.2 0 0 1-1.2-1.2z"/><path d="M6.4 2.2h5.2a1.2 1.2 0 0 1 1.2 1.2v2H5.2v-2a1.2 1.2 0 0 1 1.2-1.2z"/></g>' + S + '<path d="M1.6 10h14.8M7.6 8.4h2.8"/></g>'],
+  "fod.svg": ["work", "Features on Demand, pulled from media", '<g fill="@H"><path d="M2.4 8.6h13.2v6.6a1.2 1.2 0 0 1-1.2 1.2H3.6a1.2 1.2 0 0 1-1.2-1.2z"/><path d="M8.1 1.4h1.8v3.8h2.6L9 9.2 5.5 5.2h2.6z"/></g>' + S + '<path d="M2.4 11.8h13.2"/></g>'],
+  "root-ca.svg": ["ident", "A certificate authority, not a certificate", '<g fill="@H"><circle cx="9" cy="7.4" r="5.6"/><path d="M5.6 12l1.9 1.2v3.2L9 15.2l1.5 1.2v-3.2L12.4 12z"/></g>' + S + '<circle cx="9" cy="7.4" r="2.2"/></g>'],
+  "secret.svg": ["ident", "A generated password, masked", '<g fill="@H"><rect x="1.6" y="6" width="14.8" height="6.4" rx="3.2"/></g>' + S + '<path d="M5 9.2h.01M7.6 9.2h.01M10.2 9.2h.01M12.8 9.2h.01" stroke-width="1.9"/></g>'],
+  "answer-file.svg": ["deploy", "The generated unattend.xml", '<g fill="@H"><path d="M3 2.6a1.2 1.2 0 0 1 1.2-1.2h6l4.8 4.4v9.6a1.2 1.2 0 0 1-1.2 1.2H4.2A1.2 1.2 0 0 1 3 15.4z"/></g>' + S + '<path d="M10 1.6V6h4.6M7.4 9.4L5.8 11.2l1.6 1.8M10.6 9.4l1.6 1.8-1.6 1.8"/></g>'],
+  "os-server-desktop.svg": ["work", "Server with Desktop Experience — a screen over a rack unit", '<g fill="@H"><rect x="1.6" y="1.6" width="14.8" height="8.6" rx="1.3"/><rect x="1.4" y="12.6" width="15.2" height="3.8" rx="1.1"/></g>' + S + '<rect x="3.6" y="3.6" width="10.8" height="4.6" rx=".7"/><path d="M3.4 14.5h6"/><path d="M14.2 14.5h.01" stroke-width="1.7"/></g>'],
+  "os-server-core.svg": ["work", "Server Core — one pane, a prompt, same rack unit", '<g fill="@H"><rect x="2.4" y="1.6" width="13.2" height="9.6" rx="1.2"/><rect x="1.4" y="12.6" width="15.2" height="3.8" rx="1.1"/></g>' + S + '<path d="M2.4 4.6h13.2M4.8 6.9l1.8 1.8-1.8 1.8M8.6 10.1h4.4M3.4 14.5h6"/><path d="M14.2 14.5h.01" stroke-width="1.7"/></g>'],
+  "os-client.svg": ["host", "Windows client — one screen on a laptop base, in the blue band", '<g fill="@H"><rect x="2.2" y="1.8" width="13.6" height="9.2" rx="1.3"/><path d="M1 12.4h16l-1.2 3.2H2.2z"/></g>' + S + '<rect x="4.2" y="3.8" width="9.6" height="5.2" rx=".7"/><path d="M6.4 14h5.2"/></g>'],
+  "os-window.svg": ["studio", "The OS itself, as a plain window", '<g fill="@H"><rect x="1.6" y="2.2" width="14.8" height="13.6" rx="1.4"/></g>' + S + '<path d="M1.6 5.8h14.8M9 5.8v10M12.6 4h1.4"/></g>'],
+  "trash.svg": ["studio", "Remove \u2014 was a stroked outline bin from the old icon set", '<g fill="@H"><rect x="6.4" y="1.2" width="5.2" height="2.8" rx="1.1"/><rect x="2.2" y="3.4" width="13.6" height="2.4" rx="1.2"/><path d="M4 6.8h10l-.7 8.2a1.6 1.6 0 0 1-1.6 1.4H6.3a1.6 1.6 0 0 1-1.6-1.4z"/></g>' + S + '<path d="M7.4 9.2v4.2M10.6 9.2v4.2"/></g>'],
+  "validate.svg": ["deploy", "Preflight — was the magnifier", '<g fill="@H"><rect x="2.6" y="2.2" width="12.8" height="14" rx="1.4"/><rect x="6.4" y="1" width="5.2" height="2.6" rx="1.1"/></g>' + S + '<path d="M5.8 8.4l1.8 1.8 3.6-3.8M5.8 12.8h6.4"/></g>']
+};
+
+/* ---- one glyph per Windows Server role: [band, label, note, markup] ----
+   Band follows the role's subject, not its nav group. This is the one deliberate
+   exception to the band rule: sixteen Workloads-green rows on one card is unreadable. */
+const ROLES = {
+  "role-adcs.svg": ["ident", "AD Certificate Services", "A certificate with its seal and ribbon", '<g fill="@H"><rect x="1.4" y="2.2" width="15.2" height="10.6" rx="1.3"/><circle cx="12.8" cy="12.4" r="3.4"/></g>' + S + '<path d="M3.8 5.4h7.4M3.8 7.6h7.4M3.8 9.8h4.6"/><circle cx="12.8" cy="12.4" r="1.3"/><path d="M11.2 15.2v1.6l1.6-1 1.6 1v-1.6"/></g>'],
+  "role-adds.svg": ["ident", "AD Domain Services", "Forest, domain, OU \u2014 the hierarchy itself", '<g fill="@H"><rect x="7.4" y="1.4" width="3.2" height="3" rx=".8"/><rect x="2.6" y="7.4" width="3.2" height="3" rx=".8"/><rect x="12.2" y="7.4" width="3.2" height="3" rx=".8"/><rect x="7.4" y="13.4" width="3.2" height="3" rx=".8"/></g>' + S + '<path d="M9 4.4v1.6M4.2 7.4V6h9.6v1.4M9 10.6v2.8"/></g>'],
+  "role-adfs.svg": ["ident", "AD Federation Services", "Two realms trusting each other", '<g fill="@H"><circle cx="6.2" cy="9" r="4.6"/><circle cx="11.8" cy="9" r="4.6"/></g>' + S + '<circle cx="6.2" cy="9" r="1.6"/><circle cx="11.8" cy="9" r="1.6"/><path d="M9 4.9v8.2"/></g>'],
+  "role-adlds.svg": ["ident", "AD LDS", "A directory without the domain", '<g fill="@H"><rect x="5.4" y="1.6" width="7.2" height="14.8" rx="1.4"/></g>' + S + '<path d="M7.2 4.6h3.6M7.2 7.2h3.6M7.2 9.8h3.6M7.2 12.4h2.2"/></g>'],
+  "role-npas.svg": ["ident", "Network Policy (NPS)", "A policy list gating a flow", '<g fill="@H"><rect x="1.4" y="2.6" width="6.6" height="12.8" rx="1.2"/><path d="M10.6 5.2l6 3.8-6 3.8z"/></g>' + S + '<path d="M3.4 6h2.6M3.4 8.6h2.6M3.4 11.2h2.6"/></g>'],
+  "role-volume-activation.svg": ["ident", "Volume Activation", "The product key field, four groups", '<g fill="@H"><rect x="1.4" y="4.6" width="15.2" height="8.8" rx="1.4"/></g>' + S + '<path d="M4 8h2.2M7.6 8h2.2M11.2 8h2.2M4 11h8.4"/></g>'],
+  "role-dhcp.svg": ["host", "DHCP Server", "A scope handing out leases", '<g fill="@H"><rect x="1.4" y="2.6" width="8.4" height="12.8" rx="1.3"/><rect x="12" y="4.2" width="4.6" height="3.2" rx=".8"/><rect x="12" y="10.6" width="4.6" height="3.2" rx=".8"/></g>' + S + '<path d="M3.4 5.4h4.4M3.4 7.8h4.4M3.4 10.2h4.4M10.2 5.8h1.4M10.2 12.2h1.4"/></g>'],
+  "role-dns.svg": ["host", "DNS Server", "A globe holding a name tree", '<g fill="@H"><circle cx="9" cy="9" r="7.2"/></g>' + S + '<path d="M9 3.4v2.6M5.4 9V6h7.2v3"/><path d="M5.4 12h.01M9 12h.01M12.6 12h.01" stroke-width="1.8"/></g>'],
+  "role-hyperv.svg": ["host", "Hyper-V", "A host with a guest inside it", '<g fill="@H"><rect x="1.4" y="1.4" width="15.2" height="15.2" rx="2"/></g>' + S + '<polygon points="9,4.4 13.2,6.8 13.2,11.6 9,14 4.8,11.6 4.8,6.8"/><path d="M4.8 6.8L9 9.2l4.2-2.4M9 9.2V14"/></g>'],
+  "role-remote-access.svg": ["host", "Remote Access", "Traffic through a tunnel", '<g fill="@H"><path d="M1.4 10.6V9a7.6 7.6 0 0 1 15.2 0v1.6h-3.4V9a4.2 4.2 0 0 0-8.4 0v1.6z"/></g>' + S + '<path d="M5.6 13.6h6.8M10.8 12l1.8 1.6-1.8 1.6"/></g>'],
+  "role-wds.svg": ["host", "Deployment Services", "A machine booting off the wire", '<g fill="@H"><rect x="5.4" y="7.2" width="7.2" height="9.2" rx="1.3"/><path d="M9 1l2.8 2.8h-1.9v2.2H8.1V3.8H6.2z"/></g>' + S + '<path d="M7.2 9.8h3.6M7.2 12h3.6"/><circle cx="9" cy="14.4" r="1.1"/></g>'],
+  "role-file-services.svg": ["work", "File Services", "A cabinet, not a single folder", '<g fill="@H"><rect x="2.4" y="1.6" width="13.2" height="14.8" rx="1.4"/></g>' + S + '<path d="M2.4 6.4h13.2M2.4 11.2h13.2M7.4 4h3.2M7.4 8.8h3.2M7.4 13.6h3.2"/></g>'],
+  "role-print-services.svg": ["work", "Print Services", "A printer with a queue behind it", '<g fill="@H"><rect x="4.4" y="6.6" width="11.2" height="6.2" rx="1.2"/><rect x="6.6" y="2.4" width="7" height="3.6" rx=".9"/><rect x="6.6" y="11.6" width="7" height="4.2" rx=".9"/><rect x="1.2" y="8.4" width="2.4" height="2.6" rx=".7"/></g>' + S + '<path d="M8.2 13.6h3.8M13 8.8h1.2"/></g>'],
+  "role-rds.svg": ["work", "Remote Desktop Services", "A farm of sessions, not one", '<g fill="@H"><rect x="1.2" y="3.2" width="7.4" height="6.4" rx="1.1"/><rect x="9.4" y="3.2" width="7.4" height="6.4" rx="1.1"/><rect x="5.3" y="10.4" width="7.4" height="5.8" rx="1.1"/></g>' + S + '<path d="M3.2 6.4h3.4M11.4 6.4h3.4M7.3 13.3h3.4"/></g>'],
+  "role-web-server.svg": ["work", "Web Server (IIS)", "A site served from a host", '<g fill="@H"><circle cx="9" cy="6.2" r="4.7"/><rect x="2.4" y="12" width="13.2" height="4.4" rx="1.2"/></g>' + S + '<path d="M4.4 6.2h9.2M9 1.6c2.3 2.6 2.3 6.6 0 9.2M9 1.6c-2.3 2.6-2.3 6.6 0 9.2M4.4 14.2h4.4"/><path d="M13.4 14.2h.01" stroke-width="1.7"/></g>'],
+  "role-update-services.svg": ["work", "Update Services", "Approvals, not a refresh arrow", '<g fill="@H"><rect x="1.6" y="2.4" width="14.8" height="13.2" rx="1.4"/></g>' + S + '<path d="M4 6.6l1.6 1.6 2.8-3M4 11.4l1.6 1.6 2.8-3M10.8 7.2h3.4M10.8 12h3.4"/></g>']
+};
+
+/* ---- the studio mark. Takes the theme ACCENT, not a band hue, so the favicon
+   tracks whichever theme is loaded. Only place the plane stack appears face-on. ---- */
+const MARK = '<g fill="@H"><rect x="1.9" y="1.8" width="11" height="4.2" rx="1.2"/><rect x="3.5" y="6.9" width="11" height="4.2" rx="1.2"/><rect x="5.1" y="12" width="11" height="4.2" rx="1.2"/></g>';
+
+/* ---- one flat table: name -> { band, markup, label, note } ---- */
+const ICON_TEMPLATES = (() => {
+  const out = {};
+  Object.keys(DEFS).forEach(n => { out[n] = { band: DEFS[n][0], markup: DEFS[n][1] }; });
+  Object.keys(FRESH).forEach(n => { out[n] = { band: FRESH[n][0], note: FRESH[n][1], markup: FRESH[n][2] }; });
+  Object.keys(ROLES).forEach(n => { out[n] = { band: ROLES[n][0], label: ROLES[n][1], note: ROLES[n][2], markup: ROLES[n][3] }; });
+  out["mark.svg"] = { band: "accent", markup: MARK };
+  return out;
+})();
+
+/* Deploy is the one nav group banded by SUBJECT, the way the sibling windows-feature-
+   toolbox bands its whole set: four blades on the group's orange read as one wall of
+   colour. So Passwords is an ident-violet key, Review a studio-grey magnifier, VM overview
+   a host-blue server rack and only Export - the actual hand-off - keeps Deploy orange. */
+ICON_TEMPLATES["search.svg"].band = "studio";
+/* SSH: a bare terminal, full-bleed, nothing but the prompt - no title bar, so it is not
+   PowerShell's window at a glance. Big seams, because it mostly lives on an accent
+   button, knocked out (see tintIconKnockout). */
+ICON_TEMPLATES["ssh.svg"] = { band: "host", markup:
+  '<g fill="@H"><rect x="1.6" y="2.2" width="14.8" height="13.6" rx="2"/></g>' +
+  S.replace('stroke-width="1.2"', 'stroke-width="1.7"') + '<path d="M5 6.4l2.8 2.6L5 11.6M9.6 12.2h3.6"/></g>' };
+/* RDP: a screen with a second, smaller desktop inside it - the remote one. The general
+   monitor glyph puts its screen high over a thin stand and sits visibly above a
+   button's text; this one centres its weight on the 18-unit box, stand included. */
+ICON_TEMPLATES["rdp.svg"] = { band: "host", markup:
+  '<g fill="@H"><rect x="1.6" y="2.8" width="14.8" height="10.2" rx="1.4"/><rect x="5.4" y="13.8" width="7.2" height="1.8" rx=".9"/></g>' +
+  S.replace('stroke-width="1.2"', 'stroke-width="1.5"') + '<rect x="4.6" y="5.6" width="8.8" height="4.6" rx=".6"/></g>' };
+
+/* Image-picker OS markers. Drawn from what the machine IS, not from a vendor mark: the
+   server is a rack of two node units, the client is a monitor on its stand. Bands carry
+   the colour the rest of the studio already uses - work green for server images, host
+   blue for client ones - so both tint with every theme instead of pinning a hex. */
+/* Two node units racked together, seams for the drive bay and the status lamp. Drawn from
+   the idea rather than from Microsoft's mark, and shared by both server-class images: a
+   Windows Server gold and an Azure Local one are the same machine to this studio, so they
+   get the same drawing and are told apart by band alone - work green against ident violet.
+   One constant, so the two can never drift into looking almost-but-not-quite alike. */
+const OS_RACK =
+  '<g fill="@H"><rect x="1.6" y="2.6" width="14.8" height="5.6" rx="1.4"/><rect x="1.6" y="9.8" width="14.8" height="5.6" rx="1.4"/></g>' +
+  S + '<path d="M4.2 5.4h4.4M4.2 12.6h4.4"/><path d="M13.4 5.4h.01M13.4 12.6h.01"/></g>';
+ICON_TEMPLATES["azure-local.svg"] = { band: "ident", markup: OS_RACK };
+ICON_TEMPLATES["os-server-panes.svg"] = { band: "work", markup: OS_RACK };
+/* VM overview takes the same rack - the blade is every machine at a glance - on the host
+   blue, so it is not mistaken for a green server image in the list beside it. */
+ICON_TEMPLATES["vm-overview.svg"] = { band: "host", markup: OS_RACK };
+/* No seam on this one: the neck and base already read as a monitor, and a screen rect
+   inside the panel only crowded it at 12px. The band still carries the colour. */
+ICON_TEMPLATES["os-client-panes.svg"] = { band: "host", markup:
+  '<g fill="@H"><rect x="1.4" y="1.8" width="15.2" height="10.4" rx="1.4"/><rect x="7.7" y="12.9" width="2.6" height="1.9" rx=".5"/><rect x="4.2" y="14.9" width="9.6" height="1.7" rx=".85"/></g>' };
+
+/* ---- one glyph per removable built-in app: [note, markup] ----
+   Registered host blue, but rendered with the band of the app's category (see
+   APP_CAT_BANDS) - the same readability exception the role catalog makes: forty
+   rows in one hue on one card is a wall, and the colour restates the grouping the
+   headers already give. Drawn from what each app does, never from a vendor logo.
+   A product family shares one drawing (all seven Xbox packages are the
+   controller) - the label tells them apart, the glyph names the family. */
+const APPGLYPHS = {
+  "app-xbox.svg": ["A game controller for the whole Xbox family", '<g fill="@H"><path d="M3.4 5.4h11.2a2.9 2.9 0 0 1 2.9 2.9l-.5 4.1a2.3 2.3 0 0 1-4 1.2l-1.4-1.6H6.4L5 13.6a2.3 2.3 0 0 1-4-1.2l-.5-4.1a2.9 2.9 0 0 1 2.9-2.9z"/></g>' + S + '<path d="M5.5 8v2.6M4.2 9.3h2.6"/><path d="M12 8.6h.01M13.8 10.2h.01" stroke-width="1.7"/></g>'],
+  "app-solitaire.svg": ["A playing card, diamond up", '<g fill="@H"><rect x="4.6" y="1.6" width="8.8" height="14.8" rx="1.5"/></g>' + S + '<path d="M9 6l2.3 3L9 12 6.7 9z"/></g>'],
+  "app-teams.svg": ["Two chat bubbles, one conversation", '<g fill="@H"><path d="M1.4 4.4a1.8 1.8 0 0 1 1.8-1.8h7a1.8 1.8 0 0 1 1.8 1.8v4a1.8 1.8 0 0 1-1.8 1.8H6.4l-2.8 2.2v-2.2h-.4a1.8 1.8 0 0 1-1.8-1.8z"/><path d="M13.2 6h1.6a1.8 1.8 0 0 1 1.8 1.8v3.6a1.8 1.8 0 0 1-1.8 1.8h-.6v2.2l-2.7-2.2H9.2a1.8 1.8 0 0 1-1.6-1h3.2a2.4 2.4 0 0 0 2.4-2.4z"/></g>' + S + '<path d="M4.2 5.6h5M4.2 7.4h3.4"/></g>'],
+  "app-call.svg": ["A phone handset - voice calls", '<g fill="@H"><path d="M3.2 1.8l3.1.7.8 3.4-1.8 1.5a10.2 10.2 0 0 0 5.3 5.3l1.5-1.8 3.4.8.7 3.1a1.4 1.4 0 0 1-1.4 1.4C7.6 16.2 1.8 10.4 1.8 3.2a1.4 1.4 0 0 1 1.4-1.4z"/></g>'],
+  "app-phone-link.svg": ["The phone itself, linked to the PC", '<g fill="@H"><rect x="5.2" y="1.4" width="7.6" height="15.2" rx="1.8"/></g>' + S + '<path d="M7.8 3.6h2.4M8 14.4h2"/></g>'],
+  "app-mail.svg": ["A closed envelope", '<g fill="@H"><rect x="1.6" y="3.4" width="14.8" height="11.2" rx="1.5"/></g>' + S + '<path d="M2.6 5L9 9.8 15.4 5"/></g>'],
+  "app-outlook.svg": ["An opened envelope with its letter", '<g fill="@H"><path d="M9 1.8l7.2 4.6v8.2a1.4 1.4 0 0 1-1.4 1.4H3.2a1.4 1.4 0 0 1-1.4-1.4V6.4z"/></g>' + S + '<path d="M1.8 6.8L9 11.4l7.2-4.6M5.8 5.2V3.4h6.4v1.8"/></g>'],
+  "app-copilot.svg": ["The assistant spark", '<g fill="@H"><path d="M8.4 1.8l1.6 4.9 4.9 1.6-4.9 1.6-1.6 4.9-1.6-4.9-4.9-1.6 4.9-1.6z"/></g>' + S + '<path d="M14 11.6l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></g>'],
+  "app-cortana.svg": ["The listening ring", '<g fill="@H"><path d="M9 1.6A7.4 7.4 0 1 1 1.6 9 7.4 7.4 0 0 1 9 1.6zm0 3.2A4.2 4.2 0 1 0 13.2 9 4.2 4.2 0 0 0 9 4.8z"/></g>'],
+  "app-news.svg": ["A folded newspaper", '<g fill="@H"><path d="M1.6 3.4h11.8v10.2a1.6 1.6 0 0 0 1.6 1.6H3.4a1.8 1.8 0 0 1-1.8-1.8z"/><path d="M14.4 6h2v7.6a1.6 1.6 0 0 1-1.6 1.6h-.4z"/></g>' + S + '<path d="M3.8 6h3v3h-3zM8.8 6.4h2.4M8.8 8.8h2.4M3.8 11.6h7.4"/></g>'],
+  "app-weather.svg": ["Sun behind a cloud", '<g fill="@H"><circle cx="6" cy="5.8" r="3.1"/><path d="M5 15.6a3.1 3.1 0 0 1-.3-6.2 4.3 4.3 0 0 1 8.2-.9 3.3 3.3 0 0 1 .5 6.5z"/></g>' + S + '<path d="M6 1v1M1.2 5.8h1M2.4 2.2l.7.7"/></g>'],
+  "app-movies.svg": ["A film strip playing", '<g fill="@H"><rect x="1.6" y="3" width="14.8" height="12" rx="1.4"/></g>' + S + '<path d="M4.4 3.2v11.6M13.6 3.2v11.6M1.8 6h2.4M1.8 9h2.4M1.8 12h2.4M13.8 6h2.4M13.8 9h2.4M13.8 12h2.4M7.5 7.4l3.2 1.6-3.2 1.6z"/></g>'],
+  "app-music.svg": ["A beamed note", '<g fill="@H"><path d="M6.2 3.4l8.6-1.9v9.7a2.5 2.5 0 1 1-1.6-2.3V4.6L7.8 5.8v7.4a2.5 2.5 0 1 1-1.6-2.3z"/></g>'],
+  "app-camera.svg": ["The camera body and its lens", '<g fill="@H"><path d="M6.2 2.8h5.6l1 2h2.4a1.4 1.4 0 0 1 1.4 1.4v7.6a1.4 1.4 0 0 1-1.4 1.4H2.8a1.4 1.4 0 0 1-1.4-1.4V6.2a1.4 1.4 0 0 1 1.4-1.4h2.4z"/></g>' + S + '<circle cx="9" cy="10" r="2.6"/></g>'],
+  "app-clipchamp.svg": ["A clapperboard mid-cut", '<g fill="@H"><path d="M1.6 7h14.8v7.4a1.4 1.4 0 0 1-1.4 1.4H3a1.4 1.4 0 0 1-1.4-1.4z"/><path d="M1.9 6.2l-.3-2.4L15.8 2l.3 2.4z"/></g>' + S + '<path d="M5.2 3.4l1.5 2.2M9.6 2.8l1.5 2.2M4.6 10.4h4.6"/></g>'],
+  "app-recorder.svg": ["A microphone on its stand", '<g fill="@H"><rect x="6.6" y="1.4" width="4.8" height="9" rx="2.4"/></g>' + S + '<path d="M4 8.4a5 5 0 0 0 10 0M9 13.4v3M6.6 16.4h4.8"/></g>'],
+  "app-paint.svg": ["A palette with its wells", '<g fill="@H"><path d="M9 1.6a7.4 7.4 0 0 0 0 14.8c1.4 0 1.9-.9 1.4-1.9-.6-1.2 0-2.5 1.5-2.5h1.9A2.6 2.6 0 0 0 16.4 9 7.4 7.4 0 0 0 9 1.6z"/></g>' + S + '<path d="M5.2 6.2h.01M9 4.6h.01M12.6 6.4h.01M4.6 10h.01" stroke-width="1.8"/></g>'],
+  "app-vr.svg": ["A headset with room for a nose", '<g fill="@H"><path d="M2.8 4.6h12.4a1.4 1.4 0 0 1 1.4 1.4v5a1.4 1.4 0 0 1-1.4 1.4h-3.1L10.6 11a2.1 2.1 0 0 0-3.2 0l-1.5 1.4H2.8a1.4 1.4 0 0 1-1.4-1.4V6a1.4 1.4 0 0 1 1.4-1.4z"/></g>' + S + '<circle cx="5.8" cy="8.4" r="1"/><circle cx="12.2" cy="8.4" r="1"/></g>'],
+  "app-office.svg": ["The work briefcase", '<g fill="@H"><rect x="1.6" y="5.4" width="14.8" height="9.8" rx="1.4"/><path d="M6.4 5V3.4A1.4 1.4 0 0 1 7.8 2h2.4a1.4 1.4 0 0 1 1.4 1.4V5h-1.7V3.7H8.1V5z"/></g>' + S + '<path d="M1.8 9.2h14.4M9 8.2v2"/></g>'],
+  "app-onenote.svg": ["A ruled notebook with its spine", '<g fill="@H"><rect x="3.4" y="1.6" width="11.2" height="14.8" rx="1.4"/></g>' + S + '<path d="M6.4 1.8v14.4M8.8 5h3.4M8.8 7.8h3.4M8.8 10.6h2.2"/></g>'],
+  "app-sticky.svg": ["The folded corner", '<g fill="@H"><path d="M2.4 2.4h13.2v8.4l-4.8 4.8H2.4z"/></g>' + S + '<path d="M10.8 15.2v-4.4h4.4M4.8 6h6M4.8 8.8h4"/></g>'],
+  "app-journal.svg": ["A bound book, pen resting on it", '<g fill="@H"><path d="M3 2.8a1.2 1.2 0 0 1 1.2-1.2h9.6A1.2 1.2 0 0 1 15 2.8v12.4a1.2 1.2 0 0 1-1.2 1.2H4.2A1.2 1.2 0 0 1 3 15.2z"/></g>' + S + '<path d="M3.2 4.8h11.6M6.4 8.4h3M11.2 12.8l2.6-2.6"/></g>'],
+  "app-whiteboard.svg": ["A board on its legs, ink flowing", '<g fill="@H"><rect x="1.6" y="2.2" width="14.8" height="9.8" rx="1.4"/></g>' + S + '<path d="M5.2 12.4l-1.4 3.4M12.8 12.4l1.4 3.4M4.6 7.6c1.5-2.3 3-2.3 4.4 0s2.9 2.3 4.4 0"/></g>'],
+  "app-automate.svg": ["A flow moving right", '<g fill="@H"><path d="M1.8 2.8h8.4l5.8 6.2-5.8 6.2H1.8l5.8-6.2z"/></g>'],
+  "app-alarms.svg": ["An alarm clock with its bells", '<g fill="@H"><circle cx="9" cy="9.8" r="6.8"/><path d="M2.4 3.9L4.9 1.6l1.3 1.5L3.7 5.4zM15.6 3.9L13.1 1.6l-1.3 1.5 2.5 2.3z"/></g>' + S + '<path d="M9 6.4v3.6l2.6 1.6"/></g>'],
+  "app-feedback.svg": ["A megaphone saying something back", '<g fill="@H"><path d="M2 7.2l9.6-4.7a1 1 0 0 1 1.4.9v11.2a1 1 0 0 1-1.4.9L2 10.8a1 1 0 0 1-.6-.9V8.1a1 1 0 0 1 .6-.9z"/><path d="M14.2 6.2a3.2 3.2 0 0 1 0 5.6z"/><path d="M4.4 11.6l1 3.5a1.1 1.1 0 0 0 1.1.8h.9a.9.9 0 0 0 .9-1.2l-.9-2.5z"/></g>'],
+  "app-gethelp.svg": ["A life ring", '<g fill="@H"><path d="M9 1.6A7.4 7.4 0 1 1 1.6 9 7.4 7.4 0 0 1 9 1.6zm0 4.6A2.8 2.8 0 1 0 11.8 9 2.8 2.8 0 0 0 9 6.2z"/></g>' + S + '<path d="M7 7L4.2 4.2M11 7l2.8-2.8M7 11l-2.8 2.8M11 11l2.8 2.8"/></g>'],
+  "app-tips.svg": ["A lit bulb", '<g fill="@H"><path d="M9 1.6a5.6 5.6 0 0 1 3.2 10.2c-.6.5-1 1-1 1.7H6.8c0-.7-.4-1.2-1-1.7A5.6 5.6 0 0 1 9 1.6z"/><rect x="6.8" y="14.4" width="4.4" height="2.2" rx="1"/></g>' + S + '<path d="M9 7.2v3.2"/></g>'],
+  "app-family.svg": ["The safety shield holding two people", '<g fill="@H"><path d="M9 1.4l6.4 2.4v5.4c0 3.6-2.8 6.2-6.4 7.4-3.6-1.2-6.4-3.8-6.4-7.4V3.8z"/></g>' + S + '<circle cx="6.9" cy="7" r="1.4"/><circle cx="11.2" cy="7.4" r="1.1"/><path d="M4.8 11.8c0-1.4 1-2.3 2.1-2.3s2.1.9 2.1 2.3M9.9 11.4c.2-1 .7-1.5 1.4-1.5.8 0 1.4.6 1.5 1.7"/></g>']
+};
+Object.keys(APPGLYPHS).forEach(n => {
+  ICON_TEMPLATES[n] = { band: "host", note: APPGLYPHS[n][0], markup: APPGLYPHS[n][1] };
+});
+/* Concepts the studio already draws are not drawn twice - the app borrows the glyph
+   and only the band moves to the client card's blue. */
+[["app-3d.svg", "vm.svg"], ["app-people.svg", "users.svg"], ["app-search.svg", "search.svg"],
+ ["app-maps.svg", "static-ip.svg"], ["app-todo.svg", "validate.svg"], ["app-devhome.svg", "code.svg"],
+ ["app-quickassist.svg", "rds.svg"]].forEach(([app, src]) => {
+  ICON_TEMPLATES[app] = { band: "host", markup: ICON_TEMPLATES[src].markup };
+});
+
+/* mix() lives in the theme section below — same signature, one implementation. */
+
+/* seam = hue pulled 45% toward the theme's darkest surface. Light themes borrow a cool
+   ink instead of their own near-white bg, or the seam would end up lighter than the hue. */
+function seamFor(hue, theme) {
+  return mix(hue, theme.mode === "light" ? "#14141a" : theme.bg, 0.45);
+}
+
+const _iconCache = {};
+
+/* Returns a data: URI for <img src>. Cache key includes the theme id. */
+function tintIcon(name, theme) {
+  const def = ICON_TEMPLATES[name] || ICON_TEMPLATES["vm.svg"];
+  const key = theme.id + "|" + name;
+  if (_iconCache[key]) return _iconCache[key];
+  const hue = def.band === "accent" ? theme.accent : theme.bands[def.band];
+  const seam = def.band === "accent" ? hue : seamFor(hue, theme);
+  const body = def.markup.split("@H").join(hue).split("@S").join(seam)
+    /* @B:<name> takes a named band (or any top-level theme colour) instead of the icon's
+       own band — the one way a glyph may carry more than a single hue. */
+    .replace(/@B:([a-zA-Z]+)/g, (_, b) => theme.bands[b] || theme[b] || theme.accent);
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">' + body + "</svg>";
+  return (_iconCache[key] = "data:image/svg+xml," + encodeURIComponent(svg));
+}
+
+/* For a glyph sitting ON the accent (e.g. the primary button): flatten it to the
+   accent's foreground so it reads as a single-colour mark. */
+function tintIconOnAccent(name, theme) {
+  const def = ICON_TEMPLATES[name] || ICON_TEMPLATES["vm.svg"];
+  const key = theme.id + "|onaccent|" + name;
+  if (_iconCache[key]) return _iconCache[key];
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">' +
+    def.markup.split("@H").join(theme.accentFg).split("@S").join(theme.accentFg)
+      .replace(/@B:[a-zA-Z]+/g, theme.accentFg) + "</svg>";
+  return (_iconCache[key] = "data:image/svg+xml," + encodeURIComponent(svg));
+}
+
+/* On an accent button, but with the seams cut back out in the accent itself. The plain
+   on-accent tint paints seams the same colour as the silhouette, which is right for a
+   solid mark like export and turns a glyph whose meaning IS its seams - a prompt, a
+   screen - into a blank tile. */
+function tintIconKnockout(name, theme) {
+  const def = ICON_TEMPLATES[name] || ICON_TEMPLATES["vm.svg"];
+  const key = theme.id + "|knockout|" + name;
+  if (_iconCache[key]) return _iconCache[key];
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">' +
+    def.markup.split("@H").join(theme.accentFg).split("@S").join(theme.accent)
+      .replace(/@B:[a-zA-Z]+/g, theme.accentFg) + "</svg>";
+  return (_iconCache[key] = "data:image/svg+xml," + encodeURIComponent(svg));
+}
+
+/* For a destructive control: the glyph carries the theme's danger hue instead of its
+   band, seams still pulled toward the background so it reads as one mark at 16px. */
+function tintIconDanger(name, theme) {
+  const def = ICON_TEMPLATES[name] || ICON_TEMPLATES["vm.svg"];
+  const key = theme.id + "|danger|" + name;
+  if (_iconCache[key]) return _iconCache[key];
+  const hue = theme.danger;
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">' +
+    def.markup.split("@H").join(hue).split("@S").join(seamFor(hue, theme))
+      .replace(/@B:[a-zA-Z]+/g, hue) + "</svg>";
+  return (_iconCache[key] = "data:image/svg+xml," + encodeURIComponent(svg));
+}
+
+/* Same glyph, a different band's hue. The band normally follows the nav group an icon is
+   reached from; a VM's own mark instead follows what the machine IS, so one shape can say
+   server / client / custom without three drawings. */
+function tintIconBand(name, band, theme) {
+  const def = ICON_TEMPLATES[name] || ICON_TEMPLATES["vm.svg"];
+  const key = theme.id + "|band:" + band + "|" + name;
+  if (_iconCache[key]) return _iconCache[key];
+  const hue = theme.bands[band] || theme.bands[def.band];
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">' +
+    def.markup.split("@H").join(hue).split("@S").join(seamFor(hue, theme))
+      .replace(/@B:[a-zA-Z]+/g, hue) + "</svg>";
+  return (_iconCache[key] = "data:image/svg+xml," + encodeURIComponent(svg));
+}
+
+/* Call after a theme switch — the old data URIs are stale but the cache is keyed by
+   theme id, so nothing has to be evicted; just re-render. */
+function iconCacheSize() { return Object.keys(_iconCache).length; }
+
+/* Icons are theme-tinted at render time, so this must resolve the ACTIVE theme on every
+   call. tintIcon caches per theme id, so a theme switch costs one re-render, not an evict. */
+function iconSrc(name) {
+  return tintIcon(name, currentTheme());
+}
+function iconSrcOnAccent(name) {
+  return tintIconOnAccent(name, currentTheme());
+}
+function iconSrcKnockout(name) {
+  return tintIconKnockout(name, currentTheme());
+}
+function iconSrcDanger(name) {
+  return tintIconDanger(name, currentTheme());
+}
+function iconSrcBand(name, band) {
+  return tintIconBand(name, band, currentTheme());
+}
+
+/* The band a machine's own mark takes: a Linux VM is yellow, a custom gold is Deploy
+   orange, a client image is Host blue, and everything else is a Workloads-green VM.
+   Linux is a FOURTH case rather than a recolour of the other three - what a machine IS
+   still has to be readable from its glyph alone. */
+function serverGlyphBand(s) {
+  const img = findImage(s && s.imageId);
+  if (isLinuxImage(img)) return "linux";
+  if (s && s.imageSource === "custom") return "deploy";
+  if (img.iconBand) return img.iconBand;
+  return img.kind === "client" ? "host" : "work";
+}
+const STATE_PREFIX = "HVSS1.";
+/* de-DE default/top, en-US next, then alphabetical - mirrors New-Vhdx.ps1's locale catalog.
+   An explicit tag must match whatever locale the gold .vhdx was actually built with -
+   Build-Vms.ps1 only echoes this back to satisfy Windows Setup's OOBE region/keyboard
+   screen, it does not independently re-bake locale. "default" (the LOCALE_DEFAULT entry,
+   not in this catalog) makes Build-Vms.ps1 read the baked values from each gold's
+   .vhdx.json sidecar manifest instead, so per-gold locales resolve themselves. */
+const LOCALE_DEFAULT = "default";
+const LOCALE_CATALOG = {
+  "de-DE": "German (Germany)",
+  "en-US": "English (United States)",
+  "cs-CZ": "Czech (Czech Republic)",
+  "da-DK": "Danish (Denmark)",
+  "en-GB": "English (United Kingdom)",
+  "es-ES": "Spanish (Spain)",
+  "fi-FI": "Finnish (Finland)",
+  "fr-FR": "French (France)",
+  "it-IT": "Italian (Italy)",
+  "nb-NO": "Norwegian (Norway)",
+  "nl-NL": "Dutch (Netherlands)",
+  "pl-PL": "Polish (Poland)",
+  "pt-PT": "Portuguese (Portugal)",
+  "sv-SE": "Swedish (Sweden)"
+};
+/* group = nav headline the blade sits under; order here is the order in the sidebar. */
+const BLADES = [
+  { id: "overview",   group: "Studio",     label: "Overview",            icon: "overview.svg", desc: "How the whole pipeline fits together, start here." },
+  { id: "general",    group: "Studio",     label: "General Settings",    icon: "settings.svg", desc: "Naming, local accounts, where VMs go, Windows (WinPE, virtio-win), the studio's name and certificate." },
+  { id: "cluster",    group: "Host",       label: "Cluster",             icon: "servers.svg",  desc: "The Proxmox VE cluster: nodes, storage, what runs where.", server: true },
+  { id: "networks",   group: "Host",       label: "Networks",            icon: "vnet.svg",     desc: "Reusable subnets on a bridge or SDN VNet: VLAN, gateway, DNS. Bind VMs to one and IPs get range-checked." },
+  { id: "golds",      group: "Host",       label: "Golds",               icon: "gold-image.svg", desc: "Gold images: Linux from its publisher, Windows from an ISO - baked once, parked as templates.", server: true },
+  { id: "servers",    group: "Workloads",  label: "Virtual machines",    icon: "vm.svg",       desc: "The VMs themselves: start from a template, then image, CPU/memory, disks, adapters, roles, local account." },
+  { id: "domainjoin", group: "Identity",   label: "Domain Join",         icon: "identity.svg", desc: "Join accounts defined once, then attached to VMs — one per tier or OU, with a target OU per machine." },
+  { id: "azurearc",   group: "Identity",   label: "Azure Arc",           icon: "arc.svg",      desc: "Arc landing zones — subscription, tenant, resource group, region, credentials." },
+  { id: "review",     group: "Deploy",     label: "Review and validate", icon: "search.svg",   desc: "Every consistency check, against the cluster as it is, plus the lab-wide summary." },
+  { id: "vmoverview", group: "Deploy",     label: "VM overview",         icon: "vm-overview.svg", desc: "Every VM's FQDN, address, sign-in and connect commands, with the rest of its settings underneath." },
+  { id: "passwords",  group: "Deploy",     label: "Passwords",           icon: "key.svg",     desc: "The local account passwords this studio generates, in one place — reveal, copy, regenerate." },
+  { id: "deploy",     group: "Deploy",     label: "Deploy",              icon: "first-boot.svg", desc: "Build the lab on Proxmox VE: what exists, what gets built, and the jobs doing it.", server: true },
+  { id: "jobs",       group: "Deploy",     label: "Jobs",                icon: "update.svg",   desc: "Every bake and build, with its log and progress.", server: true }
+];
+
+const PREFIX_OPTIONS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
+/* themes.js — Hyper-V VM Studio, six themes (three families x dark/light).
+   Replaces ALACRITTY_THEMES. Vitrine dark is the default.
+
+   Every key here is consumed either as a CSS custom property (applyTheme) or as an icon
+   band hue (see icons.js). Nothing else in the studio may invent a colour. */
+
+const FAMILIES = [
+  {
+    id: "vitrine", name: "Vitrine",
+    note: "Near-black, cool, violet accent. The default \u2014 highest contrast of the three, and the one that photographs best.",
+    dark: {
+      bg: "#101014", elevated: "#17171d", subtle: "#131318", hover: "#202029",
+      fg: "#dcdce6", muted: "#8a8a9c", border: "#26262f", borderStrong: "#383843", divider: "#1d1d24",
+      accent: "#a78bfa", accentHover: "#bba4fc", accentSoft: "#282040", accentBorder: "#4a3d78", accentFg: "#0e0c14",
+      success: "#86dba0", danger: "#f4778e", warn: "#e3b366",
+      bands: { studio: "#8a8a9c", host: "#67d4e8", work: "#86dba0", ident: "#a78bfa", deploy: "#f2a26b", linux: "#ded27c" }
+    },
+    light: {
+      bg: "#f4f4f8", elevated: "#ffffff", subtle: "#f9f9fc", hover: "#e9e9f1",
+      fg: "#26262f", muted: "#5f5f70", border: "#dcdce6", borderStrong: "#bfbfcd", divider: "#ebebf2",
+      accent: "#6d46d6", accentHover: "#5b37bb", accentSoft: "#e7e0fb", accentBorder: "#c2b0f0", accentFg: "#ffffff",
+      success: "#2f7d4a", danger: "#bf3350", warn: "#8f6414",
+      bands: { studio: "#5f5f70", host: "#14738a", work: "#2f7d4a", ident: "#6d46d6", deploy: "#ad5f1c", linux: "#786b1f" }
+    }
+  },
+  {
+    id: "kaido", name: "Kaido",
+    note: "Tokyo Night's cool accents over the warm-neutral structure the studio already had. The favourite.",
+    dark: {
+      bg: "#16171e", elevated: "#1d1f28", subtle: "#1a1c24", hover: "#262a38",
+      fg: "#d7dbec", muted: "#8b93ad", border: "#2b2f3d", borderStrong: "#3d4356", divider: "#23262f",
+      accent: "#7aa2f7", accentHover: "#93b3fa", accentSoft: "#22304f", accentBorder: "#3d5488", accentFg: "#11141c",
+      success: "#9ece6a", danger: "#f7768e", warn: "#e0af68",
+      bands: { studio: "#8b93ad", host: "#7dcfff", work: "#9ece6a", ident: "#bb9af7", deploy: "#ff9e64", linux: "#e6de78" }
+    },
+    light: {
+      bg: "#eef1f8", elevated: "#ffffff", subtle: "#f7f9fd", hover: "#e4eaf6",
+      fg: "#2c3145", muted: "#626a85", border: "#d7deec", borderStrong: "#b9c3da", divider: "#e6ebf5",
+      accent: "#3457c4", accentHover: "#2a49aa", accentSoft: "#dfe6f9", accentBorder: "#a9bcec", accentFg: "#ffffff",
+      success: "#3f7a25", danger: "#c0344f", warn: "#9a6b12",
+      bands: { studio: "#626a85", host: "#1d7fa8", work: "#4a8b2f", ident: "#7d4fc0", deploy: "#b8641c", linux: "#7a6a12" }
+    }
+  },
+  {
+    id: "ember", name: "Ember",
+    note: "Warm graphite with a copper accent — the neutral end of the range, for long sessions on a bright desk.",
+    dark: {
+      bg: "#171513", elevated: "#201d1a", subtle: "#1b1917", hover: "#2a2622",
+      fg: "#ece7e1", muted: "#a49a90", border: "#322d28", borderStrong: "#46403a", divider: "#262220",
+      accent: "#e0955c", accentHover: "#eda876", accentSoft: "#3a2718", accentBorder: "#6d4a2c", accentFg: "#1a1310",
+      success: "#a3b86a", danger: "#e2777c", warn: "#d9ac5e",
+      bands: { studio: "#a49a90", host: "#7fb8c4", work: "#a3b86a", ident: "#c99ad6", deploy: "#e0955c", linux: "#ded07a" }
+    },
+    light: {
+      bg: "#f7f4f0", elevated: "#fffdfb", subtle: "#faf7f3", hover: "#eee7df",
+      fg: "#2e2a26", muted: "#6b625a", border: "#e2dad1", borderStrong: "#c9bfb3", divider: "#ece5dd",
+      accent: "#a85f21", accentHover: "#8e4f18", accentSoft: "#f4e3d2", accentBorder: "#dcbf9f", accentFg: "#ffffff",
+      success: "#4f7020", danger: "#b8353c", warn: "#96681a",
+      bands: { studio: "#6b625a", host: "#1d6f80", work: "#5a7524", ident: "#8a4aa0", deploy: "#a85f21", linux: "#7d6410" }
+    }
+  },
+];
+
+/* nav-group -> band id. The band an icon takes is decided by where it is reached from,
+   with one documented exception: server-role icons take the band of what they ARE
+   (see icons.js ROLES) because they all live on one card and must stay scannable. */
+const BAND_LABEL = { studio: "Studio", host: "Host", work: "Workloads", ident: "Identity", deploy: "Deploy" };
+
+const THEME_DEFAULT = "kaido";
+const THEME_MODE_DEFAULT = "dark";
+
+/* Flat lookup: "vitrine_dark" -> theme object, for the appearance picker. */
+const THEMES = (() => {
+  const out = {};
+  FAMILIES.forEach(f => {
+    out[f.id + "_dark"] = Object.assign({ id: f.id + "_dark", name: f.name + " Dark", family: f.id, mode: "dark" }, f.dark);
+    out[f.id + "_light"] = Object.assign({ id: f.id + "_light", name: f.name + " Light", family: f.id, mode: "light" }, f.light);
+  });
+  return out;
+})();
+
+/* The picker still addresses themes by a flat id; default is Vitrine dark. */
+const DEFAULT_THEME_ID = THEME_DEFAULT + "_" + THEME_MODE_DEFAULT;
+const NETBIOS_MAX = 15;
+
+const USERNAME_THEMES = {
+  "roman-emperors": {
+    label: "Roman emperors",
+    words: [
+      "augustus","trajan","hadrian","marcus","aurelian","constantine","nero","titus","vespasian",
+      "claudius","domitian","antoninus","severus","commodus","galba","otho","vitellius","nerva",
+      "lucius","caligula","tiberius","gaius","diocletian","julian","valerius","maximus","probus",
+      "caracalla","geta","elagabalus","alexander","philip","decius","gallienus","claudiusgothicus",
+      "tacitus","florinus","carus","numerian","carinus","maximian","constantius","galerius","licinius",
+      "jovian","valentinian","gratian","theodosius","honorius","arcadius","marcian","leo","zeno",
+      "anastasius","justin","justinian","maurice","phocas","heraclius","constans"
+    ]
+  },
+  "mythology": {
+    label: "Mythology",
+    words: [
+      "odin","thor","freya","apollo","athena","zeus","hera","loki","artemis","hermes","poseidon",
+      "hephaestus","dionysus","persephone","orion","atlas","gaia","nyx","selene","eos","ares",
+      "aphrodite","demeter","hestia","hades","iris","hebe","nike","eos","hypnos","morpheus",
+      "prometheus","epimetheus","chronos","kronos","rhea","titan","valkyrie","baldr","heimdall",
+      "tyr","frigg","hel","fenrir","jormungandr","skadi","idunn","njord","freyr","sif","vidar"
+    ]
+  },
+  "animals": {
+    label: "Animals",
+    words: [
+      "falcon","wolf","otter","lynx","hawk","badger","raven","fox","eagle","heron","panther","orca",
+      "bison","moose","cougar","ibis","crane","stoat","mink","condor","bear","elk","coyote","bobcat",
+      "jaguar","leopard","cheetah","tiger","lion","puma","marten","weasel","ferret","sable","ermine",
+      "walrus","narwhal","dolphin","seal","osprey","kite","kestrel","merlin","peregrine",
+      "owl","finch","wren","swift","tern","puffin","auk","gannet","albatross","petrel"
+    ]
+  },
+  "trees": {
+    label: "Trees",
+    words: [
+      "oak","birch","cedar","maple","pine","ash","elm","willow","rowan","yew","beech","spruce",
+      "larch","aspen","holly","juniper","sycamore","chestnut","hickory","poplar","alder","fir",
+      "hemlock","cypress","sequoia","redwood","baobab","acacia","olive","myrtle","laurel","boxwood",
+      "hawthorn","blackthorn","elder","hazel","walnut","pecan","magnolia","dogwood","redbud","catalpa"
+    ]
+  },
+  "stars": {
+    label: "Stars",
+    words: [
+      "vega","rigel","altair","sirius","deneb","polaris","betelgeuse","aldebaran","antares","spica",
+      "regulus","castor","pollux","procyon","canopus","achernar","mimosa","algol","mira","fomalhaut",
+      "bellatrix","saiph","mintaka","alnilam","alnitak","meissa","capella","arcturus","alnair","hadar",
+      "gacrux","acrux","peacock","nunki","sabik","rasalhague","etamin","elnath","alhena","menkalinan"
+    ]
+  },
+  "elements": {
+    label: "Elements",
+    words: [
+      "cobalt","argon","xenon","iron","copper","zinc","neon","krypton","nickel","silver","gold",
+      "titanium","carbon","helium","lithium","boron","silicon","sulfur","radon","osmium","platinum",
+      "palladium","rhodium","iridium","ruthenium","tungsten","chromium","vanadium","manganese","scandium",
+      "yttrium","zirconium","niobium","molybdenum","technetium","cadmium","indium","tin","antimony",
+      "tellurium","iodine","cesium","barium","lanthanum","cerium","praseodymium","neodymium","samarium"
+    ]
+  },
+  "minerals": {
+    label: "Minerals",
+    words: [
+      "quartz","jade","onyx","obsidian","topaz","garnet","amber","flint","slate","basalt","granite",
+      "marble","agate","opal","ruby","emerald","sapphire","citrine","jasper","pyrite","amethyst",
+      "turquoise","malachite","azurite","hematite","magnetite","feldspar","mica","talc","gypsum",
+      "calcite","dolomite","fluorite","apatite","beryl","peridot","zircon","spinel","tourmaline","moonstone"
+    ]
+  },
+  "cities": {
+    label: "Cities",
+    words: [
+      "rome","oslo","tokyo","cairo","lisbon","prague","vienna","dublin","seoul","quito","lagos",
+      "nairobi","hanoi","berlin","madrid","athens","geneva","zurich","ottawa","sydney","paris",
+      "london","boston","denver","austin","seattle","munich","krakow","warsaw","budapest","helsinki",
+      "tallinn","riga","vilnius","bratislava","ljubljana","zagreb","sofia","belgrade","bucharest",
+      "ankara","dubai","mumbai","delhi","beijing","shanghai","taipei","manila","jakarta","bangkok"
+    ]
+  },
+  "countries": {
+    label: "Countries",
+    words: [
+      "norway","sweden","denmark","finland","iceland","ireland","poland","spain","italy","greece",
+      "france","germany","austria","belgium","portugal","switzerland","netherlands","hungary","romania",
+      "bulgaria","croatia","serbia","slovakia","slovenia","estonia","latvia","lithuania","ukraine",
+      "georgia","armenia","canada","mexico","brazil","chile","peru","argentina","japan","korea",
+      "china","india","vietnam","thailand","malaysia","singapore","indonesia","australia","zealand",
+      "egypt","kenya","ghana","nigeria","morocco","tunisia","algeria","jordan","lebanon","cyprus"
+    ]
+  },
+  "instruments": {
+    label: "Instruments",
+    words: [
+      "cello","harp","lute","flute","oboe","viola","piano","organ","drum","lyre","banjo","sitar",
+      "tabla","horn","trumpet","clarinet","bassoon","ukulele","marimba","xylophone","violin","guitar",
+      "mandolin","dulcimer","zither","bagpipe","trombone","cornet","bugle","fife","piccolo","recorder",
+      "harmonica","accordion","concertina","synth","theremin","celesta","glockenspiel","vibraphone"
+    ]
+  },
+  "colors": {
+    label: "Colors",
+    words: [
+      "crimson","azure","indigo","amber","scarlet","teal","violet","coral","ivory","sable","ochre",
+      "cerulean","mauve","umber","jade","ruby","cobalt","emerald","saffron","ebony","cyan","magenta",
+      "maroon","burgundy","chartreuse","periwinkle","lavender","lilac","fuchsia","vermilion","sienna",
+      "sepia","taupe","khaki","olive","mint","seafoam","turquoise","ultramarine","navy","slate"
+    ]
+  },
+  "greek-philosophers": {
+    label: "Greek philosophers",
+    words: [
+      "plato","socrates","aristotle","pythagoras","heraclitus","parmenides","zeno","epicurus","zenoofcitium",
+      "diogenes","thales","anaximander","anaximenes","empedocles","democritus","leucippus","anaxagoras",
+      "protagoras","gorgias","xenophon","plotinus","porphyry","iamblichus","proclus","epictetus","seneca",
+      "marcus","aurel","chrysippus","cleanthes","zenoofelea","philemon","theophrastus","xenocrates"
+    ]
+  },
+  "constellations": {
+    label: "Constellations",
+    words: [
+      "orion","lyra","cygnus","aquila","draco","ursa","cepheus","cassiopeia","andromeda","perseus",
+      "pegasus","phoenix","hydra","crux","centaurus","scorpius","sagittarius","capricornus","aquarius",
+      "pisces","aries","taurus","gemini","cancer","leo","virgo","libra","ophiuchus","hercules","bootes",
+      "corona","lynx","leominor","canes","vulpecula","delphinus","equuleus","sagitta","scutum","lupus"
+    ]
+  },
+  "ships": {
+    label: "Ships",
+    words: [
+      "enterprise","discovery","endeavour","victory","constitution","sovereign","invincible","resolute",
+      "courageous","valiant","intrepid","dauntless","formidable","triumphant","vigilant","sentinel",
+      "guardian","protector","defender","vanguard","pioneer","voyager","navigator","explorer","pathfinder",
+      "horizon","aurora","eclipse","comet","meteor","tempest","gale","zephyr","monsoon","tradewind"
+    ]
+  },
+  "mountains": {
+    label: "Mountains",
+    words: [
+      "everest","k2","kangchenjunga","lhotse","makalu","chooyu","dhaulagiri","manaslu","nanga","annapurna",
+      "gasherbrum","broadpeak","shishapangma","denali","aconcagua","kilimanjaro","elbrus","vinson",
+      "montblanc","matterhorn","eiger","jungfrau","whitney","rainier","shasta","hood","fuji","olympus",
+      "etna","vesuvius","stromboli","teide","pico","torres","fitzroy","cerro","patagonia","andes"
+    ]
+  },
+  "rivers": {
+    label: "Rivers",
+    words: [
+      "amazon","nile","yangtze","mississippi","missouri","yenisei","yellow","ob","lena","niger",
+      "congo","mekong","ganges","danube","rhine","volga","seine","thames","tiber","po","tagus",
+      "douro","elbe","oder","vistula","dnipro","don","ural","tigris","euphrates","jordan","indus",
+      "brahmaputra","irrawaddy","salween","redriver","colorado","columbia","yukon","mackenzie","fraser"
+    ]
+  },
+  "tech-codenames": {
+    label: "Tech codenames",
+    words: [
+      "redstone","threshold","rs1","cobalt","iron","vibranium","sunvalley","hudson","nickel","copper",
+      "manganese","gallium","germanium","selenium","titanium","zirconium","niobium","molybdenum",
+      "polaris","orion","sirius","vega","altair","deneb","rigel","spica","castor","pollux","procyon",
+      "photon","quark","neutron","proton","electron","muon","boson","fermion","hadron","lepton"
+    ]
+  },
+  "spices": {
+    label: "Spices",
+    words: [
+      "saffron","cumin","coriander","cardamom","cinnamon","nutmeg","clove","ginger","turmeric","paprika",
+      "pepper","cayenne","anise","fennel","star","mace","allspice","mustard","sesame","caraway",
+      "fenugreek","sumac","zaatar","harissa","berbere","galangal","lemongrass","kaffir","vanilla","cocoa"
+    ]
+  }
+};
+
+// Keep generated local names Windows-safe (≤20 chars, no spaces / punctuation leftovers)
+Object.keys(USERNAME_THEMES).forEach(tid => {
+  const t = USERNAME_THEMES[tid];
+  t.words = [...new Set(
+    (t.words || [])
+      .map(w => String(w || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 20))
+      .filter(w => w.length >= 3)
+  )];
+});
+
+
+/** Matches New-Vhdx.ps1 Get-ImageNameSlug / Get-VhdxFileName (Target HyperV).
+ *  The id here IS the token New-Vhdx.ps1 bakes into the gold file name and the one
+ *  Build-Vms.ps1 matches on: hv-{language}-{id}.vhdx, e.g. hv-enus-ws2025-standard-core.vhdx.
+ *  Keep the ids identical in all three places or a config exports an image nothing resolves.
+ */
+const IMAGE_CATALOG = [
+  {
+    id: "ws2016-datacenter-desktop",
+    label: "Windows Server 2016 Datacenter Desktop",
+    icon: "os-server-panes.svg",
+    kind: "desktop",
+    edition: "Datacenter",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+  },
+  {
+    id: "ws2016-datacenter-core",
+    label: "Windows Server 2016 Datacenter Core",
+    icon: "os-server-panes.svg",
+    kind: "core",
+    edition: "Datacenter",
+    experience: "Core",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+  },
+  {
+    id: "ws2016-standard-desktop",
+    label: "Windows Server 2016 Standard Desktop",
+    icon: "os-server-panes.svg",
+    kind: "desktop",
+    edition: "Standard",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+  },
+  {
+    id: "ws2016-standard-core",
+    label: "Windows Server 2016 Standard Core",
+    icon: "os-server-panes.svg",
+    kind: "core",
+    edition: "Standard",
+    experience: "Core",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+  },
+  {
+    id: "ws2019-datacenter-desktop",
+    label: "Windows Server 2019 Datacenter Desktop",
+    icon: "os-server-panes.svg",
+    kind: "desktop",
+    edition: "Datacenter",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+  },
+  {
+    id: "ws2019-datacenter-core",
+    label: "Windows Server 2019 Datacenter Core",
+    icon: "os-server-panes.svg",
+    kind: "core",
+    edition: "Datacenter",
+    experience: "Core",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+  },
+  {
+    id: "ws2019-standard-desktop",
+    label: "Windows Server 2019 Standard Desktop",
+    icon: "os-server-panes.svg",
+    kind: "desktop",
+    edition: "Standard",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+  },
+  {
+    id: "ws2019-standard-core",
+    label: "Windows Server 2019 Standard Core",
+    icon: "os-server-panes.svg",
+    kind: "core",
+    edition: "Standard",
+    experience: "Core",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+  },
+  {
+    id: "ws2022-datacenter-desktop",
+    label: "Windows Server 2022 Datacenter Desktop",
+    icon: "os-server-panes.svg",
+    kind: "desktop",
+    edition: "Datacenter",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+  },
+  {
+    id: "ws2022-datacenter-core",
+    label: "Windows Server 2022 Datacenter Core",
+    icon: "os-server-panes.svg",
+    kind: "core",
+    edition: "Datacenter",
+    experience: "Core",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+  },
+  {
+    id: "ws2022-standard-desktop",
+    label: "Windows Server 2022 Standard Desktop",
+    icon: "os-server-panes.svg",
+    kind: "desktop",
+    edition: "Standard",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+  },
+  {
+    id: "ws2022-standard-core",
+    label: "Windows Server 2022 Standard Core",
+    icon: "os-server-panes.svg",
+    kind: "core",
+    edition: "Standard",
+    experience: "Core",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+  },
+  {
+    id: "ws2025-datacenter-desktop",
+    label: "Windows Server 2025 Datacenter Desktop",
+    icon: "os-server-panes.svg",
+    kind: "desktop",
+    edition: "Datacenter",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+  },
+  {
+    id: "ws2025-datacenter-core",
+    label: "Windows Server 2025 Datacenter Core",
+    icon: "os-server-panes.svg",
+    kind: "core",
+    edition: "Datacenter",
+    experience: "Core",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+  },
+  {
+    id: "ws2025-standard-desktop",
+    label: "Windows Server 2025 Standard Desktop",
+    icon: "os-server-panes.svg",
+    kind: "desktop",
+    edition: "Standard",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+  },
+  {
+    id: "ws2025-standard-core",
+    label: "Windows Server 2025 Standard Core",
+    icon: "os-server-panes.svg",
+    kind: "core",
+    edition: "Standard",
+    experience: "Core",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+  },
+  {
+    /* Its own SKU next to Standard and Datacenter, built by New-Vhdx.ps1 as a
+       post-generalize edition upgrade from a 2025 Datacenter index. Server 2025 only:
+       older media has no conversion path to it. Supported on Azure and Azure Local;
+       on plain Hyper-V it is a lab image. */
+    id: "ws2025-datacenter-az-desktop",
+    label: "Windows Server 2025 Datacenter: Azure Edition Desktop",
+    icon: "os-server-panes.svg",
+    kind: "desktop",
+    edition: "Datacenter: Azure Edition",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+  },
+  {
+    id: "ws2025-datacenter-az-core",
+    label: "Windows Server 2025 Datacenter: Azure Edition Core",
+    icon: "os-server-panes.svg",
+    kind: "core",
+    edition: "Datacenter: Azure Edition",
+    experience: "Core",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+  },
+  {
+    id: "w11-enterprise",
+    label: "Windows 11 Enterprise",
+    icon: "os-client-panes.svg",
+    kind: "client",
+    edition: "",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
+  },
+  {
+    /* N editions ship without Media Player and the related components. Same image
+       otherwise, but a separate id: the gold is a different file and a config that
+       asks for one must not silently resolve to the other. */
+    id: "w11-enterprise-n",
+    label: "Windows 11 Enterprise N",
+    icon: "os-client-panes.svg",
+    kind: "client",
+    edition: "",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
+  },
+  {
+    /* Multi-session is its own SKU, licensed for Azure Virtual Desktop, and its WIM
+       name starts the same way plain Enterprise does. It earns its own id so the two
+       never share a gold file name. */
+    id: "w11-enterprise-ms",
+    label: "Windows 11 Enterprise multi-session",
+    icon: "os-client-panes.svg",
+    kind: "client",
+    edition: "",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
+  },
+  {
+    id: "w11-pro",
+    label: "Windows 11 Pro",
+    icon: "os-client-panes.svg",
+    kind: "client",
+    edition: "",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
+  },
+  {
+    id: "w11-pro-n",
+    label: "Windows 11 Pro N",
+    icon: "os-client-panes.svg",
+    kind: "client",
+    edition: "",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
+  },
+  {
+    /* The media still calls the image "Azure Stack HCI"; New-Vhdx.ps1 slugs it to
+       azl so the gold carries the current product name, abbreviated like every other
+       id. Core-based, so it inherits every Core rule; iconBand gives it its own colour. */
+    id: "azl",
+    label: "Azure Local",
+    icon: "azure-local.svg",
+    iconBand: "ident",
+    kind: "core",
+    edition: "",
+    experience: "Core",
+    noServerRoles: true,
+    requiresNestedVirt: true,
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 16, cpuCount: 8, nestedVirtualization: true }
+  },
+  /* ---- Linux ----------------------------------------------------------------
+     Built by New-Vhdx.ps1 from a distribution cloud image rather than from an ISO,
+     and provisioned by a cloud-init NoCloud seed instead of an answer file.
+
+     Every one of them sets noServerRoles, which is what keeps the roles and features
+     machinery away from them - the same flag Azure Local already uses. They carry the
+     plain vm.svg cube and take the `linux` band, so a Linux machine is yellow on the
+     list where a Windows server is green and a client blue.
+
+     secureBootTemplate is the field that actually matters: these images are signed by
+     Microsoft's third-party UEFI CA, not by the Windows template, and a VM created
+     with the wrong one does not boot. vTPM is off - nothing here uses it, and it is
+     one more thing that can refuse.
+
+     Differencing is off, the same as every Windows image here. It was on for a while
+     on these three - a Linux gold is small and the chain looks free - and that is
+     exactly the trap: a differencing disk ties the VM to a parent that must never be
+     touched again, which is not a default anybody chooses, it is one they discover.
+     It stays a per-VM decision on the Boot / disk card, and the default is an
+     independent copy. */
+  {
+    id: "ubuntu2604",
+    label: "Ubuntu 26.04 LTS",
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "ubuntu",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    id: "ubuntu2404",
+    label: "Ubuntu 24.04 LTS",
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "ubuntu",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    /* Debian ships no grub-pc in any trixie cloud variant, so it is UEFI only - there
+       is no Generation 1 fallback to offer. */
+    id: "debian13",
+    label: "Debian 13 (Trixie)",
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "debian",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    id: "debian12",
+    /* Arc is offered on Debian 13 only. Microsoft's supported-OS table ends Arc support
+       for Debian 12 in November 2026, and Debian itself moved 12 to LTS on 2026-07-11;
+       a lab VM built today would outlive the agent's support within weeks. */
+    noAzureArc: true,
+    noAzureArcReason: "Azure Arc support for Debian 12 ends November 2026 - use Debian 13 for Arc",
+    label: "Debian 12 (Bookworm)",
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "debian",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    /* Fedora and Rocky ship a Microsoft-signed shim, so the same Secure Boot
+       template the other Linux golds use applies unchanged. */
+    id: "fedora44",
+    /* Azure Arc does not support Fedora, and this is Microsoft's answer rather than a
+       guess: the installer from aka.ms/azcmagent stops with "unsupported Linux
+       distribution: Fedora Linux", so azcmagent is never on the disk and the connect
+       that follows fails on a path that does not exist. A VM here can be ticked into
+       an Arc principal and would simply never arrive in the portal, which is the
+       worst of the three possible outcomes. */
+    noAzureArc: true,
+    label: "Fedora 44",
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "fedora",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    id: "fedora43",
+    noAzureArc: true,
+    label: "Fedora 43",
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "fedora",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    id: "rocky10",
+    label: "Rocky Linux 10",
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "rocky",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    id: "rocky9",
+    label: "Rocky Linux 9",
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "rocky",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    id: "alma10",
+    label: "AlmaLinux 10",
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "alma",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    id: "alma9",
+    label: "AlmaLinux 9",
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "alma",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    id: "oracle10",
+    label: "Oracle Linux 10",
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "oracle",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    id: "oracle9",
+    label: "Oracle Linux 9",
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "oracle",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    id: "leap16",
+    label: "openSUSE Leap 16.0",
+    /* Azure Arc lists SLES but no openSUSE release, and Build-Vms.ps1 drops the Arc
+       block for it with a warning - the studio says so first. Domain join works:
+       realmd, adcli and sssd-ad are all in Leap's own repo-oss. */
+    noAzureArc: true,
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "opensuse",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    /* openSUSE ships a Microsoft-signed shim, so Secure Boot stays on like Fedora. */
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  },
+  {
+    /* Secure Boot OFF, and not as a preference. Arch ships no Microsoft-signed shim,
+       so there is nothing for the third-party UEFI CA to validate and a Gen 2 VM with
+       Secure Boot on stops before the kernel. The gold's sidecar says the same thing,
+       and Build-Vms.ps1 turns it off anyway if a config asks for it - this default is
+       so nobody has to find that out. */
+    id: "arch",
+    label: "Arch Linux",
+    /* Not a preference and not a default: Arch signs no shim, so there is nothing for
+       the third-party UEFI CA to validate and a Gen 2 VM with Secure Boot on stops
+       before the kernel with no message that says why. A gold built from this image
+       hung at the boot screen exactly once, which is once more than it should have.
+       The toggle is forced off and disabled wherever this image is chosen, and the
+       export writes false whatever a loaded config carried. */
+    noSecureBoot: true,
+    /* realmd and adcli are not in Arch's official repositories, so there is no
+       `realm join` to run and Build-Vms.ps1 drops the join with a warning. The studio
+       says so first: no tick, no badge, no domainJoin block in the export. */
+    noDomainJoin: true,
+    /* Azure Arc lists no Arch release among its supported distributions, and the
+       agent installer only knows apt, yum and zypper - never tried here, blocked on
+       Microsoft's word the same as Fedora rather than after a four-minute failure. */
+    noAzureArc: true,
+    icon: "os-server-panes.svg",
+    kind: "linux",
+    osFamily: "linux",
+    distro: "arch",
+    edition: "",
+    experience: "",
+    noServerRoles: true,
+    secureBootTemplate: "MicrosoftUEFICertificateAuthority",
+    defaults: { useDifferencingDisk: true, enableSecureBoot: false, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+  }
+];
+
+/* What New-Vhdx.ps1 bakes into each Linux gold, mirrored here so a card can SHOW it.
+   Read-only on purpose: these are already installed by the time a VM exists, so a tick
+   would be a lie in either position - clearing it removes nothing and setting it
+   installs nothing. They are listed because a gold that silently carries the azure
+   kernel and the Hyper-V daemons is a gold nobody can tell apart from one that does
+   not, and "did the tools get in?" is the first question anyone asks of it.
+
+   Duplicated from the bake's own catalog rather than derived from it: this file is a
+   single page that runs from a file:// URL with no build step and cannot read a .ps1.
+   Adding a distribution means both lists, which is the cost of that. */
+const LINUX_BAKED_PACKAGES = {
+  ubuntu2604: ["linux-azure", "linux-cloud-tools-azure"],
+  ubuntu2404: ["linux-azure", "linux-cloud-tools-azure"],
+  debian13:   ["hyperv-daemons", "kbd", "console-setup", "keyboard-configuration"],
+  debian12:   ["hyperv-daemons", "kbd", "console-setup", "keyboard-configuration"],
+  fedora44:   ["hyperv-daemons"],
+  fedora43:   ["hyperv-daemons"],
+  rocky10:    ["hyperv-daemons"],
+  rocky9:     ["hyperv-daemons"],
+  alma10:     ["hyperv-daemons"],
+  alma9:      ["hyperv-daemons"],
+  oracle10:   ["hyperv-daemons"],
+  oracle9:    ["hyperv-daemons"],
+  leap16:     ["hyper-v"],
+  arch:       ["hyperv"]
+};
+/** True when Azure Arc has no agent for this image's distribution. */
+function imageRefusesAzureArc(img) {
+  return !!(img && img.noAzureArc);
+}
+
+/** True when this image's distribution has no packaged way to join a domain. */
+function imageRefusesDomainJoin(img) {
+  return !!(img && img.noDomainJoin);
+}
+
+/** True when this image cannot boot with Secure Boot on, whatever anyone ticked. */
+function imageRefusesSecureBoot(img) {
+  return !!(img && img.noSecureBoot);
+}
+/** Secure Boot as it will actually be built: the image gets a veto, the VM gets a say. */
+function effectiveSecureBoot(s) {
+  if (imageRefusesSecureBoot(findImage(s && s.imageId))) return false;
+  return !!(s && s.enableSecureBoot);
+}
+
+/** The baked list for a VM's image, or nothing for a Windows one or a custom gold. */
+function linuxBakedPackages(s) {
+  const img = findImage(s && s.imageId);
+  if (!isLinuxImage(img)) return [];
+  return LINUX_BAKED_PACKAGES[img.id] || [];
+}
+
+/* One predicate, used everywhere a card, a validation or an export has to decide
+   whether it is looking at a Linux machine. Reads osFamily rather than kind so a
+   custom gold can declare itself Linux later without inventing a fourth kind. */
+function isLinuxImage(img) {
+  return !!img && (img.osFamily === "linux" || img.kind === "linux");
+}
+function isLinuxServer(s) {
+  return isLinuxImage(findImage(s && s.imageId));
+}
+
+/* The icon for a catalog image, tinted by what the image IS rather than by the glyph's
+   own band. Every Linux row shares vm.svg, whose band is Workloads green - right for a
+   Windows server carrying the same cube, wrong for a Debian box. Only Linux is special
+   cased: everything else keeps the exact tint it had, including Azure Local. */
+function imageIconSrc(img) {
+  if (img && isLinuxImage(img)) return iconSrcBand(img.icon, "linux");
+  return iconSrc(img ? img.icon : "vm.svg");
+}
+
+/** Curated Install-WindowsFeature catalog (roles + role services + features). */
+const ROLE_CATALOG = [
+  {
+    id: "AD-Certificate",
+    label: "AD Certificate Services",
+    icon: "role-adcs.svg",
+    info: "Installs Active Directory Certificate Services binaries for a public-key infrastructure (PKI). Does not create or configure a CA — run Install-AdcsCertificationAuthority after first boot.",
+    postConfig: "Binaries only — configure CA after boot",
+    children: [
+      { id: "ADCS-Cert-Authority", label: "Certification Authority", defaultOn: true, info: "Installs the Certification Authority role service (Install-WindowsFeature ADCS-Cert-Authority). Issues and manages certificates once configured." },
+      { id: "ADCS-Web-Enrollment", label: "CA Web Enrollment", info: "Installs Certification Authority Web Enrollment (ADCS-Web-Enrollment). Pulls IIS dependencies automatically. Browser-based cert requests." },
+      { id: "ADCS-Online-Cert", label: "Online Responder (OCSP)", info: "Installs Online Responder (ADCS-Online-Cert) for OCSP certificate status checking." },
+      { id: "ADCS-Device-Enrollment", label: "Network Device Enrollment (NDES)", info: "Installs Network Device Enrollment Service (ADCS-Device-Enrollment) for SCEP-based device certificates." },
+      { id: "ADCS-Enroll-Web-Pol", label: "Certificate Enrollment Policy Web Service", info: "Installs Certificate Enrollment Policy Web Service (ADCS-Enroll-Web-Pol / CEP)." },
+      { id: "ADCS-Enroll-Web-Svc", label: "Certificate Enrollment Web Service", info: "Installs Certificate Enrollment Web Service (ADCS-Enroll-Web-Svc / CES)." }
+    ]
+  },
+  {
+    id: "AD-Domain-Services",
+    label: "AD Domain Services",
+    icon: "role-adds.svg",
+    info: "Installs AD DS binaries (Install-WindowsFeature AD-Domain-Services). Does not promote a domain controller — run Install-ADDSForest or Install-ADDSDomainController in the guest afterward.",
+    postConfig: "No promotion"
+  },
+  {
+    id: "ADFS-Federation",
+    label: "AD Federation Services",
+    icon: "role-adfs.svg",
+    info: "Installs Active Directory Federation Services (ADFS-Federation) for claims-based SSO / federation."
+  },
+  {
+    id: "ADLDS",
+    label: "AD Lightweight Directory Services",
+    icon: "role-adlds.svg",
+    info: "Installs AD LDS (ADLDS) — a lightweight LDAP directory without full domain controller roles."
+  },
+  {
+    id: "DHCP",
+    label: "DHCP Server",
+    icon: "role-dhcp.svg",
+    info: "Installs the DHCP Server role (Install-WindowsFeature DHCP). Authorize the server in Active Directory after boot.",
+    postConfig: "Authorize in AD after boot"
+  },
+  {
+    id: "DNS",
+    label: "DNS Server",
+    icon: "role-dns.svg",
+    info: "Installs the DNS Server role (Install-WindowsFeature DNS) for hosting DNS zones."
+  },
+  {
+    id: "File-Services",
+    label: "File and Storage Services",
+    icon: "role-file-services.svg",
+    info: "File and Storage role services. Selecting this opens role services; Storage Services is already present on most Server images.",
+    children: [
+      { id: "FS-FileServer", label: "File Server", defaultOn: true, info: "Installs File Server (FS-FileServer) — core SMB file sharing." },
+      { id: "FS-DFS-Namespace", label: "DFS Namespaces", info: "Installs DFS Namespaces (FS-DFS-Namespace) for unified UNC paths." },
+      { id: "FS-DFS-Replication", label: "DFS Replication", info: "Installs DFS Replication (FS-DFS-Replication) for multi-master folder sync." },
+      { id: "FS-Resource-Manager", label: "File Server Resource Manager", info: "Installs FSRM (FS-Resource-Manager) — quotas, file screens, reports." },
+      { id: "FS-Data-Deduplication", label: "Data Deduplication", info: "Installs Data Deduplication (FS-Data-Deduplication) to reduce NTFS volume usage." },
+      { id: "FS-iSCSITarget-Server", label: "iSCSI Target Server", info: "Installs iSCSI Target Server (FS-iSCSITarget-Server) to present block storage over iSCSI." },
+      { id: "FS-NFS-Service", label: "Server for NFS", info: "Installs Server for NFS (FS-NFS-Service) for NFS file shares." },
+      { id: "FS-VSS-Agent", label: "File Server VSS Agent Service", info: "Installs File Server VSS Agent (FS-VSS-Agent) for application-consistent shadow copies of shares." },
+      { id: "FS-SyncShareService", label: "Work Folders", info: "Installs Work Folders (FS-SyncShareService) for syncing user files to devices." },
+      { id: "FS-BranchCache", label: "BranchCache for Network Files", info: "Installs BranchCache for Network Files (FS-BranchCache) content server support." }
+    ]
+  },
+  {
+    id: "Hyper-V",
+    label: "Hyper-V",
+    icon: "role-hyperv.svg",
+    info: "Installs the Hyper-V role (Install-WindowsFeature Hyper-V). Build-Vms also enables nested virtualization and MAC spoofing on this VM.",
+    hint: "Enables nested virtualization on the VM"
+  },
+  {
+    id: "Print-Services",
+    label: "Print and Document Services",
+    icon: "role-print-services.svg",
+    info: "Print and Document Services role. Select role services below when enabled.",
+    children: [
+      { id: "Print-Server", label: "Print Server", defaultOn: true, info: "Installs Print Server (Print-Server) — print queue and spooler management." },
+      { id: "Print-Internet", label: "Internet Printing", noCore: true, info: "Installs Internet Printing (Print-Internet) — IPP via IIS." },
+      { id: "Print-LPD-Service", label: "LPD Service", info: "Installs LPD Service (Print-LPD-Service) for UNIX/LPR clients." }
+    ]
+  },
+  {
+    id: "RemoteAccess",
+    label: "Remote Access",
+    icon: "role-remote-access.svg",
+    info: "Remote Access role (VPN, routing, Web Application Proxy). Select role services below.",
+    children: [
+      { id: "DirectAccess-VPN", label: "DirectAccess and VPN (RAS)", info: "Installs DirectAccess and VPN / RAS (DirectAccess-VPN)." },
+      { id: "Routing", label: "Routing", info: "Installs Routing (Routing) for LAN routing and NAT scenarios." },
+      { id: "Web-Application-Proxy", label: "Web Application Proxy", info: "Installs Web Application Proxy (Web-Application-Proxy) for reverse-proxy publishing." }
+    ]
+  },
+  {
+    id: "Remote-Desktop-Services",
+    label: "Remote Desktop Services",
+    icon: "role-rds.svg",
+    info: "Remote Desktop Services role services only. Full RDS deployment (collections, licensing mode) is post-config.",
+    postConfig: "Binaries only — deployment is post-config",
+    preset: "rds-quick",
+    children: [
+      { id: "RDS-RD-Server", label: "Remote Desktop Session Host", defaultOn: true, noCore: true, info: "Installs RD Session Host (RDS-RD-Server) for multi-user desktop/app sessions." },
+      { id: "RDS-Connection-Broker", label: "Connection Broker", noCoreFrom: 2019, info: "Installs RD Connection Broker (RDS-Connection-Broker). Installed in the guest at first boot rather than baked into the image - staged offline, its installer runs before the unattend rename/domain join and permanently binds the broker to Setup's random WIN-* computer name, breaking every later RDS deployment." },
+      { id: "RDS-Web-Access", label: "Web Access", noCore: true, info: "Installs RD Web Access (RDS-Web-Access). Installed in the guest at first boot rather than baked into the image - its installer configures IIS and needs a running OS; staged offline it aborts Windows Setup." },
+      { id: "RDS-Gateway", label: "Gateway", noCore: true, info: "Installs RD Gateway (RDS-Gateway) for HTTPS remote desktop access." },
+      { id: "RDS-Licensing", label: "Licensing", info: "Installs RD Licensing (RDS-Licensing)." },
+      { id: "RDS-Virtualization", label: "Virtualization Host", info: "Installs RD Virtualization Host (RDS-Virtualization). Requires Hyper-V." }
+    ]
+  },
+  {
+    id: "NPAS",
+    label: "Network Policy and Access Services",
+    icon: "role-npas.svg",
+    noCore: true,
+    info: "Installs Network Policy Server / NPS (Install-WindowsFeature NPAS) for RADIUS and network policies. Desktop Experience only — the role is not in the Server Core image."
+  },
+  {
+    id: "VolumeActivation",
+    label: "Volume Activation Services",
+    icon: "role-volume-activation.svg",
+    info: "Installs Volume Activation Services (VolumeActivation) for KMS / Active Directory-based activation."
+  },
+  {
+    id: "Web-Server",
+    label: "Web Server (IIS)",
+    icon: "role-web-server.svg",
+    // Not an empty container: 'Web-Server' is what installs IIS with its default role
+    // services - static content, directory browsing, request filtering, default
+    // document, HTTP logging, static compression. Arrive at IIS as a *dependency* of a
+    // child instead and Windows brings only the slice that child asked for, which is an
+    // IIS that starts, answers, and 404s every static file. A CRL is a static file.
+    selfPayload: true,
+    info: "Installs IIS Web Server (Web-Server) with its default role services - static content, directory browsing, default document, request filtering, HTTP logging - plus anything selected below.",
+    children: [
+      { id: "Web-Mgmt-Console", label: "IIS Management Console", defaultOn: true, noCore: true, info: "Installs IIS Management Console (Web-Mgmt-Console)." },
+      { id: "Web-Asp-Net45", label: "ASP.NET 4.8", info: "Installs ASP.NET 4.8 support (Web-Asp-Net45) and related .NET extensibility." },
+      { id: "Web-Windows-Auth", label: "Windows Authentication", info: "Installs Windows Authentication (Web-Windows-Auth) for IIS." },
+      { id: "Web-Basic-Auth", label: "Basic Authentication", info: "Installs Basic Authentication (Web-Basic-Auth) for IIS." },
+      { id: "Web-Http-Redirect", label: "HTTP Redirection", info: "Installs HTTP Redirection (Web-Http-Redirect)." },
+      { id: "Web-WebSockets", label: "WebSocket Protocol", info: "Installs WebSocket Protocol (Web-WebSockets)." },
+      { id: "Web-Ftp-Server", label: "FTP Server", info: "Installs FTP Server (Web-Ftp-Server) role service." }
+    ]
+  },
+  {
+    id: "WDS",
+    label: "Windows Deployment Services",
+    icon: "role-wds.svg",
+    noCoreBefore: 2019,
+    info: "Windows Deployment Services for network OS installs. Select Deployment and/or Transport services. Server Core only carries this role from Windows Server 2019 on.",
+    children: [
+      { id: "WDS-Deployment", label: "Deployment Server", defaultOn: true, noCoreBefore: 2019, info: "Installs WDS Deployment Server (WDS-Deployment)." },
+      { id: "WDS-Transport", label: "Transport Server", noCoreBefore: 2019, info: "Installs WDS Transport Server (WDS-Transport) for multicast." }
+    ]
+  },
+  {
+    id: "UpdateServices",
+    label: "Windows Server Update Services",
+    icon: "role-update-services.svg",
+    info: "Installs WSUS. After boot run wsusutil postinstall (content dir / DB). WID is the default database path.",
+    postConfig: "wsusutil postinstall required after boot",
+    children: [
+      { id: "UpdateServices-WidDB", label: "WID Connectivity", defaultOn: true, info: "Installs WSUS with Windows Internal Database (UpdateServices-WidDB)." },
+      { id: "UpdateServices-Services", label: "WSUS Services", defaultOn: true, info: "Installs core WSUS services (UpdateServices-Services)." },
+      { id: "UpdateServices-DB", label: "SQL Server Connectivity", info: "Installs WSUS SQL connectivity (UpdateServices-DB) instead of / in addition to WID — requires a SQL instance." }
+    ]
+  }
+];
+
+const FEATURE_CATALOG = [
+  { id: "Failover-Clustering", label: "Failover Clustering", icon: "virtual-clusters.svg", info: "Installs Failover Clustering (Failover-Clustering) for HA cluster nodes." },
+  { id: "GPMC", label: "Group Policy Management", icon: "gpo.svg", keywords: "group policy gpo gpmc rsat active directory", info: "Installs Group Policy Management Console (GPMC)." },
+  { id: "Windows-Server-Backup", label: "Windows Server Backup", icon: "backup.svg", info: "Installs Windows Server Backup (Windows-Server-Backup)." },
+  { id: "BitLocker", label: "BitLocker Drive Encryption", icon: "security.svg", info: "Installs BitLocker Drive Encryption (BitLocker)." },
+  { id: "Storage-Replica", label: "Storage Replica", icon: "disk-snapshot.svg", info: "Installs Storage Replica (Storage-Replica) for block-level volume replication." },
+  { id: "Multipath-IO", label: "Multipath I/O", icon: "disk-pool.svg", info: "Installs Multipath I/O (Multipath-IO / MPIO) for redundant storage paths." },
+  { id: "NLB", label: "Network Load Balancing", icon: "vnet.svg", info: "Installs Network Load Balancing (NLB)." },
+  { id: "SNMP-Service", label: "SNMP Service", icon: "monitor.svg", info: "Installs SNMP Service (SNMP-Service)." },
+  { id: "Containers", label: "Containers", icon: "code.svg", info: "Installs Containers feature (Containers) for Windows containers host support." },
+  { id: "Telnet-Client", label: "Telnet Client", icon: "powershell.svg", info: "Installs Telnet Client (Telnet-Client)." },
+  { id: "NET-Framework-Core", label: ".NET Framework 3.5", icon: "code.svg", info: "Installs .NET Framework 3.5 (NET-Framework-Core). Payload is not in the image — set SxS source path in General Settings (ISO sources\\sxs).", postConfig: "Requires SxS source path" }
+];
+
+/** Server-side RSAT (Remote Server Administration Tools) — Install-WindowsFeature, same tree shape as roles. */
+const SERVER_RSAT_CATALOG = [
+  {
+    id: "RSAT-AD-Tools",
+    label: "Active Directory Tools",
+    icon: "identity.svg",
+    keywords: "active directory ad ds adds adlds ad lds aduc users and computers domain domains and trusts sites and services admin center powershell module",
+    info: "Installs the Active Directory management tools group (RSAT-AD-Tools) — ADUC, AD Administrative Center, AD PowerShell module and AD LDS tools. Pick individual tools below.",
+    children: [
+      { id: "RSAT-ADDS-Tools", label: "AD DS Snap-Ins and Command-Line Tools", defaultOn: true, keywords: "active directory users and computers aduc dsa.msc sites services domains trusts", info: "Installs RSAT-ADDS-Tools — Active Directory Users and Computers, Sites and Services, Domains and Trusts, and the ds* command-line tools." },
+      { id: "RSAT-AD-AdminCenter", label: "Active Directory Administrative Center", keywords: "active directory administrative center dsac recycle bin fine grained password policy", info: "Installs RSAT-AD-AdminCenter (dsac.exe) — AD Administrative Center, AD Recycle Bin and fine-grained password policy UI." },
+      { id: "RSAT-AD-PowerShell", label: "Active Directory Module for Windows PowerShell", defaultOn: true, keywords: "active directory powershell module get-aduser", info: "Installs RSAT-AD-PowerShell — the ActiveDirectory PowerShell module (Get-ADUser, New-ADGroup, …). Works on Server Core." },
+      { id: "RSAT-ADLDS", label: "AD LDS Snap-Ins and Command-Line Tools", keywords: "active directory lightweight directory services adlds ldap adsi edit", info: "Installs RSAT-ADLDS — management tools for Active Directory Lightweight Directory Services." }
+    ]
+  },
+  {
+    id: "RSAT-ADCS",
+    label: "Active Directory Certificate Services Tools",
+    icon: "certificate.svg",
+    noCore: true,
+    keywords: "certificate certificates certification authority ca pki adcs certsrv certutil ocsp online responder templates",
+    info: "Installs the AD CS management tools group (RSAT-ADCS) — Certification Authority console, certificate templates and the Online Responder console. Desktop Experience only; Server Core does not ship these tools. Pick individual tools below.",
+    children: [
+      { id: "RSAT-ADCS-Mgmt", label: "Certification Authority Management Tools", defaultOn: true, noCore: true, keywords: "certification authority certsrv.msc certificate templates certtmpl enterprise pki pkiview", info: "Installs RSAT-ADCS-Mgmt — Certification Authority (certsrv.msc), Certificate Templates (certtmpl.msc) and Enterprise PKI (pkiview.msc)." },
+      { id: "RSAT-Online-Responder", label: "Online Responder Tools", noCore: true, keywords: "online responder ocsp revocation", info: "Installs RSAT-Online-Responder — the Online Responder (OCSP) management console." }
+    ]
+  },
+  { id: "RSAT-DNS-Server", label: "DNS Server Tools", icon: "dns.svg", keywords: "dns dnsmgmt zones resolver name resolution", info: "Installs DNS Server Tools (RSAT-DNS-Server) — DNS Manager and the DnsServer PowerShell module." },
+  { id: "RSAT-DHCP", label: "DHCP Server Tools", icon: "dhcp.svg", keywords: "dhcp scopes leases reservations", info: "Installs DHCP Server Tools (RSAT-DHCP) — the DHCP console and DhcpServer PowerShell module." },
+  {
+    id: "RSAT-Hyper-V-Tools",
+    label: "Hyper-V Management Tools",
+    icon: "hyperv.svg",
+    keywords: "hyper-v virtual machine manager vmconnect powershell module",
+    info: "Hyper-V management tools group (RSAT-Hyper-V-Tools). The group itself carries no payload — pick the tools below.",
+    children: [
+      { id: "Hyper-V-Tools", label: "Hyper-V GUI Management Tools", defaultOn: true, noCore: true, keywords: "hyper-v manager virtmgmt vmconnect gui", info: "Installs Hyper-V-Tools — Hyper-V Manager and Virtual Machine Connection. Desktop Experience only." },
+      { id: "Hyper-V-PowerShell", label: "Hyper-V Module for Windows PowerShell", defaultOn: true, keywords: "hyper-v powershell module get-vm", info: "Installs Hyper-V-PowerShell — the Hyper-V PowerShell module. Works on Server Core." }
+    ]
+  },
+  {
+    id: "RSAT-Clustering",
+    label: "Failover Clustering Tools",
+    icon: "virtual-clusters.svg",
+    keywords: "failover cluster clustering high availability cluadmin",
+    info: "Installs the Failover Clustering tools group (RSAT-Clustering). Pick individual tools below.",
+    children: [
+      { id: "RSAT-Clustering-Mgmt", label: "Failover Cluster Management Tools", defaultOn: true, noCore: true, keywords: "failover cluster manager cluadmin snap-in", info: "Installs RSAT-Clustering-Mgmt — Failover Cluster Manager. Desktop Experience only; on Server Core the console comes from the App Compatibility FOD instead." },
+      { id: "RSAT-Clustering-PowerShell", label: "Failover Cluster Module for Windows PowerShell", defaultOn: true, keywords: "failover cluster powershell module get-cluster", info: "Installs RSAT-Clustering-PowerShell — the FailoverClusters PowerShell module. Works on Server Core." },
+      { id: "RSAT-Clustering-CmdInterface", label: "Failover Cluster Command Interface", keywords: "cluster.exe command line", info: "Installs RSAT-Clustering-CmdInterface — cluster.exe and the legacy command interface." },
+      { id: "RSAT-Clustering-AutomationServer", label: "Failover Cluster Automation Server", keywords: "cluster automation msclus com", info: "Installs RSAT-Clustering-AutomationServer — the MSClus COM automation interface for legacy scripts." }
+    ]
+  },
+  {
+    id: "RSAT-File-Services",
+    label: "File Services Tools",
+    icon: "files.svg",
+    noCore: true,
+    keywords: "file services dfs namespaces replication fsrm quotas nfs share",
+    info: "Installs the File Services management tools group (RSAT-File-Services). Desktop Experience only — Server Core ships none of these tools. Pick individual tools below.",
+    children: [
+      { id: "RSAT-DFS-Mgmt-Con", label: "DFS Management Tools", defaultOn: true, noCore: true, keywords: "dfs namespaces replication dfsmgmt", info: "Installs RSAT-DFS-Mgmt-Con — DFS Management console and the DFSN/DFSR PowerShell modules." },
+      { id: "RSAT-FSRM-Mgmt", label: "File Server Resource Manager Tools", noCore: true, keywords: "fsrm quota file screen storage reports", info: "Installs RSAT-FSRM-Mgmt — File Server Resource Manager console and PowerShell module." },
+      { id: "RSAT-NFS-Admin", label: "Services for NFS Management Tools", noCore: true, keywords: "nfs unix export", info: "Installs RSAT-NFS-Admin — Services for NFS management console and PowerShell module." }
+    ]
+  },
+  { id: "RSAT-Print-Services", label: "Print and Document Services Tools", icon: "print.svg", noCore: true, keywords: "print management printers drivers printmanagement", info: "Installs Print and Document Services Tools (RSAT-Print-Services) — Print Management console and PrintManagement PowerShell module. Desktop Experience only." },
+  {
+    id: "RSAT-RemoteAccess",
+    label: "Remote Access Management Tools",
+    icon: "vpn.svg",
+    keywords: "remote access vpn directaccess routing ras nat",
+    info: "Installs the Remote Access management tools group (RSAT-RemoteAccess). Pick individual tools below.",
+    children: [
+      { id: "RSAT-RemoteAccess-Mgmt", label: "Remote Access GUI and Command-Line Tools", defaultOn: true, noCore: true, keywords: "remote access management console routing and remote access rras", info: "Installs RSAT-RemoteAccess-Mgmt — Remote Access Management console and Routing and Remote Access snap-in. Desktop Experience only." },
+      { id: "RSAT-RemoteAccess-PowerShell", label: "Remote Access Module for Windows PowerShell", defaultOn: true, keywords: "remote access powershell module", info: "Installs RSAT-RemoteAccess-PowerShell — the RemoteAccess PowerShell module. Works on Server Core." }
+    ]
+  },
+  {
+    id: "RSAT-RDS-Tools",
+    label: "Remote Desktop Services Tools",
+    icon: "rds.svg",
+    noCore: true,
+    selfPayload: true,
+    keywords: "remote desktop services rds session host connection broker deployment collection remoteapp remotedesktop powershell module licensing gateway",
+    info: "Installs the Remote Desktop Services management tools group (RSAT-RDS-Tools) — the Server Manager RDS pages and the RemoteDesktop PowerShell module the deployment cmdlets live in (New-RDSessionDeployment, New-RDSessionCollection). Desktop Experience only: the Server Core component list names every other RSAT group but not this one, so a Core VM cannot run an RDS deployment even though it can host RD Licensing and RD Virtualization Host. Pick individual tools below.",
+    children: [
+      { id: "RDS-Gateway-UI", label: "Remote Desktop Gateway Tools", noCore: true, keywords: "rd gateway console tsgateway policies", info: "Installs RDS-Gateway-UI — the RD Gateway Manager console and its PowerShell provider. Desktop Experience only." },
+      { id: "RDS-Licensing-UI", label: "Remote Desktop Licensing Tools", noCore: true, keywords: "rd licensing manager cal client access license activation", info: "Installs RDS-Licensing-UI — RD Licensing Manager, where a license server is activated and CALs are installed. Desktop Experience only." },
+      { id: "RSAT-RDS-Licensing-Diagnosis-UI", label: "Remote Desktop Licensing Diagnoser Tools", noCore: true, keywords: "licensing diagnoser grace period troubleshooting", info: "Installs RSAT-RDS-Licensing-Diagnosis-UI — the Licensing Diagnoser, which reports why a session host is not reaching a license server. Desktop Experience only." }
+    ]
+  },
+  { id: "RSAT-NPAS", label: "Network Policy and Access Services Tools", icon: "security.svg", noCore: true, keywords: "network policy server nps radius", info: "Installs NPAS Tools (RSAT-NPAS) — the Network Policy Server console and PowerShell module. Desktop Experience only." },
+  { id: "WDS-AdminPack", label: "Windows Deployment Services Tools", icon: "download.svg", noCore: true, keywords: "wds deployment pxe imaging rsat", info: "Installs WDS Tools (WDS-AdminPack) — the Windows Deployment Services console and wdsutil. Desktop Experience only." },
+  {
+    id: "UpdateServices-RSAT",
+    label: "Windows Server Update Services Tools",
+    icon: "update.svg",
+    keywords: "wsus update services console api powershell",
+    info: "WSUS management tools group (UpdateServices-RSAT), for administering a remote WSUS server. The group itself carries no payload — pick the tools below.",
+    children: [
+      { id: "UpdateServices-API", label: "API and PowerShell cmdlets", defaultOn: true, keywords: "wsus api powershell cmdlets", info: "Installs UpdateServices-API — the WSUS API assemblies and PowerShell cmdlets. Works on Server Core." },
+      { id: "UpdateServices-UI", label: "User Interface Management Console", defaultOn: true, noCore: true, keywords: "wsus console mmc snap-in", info: "Installs UpdateServices-UI — the WSUS management console. Desktop Experience only." }
+    ]
+  },
+  { id: "RSAT-NLB", label: "Network Load Balancing Tools", icon: "vnet.svg", noCore: true, keywords: "nlb network load balancing nlbmgr", info: "Installs NLB Tools (RSAT-NLB) — Network Load Balancing Manager and PowerShell module. Desktop Experience only." },
+  { id: "RSAT-Shielded-VM-Tools", label: "Shielded VM Tools", icon: "security.svg", keywords: "shielded vm guarded fabric hgs host guardian", info: "Installs Shielded VM Tools (RSAT-Shielded-VM-Tools) — Shielding Data File Wizard and Template Disk Wizard." },
+  { id: "RSAT-Storage-Replica", label: "Storage Replica Module for Windows PowerShell", icon: "disk-snapshot.svg", keywords: "storage replica powershell module replication", info: "Installs RSAT-Storage-Replica — the StorageReplica PowerShell module for managing Storage Replica partnerships." },
+  { id: "RSAT-DataCenterBridging-LLDP-Tools", label: "Data Center Bridging LLDP Tools", icon: "nic.svg", keywords: "dcb lldp data center bridging rdma converged network", info: "Installs RSAT-DataCenterBridging-LLDP-Tools — LLDP tools used when configuring Data Center Bridging / RDMA networks." },
+  { id: "RSAT-VA-Tools", label: "Volume Activation Tools", icon: "key.svg", noCore: true, keywords: "volume activation kms licensing vamt", info: "Installs Volume Activation Tools (RSAT-VA-Tools) — the Volume Activation Tools console (vmw.exe). Desktop Experience only." },
+  {
+    id: "RSAT-Feature-Tools-BitLocker",
+    label: "BitLocker Drive Encryption Tools",
+    icon: "security.svg",
+    noCore: true,
+    keywords: "bitlocker recovery password viewer drive encryption manage-bde aduc extension",
+    info: "Installs the BitLocker administration tools group (RSAT-Feature-Tools-BitLocker). Both tools below are Desktop Experience only, so the group is hidden on Server Core (manage-bde itself is always present there). Pick individual tools below.",
+    children: [
+      { id: "RSAT-Feature-Tools-BitLocker-RemoteAdminTool", label: "BitLocker Drive Encryption Tools", defaultOn: true, noCore: true, keywords: "manage-bde bitlocker control panel remote admin", info: "Installs RSAT-Feature-Tools-BitLocker-RemoteAdminTool — the BitLocker remote administration tools." },
+      { id: "RSAT-Feature-Tools-BitLocker-BdeAducExt", label: "BitLocker Recovery Password Viewer", noCore: true, keywords: "bitlocker recovery password viewer aduc active directory", info: "Installs RSAT-Feature-Tools-BitLocker-BdeAducExt — the BitLocker recovery password tab in Active Directory Users and Computers." }
+    ]
+  }
+];
+
+/* What ServerCore.AppCompatibility actually puts on the box, per
+   learn.microsoft.com/windows-server/get-started/server-core-app-compatibility-feature-on-demand.
+   `since` is the first Windows Server release that ships the component in the FOD. */
+const APP_COMPAT_FOD_TOOLS = [
+  { label: "Microsoft Management Console", file: "mmc.exe", icon: "settings.svg", type: "Console host", since: 2019 },
+  { label: "Event Viewer", file: "eventvwr.msc", icon: "search.svg", type: "Diagnostics", since: 2019 },
+  { label: "Performance Monitor", file: "perfmon.exe", icon: "monitor.svg", type: "Diagnostics", since: 2019 },
+  { label: "Resource Monitor", file: "resmon.exe", icon: "overview.svg", type: "Diagnostics", since: 2019 },
+  { label: "Device Manager", file: "devmgmt.msc", icon: "nic.svg", type: "Hardware", since: 2019 },
+  { label: "Disk Management", file: "diskmgmt.msc", icon: "disk.svg", type: "Storage", since: 2019 },
+  { label: "Failover Cluster Manager", file: "cluadmin.msc", icon: "virtual-clusters.svg", type: "Clustering", since: 2019, warn: "Needs the Failover Clustering feature" },
+  { label: "File Explorer", file: "explorer.exe", icon: "files.svg", type: "Shell", since: 2019 },
+  { label: "Windows PowerShell ISE", file: "powershell_ise.exe", icon: "powershell.svg", type: "Scripting", since: 2019 },
+  { label: "Hyper-V Manager", file: "virtmgmt.msc", icon: "hyperv.svg", type: "Virtualization", since: 2022 },
+  { label: "Task Scheduler", file: "taskschd.msc", icon: "update.svg", type: "Automation", since: 2022 }
+];
+
+/** FOD contents for this VM's release — 2019 ships nine of them, 2022+ adds Hyper-V Manager and Task Scheduler. */
+function appCompatFodTools(img) {
+  const year = imageReleaseYear(img);
+  return APP_COMPAT_FOD_TOOLS.filter(t => year >= t.since);
+}
+
+/** Server Core App Compatibility FOD — one row in the Roles & features tree, but a capability, not a feature. */
+const APP_COMPAT_FOD_ITEM = {
+  id: "ServerCore.AppCompatibility~~~~0.0.1.0",
+  label: "Server Core App Compatibility FOD",
+  icon: "monitor.svg",
+  keywords: "app compatibility appcompat server core fod mmc event viewer performance monitor device manager disk management file explorer powershell ise gui tools",
+  hint: "Feature on Demand — needs the Server FoD ISO or Windows Update",
+  info: "Adds ServerCore.AppCompatibility to this Core VM — mmc.exe, Event Viewer, Performance Monitor, Resource Monitor, Device Manager, Disk Management, Failover Cluster Manager, File Explorer and PowerShell ISE. Installed with Add-WindowsCapability, offline from the Windows Server Languages and Optional Features ISO or online in the guest at first boot."
+};
+
+/** Client RSAT capabilities (Add-WindowsCapability). */
+const RSAT_CATALOG = [
+  { id: "Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0", label: "AD DS and AD LDS Tools", icon: "identity.svg", paw: true, info: "Adds Windows capability Rsat.ActiveDirectory.DS-LDS.Tools — ADUC, AD PowerShell module, and related admin tools." },
+  { id: "Rsat.CertificateServices.Tools~~~~0.0.1.0", label: "AD Certificate Services Tools", icon: "certificate.svg", paw: true, info: "Adds Rsat.CertificateServices.Tools — certutil UI / CA management snap-ins." },
+  { id: "Rsat.GroupPolicy.Management.Tools~~~~0.0.1.0", label: "Group Policy Management Tools", icon: "gpo.svg", paw: true, info: "Adds Rsat.GroupPolicy.Management.Tools — GPMC on the client." },
+  { id: "Rsat.FileServices.Tools~~~~0.0.1.0", label: "File Services Tools", icon: "files.svg", info: "Adds Rsat.FileServices.Tools — DFS Management and related file-service consoles." },
+  { id: "Rsat.PrintAndDocumentServices.Tools~~~~0.0.1.0", label: "Print Services Tools", icon: "print.svg", info: "Adds Rsat.PrintAndDocumentServices.Tools — Print Management." },
+  { id: "Rsat.FailoverCluster.Management.Tools~~~~0.0.1.0", label: "Failover Clustering Tools", icon: "virtual-clusters.svg", info: "Adds Rsat.FailoverCluster.Management.Tools — Failover Cluster Manager." },
+  { id: "Rsat.DHCP.Tools~~~~0.0.1.0", label: "DHCP Server Tools", icon: "dhcp.svg", paw: true, info: "Adds Rsat.DHCP.Tools — DHCP console and PowerShell." },
+  { id: "Rsat.Dns.Tools~~~~0.0.1.0", label: "DNS Server Tools", icon: "dns.svg", paw: true, info: "Adds Rsat.Dns.Tools — DNS Manager and DNS PowerShell." },
+  { id: "Rsat.ServerManager.Tools~~~~0.0.1.0", label: "Server Manager", icon: "servers.svg", paw: true, info: "Adds Rsat.ServerManager.Tools — Server Manager on Windows client." },
+  { id: "Rsat.BitLocker.Recovery.Tools~~~~0.0.1.0", label: "BitLocker Recovery Password Viewer", icon: "security.svg", info: "Adds Rsat.BitLocker.Recovery.Tools — view BitLocker recovery passwords in ADUC." }
+];
+
+/** Client Windows optional features (Enable-WindowsOptionalFeature). Not RSAT and not
+    Features on Demand: the payload ships inside the client image, so Build-Vms.ps1 enables
+    these offline with no ISO, nothing to download and nothing to defer to the guest. */
+const CLIENT_FEATURE_CATALOG = [
+  {
+    id: "Microsoft-Hyper-V-Tools-All",
+    label: "Hyper-V Management Tools",
+    icon: "hyperv.svg",
+    info: "Enables Microsoft-Hyper-V-Tools-All — Hyper-V Manager, vmconnect and the Hyper-V PowerShell module, the same checkbox as Hyper-V Management Tools in Turn Windows features on or off. There is no Rsat.Hyper-V.Tools capability: these tools live in the image, not in the Languages and Optional Features ISO. The Hyper-V platform itself stays off — running VMs inside this VM is a separate decision that needs nested virtualization on the host. Pro, Enterprise and Education only."
+  }
+];
+
+const ROLE_PRESETS = {
+  // Server Manager's "Quick Start" deployment, as role services: broker, web access and
+  // session host on one box, plus the tools carrying the RemoteDesktop PowerShell module
+  // that New-RDSessionDeployment lives in. This installs binaries only — the deployment
+  // itself is domain-joined, post-boot work and belongs to whatever configures the server.
+  // RDS-Licensing rides along on top of Quick Start proper: a single-box deployment is
+  // its own license server in practice, and the role is a no-op until activated, so
+  // carrying it costs nothing on a box that stays in the 120-day grace period. Its
+  // console arrives via includeManagementTools like every other role's.
+  // `essential` is the part that makes it that deployment rather than a bag of features:
+  // without all three the preset would quietly apply a subset under the same name.
+  // Licensing is deliberately not essential — a build without it is still a session
+  // deployment, just one licensed from elsewhere.
+  // RSAT-RDS-Tools is the one parent id any preset carries, against the leaf-only rule
+  // below: its three children are consoles, while the RemoteDesktop PowerShell module
+  // hangs off the group itself. It is named explicitly rather than left to
+  // includeManagementTools, which is a toggle somebody can turn off - and without that
+  // module New-RDSessionDeployment does not exist on the box the roles just landed on.
+  // The RDS role card names it (ROLE_CATALOG `preset`), which is where somebody looking
+  // for a Remote Desktop deployment looks. One button, one place.
+  "rds-quick": {
+    label: "Quick Session Deployment",
+    sub: "Session Host, Connection Broker, Web Access and Licensing on this one server, plus the RDS tools. Binaries only — the deployment itself is post-config.",
+    features: ["RDS-RD-Server", "RDS-Connection-Broker", "RDS-Web-Access", "RDS-Licensing", "RSAT-RDS-Tools"],
+    essential: ["RDS-RD-Server", "RDS-Connection-Broker", "RDS-Web-Access"]
+  }
+};
+
+/* Image dropdown hierarchy: Windows release > installation option > edition.
+   Custom is appended after everything. */
+const IMAGE_PICKER_EXPERIENCE_ORDER = ["core", "desktop", "client"];
+const IMAGE_PICKER_EDITION_ORDER = ["Standard", "Datacenter"];
+
+/** Release headline: the bare year for Windows Server, "Windows 11" for client images. */
+/* The studio only ever sets access mode, so the line under a VLAN box says which of the
+   two states that leaves the adapter in — untagged, or tagged with the VLAN typed. */
+function vlanHintText(vlanId) {
+  const v = String(vlanId ?? "").trim();
+  return v ? `Access mode · tagged VLAN ${v}` : "Access mode · untagged";
+}
+
+const LINUX_DISTRO_LABEL = {
+  ubuntu: "Ubuntu", debian: "Debian", fedora: "Fedora",
+  rocky: "Rocky Linux", alma: "AlmaLinux", oracle: "Oracle Linux", opensuse: "openSUSE", arch: "Arch Linux"
+};
+
+function imageReleaseLabel(img) {
+  /* Linux first: these carry noServerRoles too, and that branch would give every
+     release a heading of its own - "UBUNTU 26.04 LTS", "UBUNTU 24.04 LTS" - where the
+     picker wants one heading per distribution with the releases under it. */
+  if (isLinuxImage(img)) return LINUX_DISTRO_LABEL[img.distro] || img.label;
+  if (img.noServerRoles) return img.label;
+  if (img.kind === "client") return "Windows 11";
+  const m = String(img.id).match(/^ws(\d{4})/);
+  return m ? m[1] : img.label;
+}
+/** Sub-headline under a release: the edition. Client images have none. */
+function imageEditionLabel(img) {
+  return img.edition || "";
+}
+/* An image seen from a template row. The template dropdown groups by role, so the one
+   thing that varies inside a group is the installation option — that is what earns the
+   row's icon. Release and edition are words on the spec line underneath, never icons:
+   Datacenter and Standard look identical as pictures. Template picker only; the image
+   dropdown spells all of it out in full. */
+
+/** The word that icon stands for. Client images have no installation option to name. */
+function imageExperienceLabel(img) {
+  if (!img || img.kind === "client" || img.noServerRoles) return "";
+  return img.kind === "core" ? "Core" : "Desktop";
+}
+/** Release and edition, short enough to lead a spec line: "Server 2025 Datacenter". */
+function imageSpecLabel(img) {
+  if (!img) return "";
+  if (img.kind === "client" || img.noServerRoles) return img.label;
+  return `Server ${imageReleaseLabel(img)}${img.edition ? " " + img.edition : ""}`;
+}
+/** Releases in catalog order; inside each, editions with their Core and Desktop images. */
+function imagePickerGroups() {
+  const releases = [];
+  IMAGE_CATALOG.forEach(img => {
+    const label = imageReleaseLabel(img);
+    let rel = releases.find(r => r.label === label);
+    if (!rel) { rel = { label, groups: [] }; releases.push(rel); }
+    const edition = imageEditionLabel(img);
+    let grp = rel.groups.find(g => g.label === edition);
+    if (!grp) { grp = { label: edition, images: [] }; rel.groups.push(grp); }
+    grp.images.push(img);
+  });
+  const rank = (list, value) => { const i = list.indexOf(value); return i < 0 ? 99 : i; };
+  releases.forEach(rel => {
+    rel.groups.sort((a, b) => rank(IMAGE_PICKER_EDITION_ORDER, a.label) - rank(IMAGE_PICKER_EDITION_ORDER, b.label));
+    rel.groups.forEach(g => g.images.sort((a, b) =>
+      rank(IMAGE_PICKER_EXPERIENCE_ORDER, a.kind) - rank(IMAGE_PICKER_EXPERIENCE_ORDER, b.kind)));
+  });
+  return releases;
+}
+
+const RSAT_PRESETS = {
+  "paw": {
+    label: "PAW essentials",
+    capabilities: RSAT_CATALOG.filter(x => x.paw).map(x => x.id),
+    // Same list on screen, so the preset fills both halves of it. Hyper-V Manager belongs on
+    // a privileged workstation for the same reason ADUC does: the host is administered from
+    // here, not from the host.
+    clientFeatures: ["Microsoft-Hyper-V-Tools-All"]
+  }
+};
+
+/* Whole-VM starting points, picked at the top of a VM card. A template owns the build shape
+   only — image, sizing, roles. Name, addressing and credentials are per VM and never touched,
+   so applying one to a VM that is already half configured cannot lose an IP or a password.
+   Sizing is only set where a role has a reason to differ from the image default - everything
+   else inherits whatever the image profile in General Settings says.
+   `name` seeds the VM name; a taken one rolls to the next free number (dc-01 -> dc-02). */
+const VM_TEMPLATES = {
+  // AD DS forces builtInAdminOnly on by itself (see isBuiltInAdminOnly), so no template
+  // touches it. RSAT-AD-PowerShell is the one AD tool that genuinely works on Core.
+  "dc-2025-core-appcompat": {
+    group: "Active Directory",
+    icon: "active-directory.svg",
+    short: "Domain Controller",
+    label: "Windows Server 2025 · Core (App Compat) · Domain Controller",
+    sub: "AD DS, AD DS snap-ins and command-line tools, AD PowerShell module, App Compatibility FOD. 2 vCPU / 4 GB.",
+    name: "dc-01",
+    imageId: "ws2025-datacenter-core",
+    cpuCount: 2,
+    memoryGB: 4,
+    windowsFeatures: ["AD-Domain-Services", "RSAT-ADDS-Tools", "RSAT-AD-PowerShell"],
+    appCompatFod: true
+  },
+  "dc-2025-core": {
+    group: "Active Directory",
+    icon: "active-directory.svg",
+    short: "Domain Controller",
+    label: "Windows Server 2025 · Core · Domain Controller",
+    sub: "AD DS binaries alone - promote with Install-ADDSForest or Install-ADDSDomainController after first boot, which installs the AD tools itself. No App Compatibility FOD. 2 vCPU / 4 GB.",
+    name: "dc-01",
+    imageId: "ws2025-datacenter-core",
+    cpuCount: 2,
+    memoryGB: 4,
+    windowsFeatures: ["AD-Domain-Services"]
+  },
+  "dc-2025-desktop": {
+    group: "Active Directory",
+    icon: "active-directory.svg",
+    short: "Domain Controller",
+    label: "Windows Server 2025 · Desktop · Domain Controller",
+    sub: "AD DS binaries only — the AD tools arrive with the role's own management tools on Desktop. 2 vCPU / 4 GB.",
+    name: "dc-01",
+    imageId: "ws2025-datacenter-desktop",
+    cpuCount: 2,
+    memoryGB: 4,
+    windowsFeatures: ["AD-Domain-Services"]
+  },
+  "files-2025-core-appcompat": {
+    group: "File services",
+    icon: "file-shares.svg",
+    short: "File Server",
+    label: "Windows Server 2025 · Core (App Compat) · File Server",
+    sub: "File and Storage Services with File Server and DFS Namespaces, a fixed 100 GB NTFS data disk on D:, and the App Compatibility FOD so the Core box has File Explorer and Disk Management for the shares.",
+    name: "files-01",
+    imageId: "ws2025-datacenter-core",
+    appCompatFod: true,
+    additionalDisks: [
+      { sizeGB: 100, type: "Fixed", fileSystem: "NTFS" }
+    ],
+    windowsFeatures: ["File-Services", "FS-FileServer", "FS-DFS-Namespace"]
+  },
+  "files-2025-core": {
+    group: "File services",
+    icon: "file-shares.svg",
+    short: "File Server",
+    label: "Windows Server 2025 · Core · File Server",
+    sub: "File and Storage Services with File Server and DFS Namespaces, plus a fixed 100 GB NTFS data disk on D: for the shares.",
+    name: "files-01",
+    imageId: "ws2025-datacenter-core",
+    additionalDisks: [
+      { sizeGB: 100, type: "Fixed", fileSystem: "NTFS" }
+    ],
+    windowsFeatures: ["File-Services", "FS-FileServer", "FS-DFS-Namespace"]
+  },
+  "files-2025-desktop": {
+    group: "File services",
+    icon: "file-shares.svg",
+    short: "File Server",
+    label: "Windows Server 2025 · Desktop · File Server",
+    sub: "File and Storage Services with File Server and DFS Namespaces, plus a fixed 100 GB NTFS data disk on D: for the shares.",
+    name: "files-01",
+    imageId: "ws2025-datacenter-desktop",
+    additionalDisks: [
+      { sizeGB: 100, type: "Fixed", fileSystem: "NTFS" }
+    ],
+    windowsFeatures: ["File-Services", "FS-FileServer", "FS-DFS-Namespace"]
+  },
+  /* Guest cluster file servers - two or more VMs that build a failover cluster *inside* the
+     guests, on top of a VHD Set they share. The template stops at the roles: no local data
+     disk, because the shares live on the shared disk, and no VHD Set either - a shared disk
+     belongs to the pair, not to one VM, so it is created once in the VHD Sets blade
+     and attached to both nodes there. Apply the template twice and the name rolls files-01
+     -> files-02. Failover-Clustering carries the cluster itself; the console comes from
+     includeManagementTools on Desktop and from the App Compatibility FOD on Core. */
+  "files-cluster-2025-core-appcompat": {
+    group: "File services",
+    icon: "virtual-clusters.svg",
+    short: "File Server (guest cluster)",
+    label: "Windows Server 2025 · Core (App Compat) · File Server (guest cluster)",
+    sub: "File and Storage Services with File Server and DFS Namespaces plus Failover Clustering, and the App Compatibility FOD so the Core node has File Explorer, Disk Management and Failover Cluster Manager. No local data disk — create one VHD Set in the VHD Sets blade and attach it to every node.",
+    name: "files-01",
+    imageId: "ws2025-datacenter-core",
+    appCompatFod: true,
+    windowsFeatures: ["File-Services", "FS-FileServer", "FS-DFS-Namespace", "Failover-Clustering"]
+  },
+  "files-cluster-2025-core": {
+    group: "File services",
+    icon: "virtual-clusters.svg",
+    short: "File Server (guest cluster)",
+    label: "Windows Server 2025 · Core · File Server (guest cluster)",
+    sub: "File and Storage Services with File Server and DFS Namespaces plus Failover Clustering. No App Compatibility FOD, so the cluster is driven from the FailoverClusters PowerShell module or a remote console. No local data disk — create one VHD Set in the VHD Sets blade and attach it to every node.",
+    name: "files-01",
+    imageId: "ws2025-datacenter-core",
+    windowsFeatures: ["File-Services", "FS-FileServer", "FS-DFS-Namespace", "Failover-Clustering"]
+  },
+  "files-cluster-2025-desktop": {
+    group: "File services",
+    icon: "virtual-clusters.svg",
+    short: "File Server (guest cluster)",
+    label: "Windows Server 2025 · Desktop · File Server (guest cluster)",
+    sub: "File and Storage Services with File Server and DFS Namespaces plus Failover Clustering, with Failover Cluster Manager and the file services consoles. No local data disk — create one VHD Set in the VHD Sets blade and attach it to every node.",
+    name: "files-01",
+    imageId: "ws2025-datacenter-desktop",
+    windowsFeatures: ["File-Services", "FS-FileServer", "FS-DFS-Namespace", "Failover-Clustering"]
+  },
+  "ca-root-2025-core": {
+    group: "Certificate services",
+    icon: "certificate.svg",
+    short: "Root CA",
+    label: "Windows Server 2025 · Core · Root CA",
+    sub: "AD CS with the Certification Authority role service. Binaries only — configure the CA after first boot.",
+    name: "ca-root-01",
+    imageId: "ws2025-datacenter-core",
+    windowsFeatures: ["AD-Certificate", "ADCS-Cert-Authority"]
+  },
+  "ca-root-2025-desktop": {
+    group: "Certificate services",
+    icon: "certificate.svg",
+    short: "Root CA",
+    label: "Windows Server 2025 · Desktop · Root CA",
+    sub: "AD CS with the Certification Authority role service. Binaries only — configure the CA after first boot.",
+    name: "ca-root-01",
+    imageId: "ws2025-datacenter-desktop",
+    windowsFeatures: ["AD-Certificate", "ADCS-Cert-Authority"]
+  },
+  // IIS carries the CRL/AIA endpoint an issuing CA publishes to. Web-Server is selfPayload,
+  // so it installs IIS with its default role services rather than the thin slice a child
+  // dependency would drag in - a CRL is a static file and needs static content serving.
+  "ca-issuing-2025-core": {
+    group: "Certificate services",
+    icon: "certificate.svg",
+    short: "Issuing CA",
+    label: "Windows Server 2025 · Core · Issuing CA",
+    sub: "AD CS with the Certification Authority role service, plus IIS for CRL/AIA publishing. The IIS Management Console is Desktop-only and is dropped on Core.",
+    name: "ca-issuing-01",
+    imageId: "ws2025-datacenter-core",
+    windowsFeatures: ["AD-Certificate", "ADCS-Cert-Authority", "Web-Server", "Web-Mgmt-Console"]
+  },
+  "ca-issuing-2025-desktop": {
+    group: "Certificate services",
+    icon: "certificate.svg",
+    short: "Issuing CA",
+    label: "Windows Server 2025 · Desktop · Issuing CA",
+    sub: "AD CS with the Certification Authority role service, plus IIS for CRL/AIA publishing and the IIS Management Console.",
+    name: "ca-issuing-01",
+    imageId: "ws2025-datacenter-desktop",
+    windowsFeatures: ["AD-Certificate", "ADCS-Cert-Authority", "Web-Server", "Web-Mgmt-Console"]
+  },
+  // The Intune Certificate Connector itself is a Microsoft download, not a Windows feature, so
+  // the template only stages what it expects to find already there: NDES on the AD CS
+  // binaries. NDES pulls its own IIS dependencies. The box is a member server that enrolls
+  // against the issuing CA, not a CA itself, so ADCS-Cert-Authority is deliberately absent.
+  // Desktop Experience only - Server Core carries the Certification Authority role service
+  // alone, none of the web-facing AD CS role services.
+  "ca-scep-2025-desktop": {
+    group: "Certificate services",
+    icon: "certificate.svg",
+    short: "Intune Connector (SCEP)",
+    label: "Windows Server 2025 · Desktop · Intune Certificate Connector (SCEP)",
+    sub: "Network Device Enrollment Service on the AD CS binaries. Binaries only - install the Intune Certificate Connector download and run the NDES configuration against the issuing CA after first boot.",
+    name: "ca-scep-01",
+    imageId: "ws2025-datacenter-desktop",
+    windowsFeatures: ["AD-Certificate", "ADCS-Device-Enrollment"]
+  },
+  "print-2025-core": {
+    group: "Print services",
+    icon: "print.svg",
+    short: "Print Server",
+    label: "Windows Server 2025 · Core · Print Server",
+    sub: "Print and Document Services with the Print Server role service.",
+    name: "print-01",
+    imageId: "ws2025-datacenter-core",
+    windowsFeatures: ["Print-Services", "Print-Server"]
+  },
+  "print-2025-desktop": {
+    group: "Print services",
+    icon: "print.svg",
+    short: "Print Server",
+    label: "Windows Server 2025 · Desktop · Print Server",
+    sub: "Print and Document Services with the Print Server role service.",
+    name: "print-01",
+    imageId: "ws2025-datacenter-desktop",
+    windowsFeatures: ["Print-Services", "Print-Server"]
+  },
+  // Matches ROLE_PRESETS["rds-quick"] exactly, so the Quick Session Deployment toggle inside
+  // the RDS role card reads as applied once this lands.
+  // A Hyper-V host that itself runs inside Hyper-V. Nested virtualization on, four adapters
+  // for the switches a lab host ends up needing, and four raw 100 GB disks left unformatted -
+  // fileSystem "None" so the guest does not claim them, which is what Storage Spaces or a S2D
+  // pool wants. The Hyper-V role itself is deliberately not staged: it needs a running
+  // hypervisor and a restart, so it goes on in the guest after first boot. Tick Hyper-V in
+  // Roles and features if you would rather Build-Vms stage it and set MAC spoofing for you.
+  // DHCP is one of the roles Server Core carries in full, so both halves are real. The
+  // console is not part of the role - includeManagementTools handles that per VM - so the
+  // feature list is the role and nothing else, and the server still has to be authorized in
+  // Active Directory after first boot.
+  "dhcp-2025-core": {
+    group: "Network services",
+    icon: "dhcp.svg",
+    short: "DHCP Server",
+    label: "Windows Server 2025 · Core · DHCP Server",
+    sub: "The DHCP Server role. Authorize the server in Active Directory and create scopes after first boot.",
+    name: "dhcp-01",
+    imageId: "ws2025-datacenter-core",
+    windowsFeatures: ["DHCP"]
+  },
+  "dhcp-2025-desktop": {
+    group: "Network services",
+    icon: "dhcp.svg",
+    short: "DHCP Server",
+    label: "Windows Server 2025 · Desktop · DHCP Server",
+    sub: "The DHCP Server role. Authorize the server in Active Directory and create scopes after first boot.",
+    name: "dhcp-01",
+    imageId: "ws2025-datacenter-desktop",
+    windowsFeatures: ["DHCP"]
+  },
+  /* Azure Local as a nested node: same four adapters and four raw disks the nested Hyper-V
+     hosts get, because a node ends up wanting a management, storage and compute switch and
+     an unformatted pool. Roles are not settable on this image and nested virtualization is
+     forced on by it, so neither is listed here. */
+  "azure-local-node": {
+    group: "Virtualization",
+    icon: "azure-local.svg",
+    short: "Azure Local Node",
+    label: "Azure Local · Nested Node",
+    sub: "Nested virtualization with four adapters and four raw 100 GB data disks. 8 vCPU / 16 GB. Add the node to a cluster after first boot.",
+    name: "vm-azl-01",
+    imageId: "azl",
+    cpuCount: 8,
+    memoryGB: 16,
+    nestedVirtualization: true,
+    extraNics: 3,
+    additionalDisks: [
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" },
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" },
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" },
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" }
+    ]
+  },
+  "hyperv-2025-core-appcompat": {
+    group: "Virtualization",
+    icon: "hyperv.svg",
+    short: "Nested Hyper-V Host",
+    label: "Windows Server 2025 · Core (App Compat) · Nested Hyper-V Host",
+    sub: "Nested virtualization with four adapters and four raw 100 GB data disks, plus the App Compatibility FOD so the Core host has Disk Management and Failover Cluster Manager for the pool. 8 vCPU / 16 GB. Install the Hyper-V role in the guest after first boot.",
+    name: "vm-hv-01",
+    imageId: "ws2025-datacenter-core",
+    cpuCount: 8,
+    memoryGB: 16,
+    nestedVirtualization: true,
+    appCompatFod: true,
+    extraNics: 3,
+    additionalDisks: [
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" },
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" },
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" },
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" }
+    ]
+  },
+  "hyperv-2025-core": {
+    group: "Virtualization",
+    icon: "hyperv.svg",
+    short: "Nested Hyper-V Host",
+    label: "Windows Server 2025 · Core · Nested Hyper-V Host",
+    sub: "Nested virtualization with four adapters and four raw 100 GB data disks. 8 vCPU / 16 GB. Install the Hyper-V role in the guest after first boot.",
+    name: "vm-hv-01",
+    imageId: "ws2025-datacenter-core",
+    cpuCount: 8,
+    memoryGB: 16,
+    nestedVirtualization: true,
+    extraNics: 3,
+    additionalDisks: [
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" },
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" },
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" },
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" }
+    ]
+  },
+  "hyperv-2025-desktop": {
+    group: "Virtualization",
+    icon: "hyperv.svg",
+    short: "Nested Hyper-V Host",
+    label: "Windows Server 2025 · Desktop · Nested Hyper-V Host",
+    sub: "Nested virtualization with four adapters and four raw 100 GB data disks. 8 vCPU / 16 GB. Install the Hyper-V role in the guest after first boot.",
+    name: "vm-hv-01",
+    imageId: "ws2025-datacenter-desktop",
+    cpuCount: 8,
+    memoryGB: 16,
+    nestedVirtualization: true,
+    extraNics: 3,
+    additionalDisks: [
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" },
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" },
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" },
+      { sizeGB: 100, type: "Dynamic", fileSystem: "None" }
+    ]
+  },
+  /* Remote Desktop Services, one template per role service plus the two bundles.
+
+     Which of them can be Server Core is not a guess - Microsoft's Server Core component
+     list names exactly three RDS role services: RD Connection Broker (with a footnote that
+     it left Core in Windows Server 2019, version 1803), RD Licensing and RD Virtualization
+     Host. RD Session Host, RD Web Access and RD Gateway are absent from that list, so they
+     are Desktop Experience only. The Connection Broker's Core window closed at 2019 and the
+     release switch reaches back to 2016, so a Core broker template would silently empty
+     itself on any newer pick. Every template here is therefore Desktop Experience.
+
+     Connection Broker and Web Access install in the guest at first boot rather than offline
+     - see guestOnlyWindowsFeatures in Build-Vms.ps1 for the event logs behind that. */
+  "rds-2025-desktop": {
+    group: "Remote Desktop Services",
+    icon: "rds.svg",
+    short: "Quick Session",
+    label: "Windows Server 2025 · Desktop · RDS Quick Session",
+    sub: "Session Host, Connection Broker, Web Access and Licensing on one server, plus the RDS tools. Binaries only — the deployment itself is post-config.",
+    name: "rds-01",
+    imageId: "ws2025-datacenter-desktop",
+    windowsFeatures: ["Remote-Desktop-Services", "RDS-RD-Server", "RDS-Connection-Broker", "RDS-Web-Access", "RDS-Licensing", "RSAT-RDS-Tools"]
+  },
+  "rds-broker-2025-desktop": {
+    group: "Remote Desktop Services",
+    icon: "rds.svg",
+    short: "Broker · Web · Licensing",
+    label: "Windows Server 2025 · Desktop · RDS Broker, Web Access and Licensing",
+    sub: "The once-per-farm half of a split deployment on one box: Connection Broker, Web Access and Licensing with the RDS and licensing consoles. Session hosts go on their own VMs.",
+    name: "rds-cb-01",
+    imageId: "ws2025-datacenter-desktop",
+    windowsFeatures: ["Remote-Desktop-Services", "RDS-Connection-Broker", "RDS-Web-Access", "RDS-Licensing", "RSAT-RDS-Tools", "RDS-Licensing-UI", "RSAT-RDS-Licensing-Diagnosis-UI"]
+  },
+  "rds-host-2025-desktop": {
+    group: "Remote Desktop Services",
+    icon: "rds.svg",
+    short: "Session Host",
+    label: "Windows Server 2025 · Desktop · RD Session Host",
+    sub: "RD Session Host alone, to be added to an existing Connection Broker's collection. Apply once per host — the name rolls to the next free number. 8 vCPU / 16 GB, since this is the box the sessions actually run on. Not available on Server Core.",
+    name: "rds-01",
+    imageId: "ws2025-datacenter-desktop",
+    cpuCount: 8,
+    memoryGB: 16,
+    windowsFeatures: ["Remote-Desktop-Services", "RDS-RD-Server"]
+  },
+  "rds-cb-2025-desktop": {
+    group: "Remote Desktop Services",
+    icon: "rds.svg",
+    short: "Connection Broker",
+    label: "Windows Server 2025 · Desktop · RD Connection Broker",
+    sub: "RD Connection Broker alone, with the RDS tools the deployment cmdlets live in. Installed in the guest at first boot so the broker binds to the VM's final name, never Setup's WIN-* placeholder.",
+    name: "rds-cb-01",
+    imageId: "ws2025-datacenter-desktop",
+    windowsFeatures: ["Remote-Desktop-Services", "RDS-Connection-Broker", "RSAT-RDS-Tools"]
+  },
+  "rds-web-2025-desktop": {
+    group: "Remote Desktop Services",
+    icon: "rds.svg",
+    short: "Web Access",
+    label: "Windows Server 2025 · Desktop · RD Web Access",
+    sub: "RD Web Access alone — the browser portal and web client. Pulls its own IIS, and installs in the guest at first boot because that installer configures IIS and needs a running OS. Not available on Server Core.",
+    name: "rds-web-01",
+    imageId: "ws2025-datacenter-desktop",
+    windowsFeatures: ["Remote-Desktop-Services", "RDS-Web-Access"]
+  },
+  // RD Gateway authorizes connections through NPS policies (RD CAPs), so NPAS is named here
+  // rather than left to the dependency resolver - it is the thing an admin configures next.
+  "rds-gw-2025-desktop": {
+    group: "Remote Desktop Services",
+    icon: "rds.svg",
+    short: "Gateway",
+    label: "Windows Server 2025 · Desktop · RD Gateway",
+    sub: "RD Gateway with Network Policy Server and the Gateway console — HTTPS on 443 plus UDP 3391 from outside. Needs a certificate matching the FQDN clients dial. Not available on Server Core.",
+    name: "rds-gw-01",
+    imageId: "ws2025-datacenter-desktop",
+    windowsFeatures: ["Remote-Desktop-Services", "RDS-Gateway", "NPAS", "RSAT-RDS-Tools", "RDS-Gateway-UI"]
+  },
+  "rds-lic-2025-desktop": {
+    group: "Remote Desktop Services",
+    icon: "rds.svg",
+    short: "Licensing",
+    label: "Windows Server 2025 · Desktop · RD Licensing",
+    sub: "RD Licensing with Licensing Manager and the Licensing Diagnoser. Activate the server and install the CAL pack after first boot. 2 vCPU / 4 GB — the role is light.",
+    name: "rds-lic-01",
+    imageId: "ws2025-datacenter-desktop",
+    cpuCount: 2,
+    memoryGB: 4,
+    windowsFeatures: ["Remote-Desktop-Services", "RDS-Licensing", "RSAT-RDS-Tools", "RDS-Licensing-UI", "RSAT-RDS-Licensing-Diagnosis-UI"]
+  },
+  "paw-w11-pro": {
+    group: "Privileged workstations",
+    icon: "paw.svg",
+    short: "PAW",
+    label: "Windows 11 Pro · PAW",
+    sub: "Every RSAT capability, and the built-in consumer apps stripped offline. Each RSAT tool is a Features on Demand download — keep the Windows 11 Languages and Optional Features ISO handy or the guest pulls them from Windows Update at first boot.",
+    name: "paw-01",
+    removeBuiltInApps: true,
+    imageId: "w11-pro",
+    rsatCapabilities: RSAT_CATALOG.map(x => x.id),
+    clientFeatures: CLIENT_FEATURE_CATALOG.map(x => x.id)
+  },
+  "paw-w11-enterprise": {
+    group: "Privileged workstations",
+    icon: "paw.svg",
+    short: "PAW",
+    label: "Windows 11 Enterprise · PAW",
+    sub: "Every RSAT capability, and the built-in consumer apps stripped offline. Each RSAT tool is a Features on Demand download — keep the Windows 11 Languages and Optional Features ISO handy or the guest pulls them from Windows Update at first boot.",
+    name: "paw-01",
+    removeBuiltInApps: true,
+    imageId: "w11-enterprise",
+    rsatCapabilities: RSAT_CATALOG.map(x => x.id),
+    clientFeatures: CLIENT_FEATURE_CATALOG.map(x => x.id)
+  }
+};
+
+/* Template rows, grouped by the role family each one builds. Both the group order and the
+   order inside a group follow VM_TEMPLATES' own key order, so a template shows up in the
+   dropdown exactly where it was written. The group icon is the first member's icon. */
+function vmTemplateGroups() {
+  const groups = [];
+  Object.keys(VM_TEMPLATES).forEach(tid => {
+    const t = VM_TEMPLATES[tid];
+    const label = t.group || "Templates";
+    let g = groups.find(x => x.label === label);
+    if (!g) { g = { label, icon: t.icon || "vm.svg", items: [] }; groups.push(g); }
+    g.items.push({ id: tid, t });
+  });
+  return groups;
+}
+/* A template pins a role shape, not a Windows build. Release and edition are picked once at
+   the top of the dropdown and every row resolves against them, so twelve role templates cover
+   four releases and both editions without turning into ninety-six rows. Client templates
+   (Windows 11) have no release/edition axis and keep their own image whatever is selected. */
+const TEMPLATE_RELEASES = [2016, 2019, 2022, 2025];
+const TEMPLATE_EDITIONS = ["Datacenter", "Standard"];
+
+/** The catalog image a template resolves to under the picked release and edition. Falls back
+ *  to the template's own image when that combination is not in the catalog. */
+function templateImageId(t, release, edition) {
+  if (!t) return "";
+  const own = findImage(t.imageId);
+  /* The release / edition switch only makes sense inside the Windows Server family. A
+     client or an appliance image has no 2016..2025 Datacenter/Standard variants, so the
+     template keeps the image it names. */
+  if (!/^ws\d{4}-/.test(t.imageId)) return t.imageId;
+  if (own.kind === "client") return t.imageId;
+  const wanted = `ws${release}-${String(edition).toLowerCase()}-${own.kind}`;
+  return IMAGE_CATALOG.some(i => i.id === wanted) ? wanted : t.imageId;
+}
+/** Same, resolved against the current picker selection. */
+function templateImage(t) {
+  return findImage(templateImageId(t, state.templateRelease, state.templateEdition));
+}
+
+/* One-line name for the applied template, shown on the closed picker: the role variant,
+   then the image it builds on. Composed rather than taken from `label` so the edition it
+   names always follows the template's own imageId. */
+function vmTemplateTitle(t, img) {
+  if (!t) return "";
+  const name = t.short || t.label;
+  if (!img) return name;
+  const experience = imageExperienceLabel(img);
+  return `${name} — ${imageSpecLabel(img)}${experience ? " · " + experience : ""}`;
+}
+/* Second line of a template row, as HTML: which Windows it is, then how big. The row
+   headline names only the role variant, so everything that identifies the image lives here —
+   release, edition (Datacenter or Standard) and installation option, all spelled out. The
+   installation option is tinted rather than given an icon of its own: Core and Desktop are
+   words, not pictures, and the row already leads with the role's icon. Sizing a template
+   does not pin follows the image profile from General Settings, so it is read from there
+   rather than shown as blank. */
+function vmTemplateSpecHtml(t) {
+  if (!t) return "";
+  const img = templateImage(t);
+  const p = profileFor(img.id);
+  const rsat = (t.rsatCapabilities || []).length + (t.clientFeatures || []).length;
+  const bits = [];
+  if (img) {
+    const experience = imageExperienceLabel(img);
+    // Release and edition are not repeated here: the switches at the top of the dropdown set
+    // them for every row at once, so printing "Server 2025 Datacenter" twenty-two times says
+    // nothing a row does not share with its neighbours. The installation option does vary
+    // row to row, so it stays. Client images have no Core/Desktop split and no release axis
+    // either, so their SKU is the thing that varies and it takes the tint instead.
+    bits.push(experience
+      ? `<b class="exp ${esc(img.kind)}">${esc(experience)}</b>`
+      : `<b class="exp client">${esc(imageSpecLabel(img))}</b>`);
+  }
+  bits.push(esc(`${t.cpuCount != null ? t.cpuCount : p.cpuCount} vCPU`), esc(`${t.memoryGB != null ? t.memoryGB : p.memoryGB} GB`));
+  // No feature count: "3 features" cannot tell you which three, and the row's name already
+  // says what the template is for. RSAT tools stay - on a PAW that count is the payload.
+  if (rsat) bits.push(esc(rsat === 1 ? "1 RSAT tool" : `${rsat} RSAT tools`));
+  if (t.extraNics) bits.push(esc(`${t.extraNics + 1} adapters`));
+  if (t.additionalDisks && t.additionalDisks.length) {
+    const disks = t.additionalDisks;
+    const same = disks.every(d => d.sizeGB === disks[0].sizeGB);
+    bits.push(esc(same ? `${disks.length} × ${disks[0].sizeGB} GB data` : `${disks.length} data disks`));
+  }
+  // The optional extras stay in the same dot-joined run as the sizes, but take a tint the way
+  // Core and Desktop do, so a glance separates "this template also switches that on" from a
+  // measurement without another shape on the line.
+  const flag = (cls, label, title) => `<b class="exp ${cls}" title="${esc(title)}">${esc(label)}</b>`;
+  if (t.nestedVirtualization) bits.push(flag("nested", "nested virtualization", "Enables nested virtualization on the VM so it can run Hyper-V itself"));
+  if (t.appCompatFod) bits.push(flag("fod", "App Compat FOD", "Adds the Server Core App Compatibility FOD - a separate download from the Languages and Optional Features ISO"));
+  if (t.removeBuiltInApps) bits.push(flag("strip", "apps stripped", "Offline-removes the built-in consumer apps before first boot"));
+  return bits.join(" · ");
+}
+
+/* Hyper-V's own automatic start actions, same wording as the VM settings dialog. Every new
+   VM starts on "StartIfRunning", so the toggle is on unless it is turned off. */
+const AUTO_START_ACTIONS = [
+  { id: "StartIfRunning", label: "Start if it was running when the host stopped" },
+  { id: "Start", label: "Always start this VM" }
+];
+/* Images that are themselves a hypervisor cannot boot without the extensions exposed,
+   so the switch is on and locked rather than merely defaulted on. */
+function nestedVirtRequired(s) {
+  return !!(s && findImage(s.imageId).requiresNestedVirt);
+}
+const NESTED_VIRT_INFO = "Exposes the host's hardware virtualization extensions to this guest (Set-VMProcessor -ExposeVirtualizationExtensions), so the guest can run Hyper-V and start VMs of its own. MAC address spoofing is switched on with it, otherwise the nested VMs' traffic never leaves the guest. In exchange the VM gives up dynamic memory, live migration and checkpoints.";
+const NESTED_VIRT_WARN = "Only for a guest that runs Hyper-V itself, or Azure Local.";
+
+const AZURE_REGIONS = [
+  { id: "westeurope", label: "West Europe" },
+  { id: "northeurope", label: "North Europe" },
+  { id: "germanywestcentral", label: "Germany West Central" },
+  { id: "germanynorth", label: "Germany North" },
+  { id: "switzerlandnorth", label: "Switzerland North" },
+  { id: "switzerlandwest", label: "Switzerland West" },
+  { id: "francecentral", label: "France Central" },
+  { id: "francesouth", label: "France South" },
+  { id: "uksouth", label: "UK South" },
+  { id: "ukwest", label: "UK West" },
+  { id: "swedencentral", label: "Sweden Central" },
+  { id: "norwayeast", label: "Norway East" },
+  { id: "norwaywest", label: "Norway West" },
+  { id: "polandcentral", label: "Poland Central" },
+  { id: "italynorth", label: "Italy North" },
+  { id: "spaincentral", label: "Spain Central" },
+  { id: "eastus", label: "East US" },
+  { id: "eastus2", label: "East US 2" },
+  { id: "westus", label: "West US" },
+  { id: "westus2", label: "West US 2" },
+  { id: "westus3", label: "West US 3" },
+  { id: "centralus", label: "Central US" },
+  { id: "northcentralus", label: "North Central US" },
+  { id: "southcentralus", label: "South Central US" },
+  { id: "canadacentral", label: "Canada Central" },
+  { id: "canadaeast", label: "Canada East" },
+  { id: "brazilsouth", label: "Brazil South" },
+  { id: "australiaeast", label: "Australia East" },
+  { id: "australiasoutheast", label: "Australia Southeast" },
+  { id: "southeastasia", label: "Southeast Asia" },
+  { id: "eastasia", label: "East Asia" },
+  { id: "japaneast", label: "Japan East" },
+  { id: "japanwest", label: "Japan West" },
+  { id: "koreacentral", label: "Korea Central" },
+  { id: "indiawest", label: "West India" },
+  { id: "indiacentral", label: "Central India" },
+  { id: "uaenorth", label: "UAE North" },
+  { id: "southafricanorth", label: "South Africa North" }
+];
+
+function defaultAzureArc() {
+  // Legacy shape kept for importing older config.json / studio tokens.
+  return {
+    available: false,
+    subscriptionId: "",
+    tenantId: "",
+    resourceGroup: "",
+    location: "westeurope",
+    authMode: "servicePrincipal",
+    servicePrincipalAppId: "",
+    servicePrincipalSecret: ""
+  };
+}
+
+function createDomainJoinAccount(partial) {
+  const a = Object.assign({
+    _id: uid("dja"),
+    id: "",
+    domain: "",
+    joinUser: "",
+    joinPassword: "",
+    sudoGroups: [],
+    loginGroups: []
+  }, partial || {});
+  delete a.name;
+  return a;
+}
+
+function createAzureArcPrincipal(partial) {
+  const a = Object.assign({
+    _id: uid("arc"),
+    id: "",
+    subscriptionId: "",
+    tenantId: "",
+    resourceGroup: "",
+    location: "westeurope",
+    authMode: "servicePrincipal",
+    servicePrincipalAppId: "",
+    servicePrincipalSecret: ""
+  }, partial || {});
+  delete a.name;
+  return a;
+}
+
+function domainJoinAccountTitle(a) {
+  const domain = String((a && a.domain) || "").trim();
+  const user = String((a && a.joinUser) || "").trim();
+  if (domain && user) return domain + "  —  " + user;
+  return domain || user || "Join account";
+}
+
+function domainJoinAccountTitleHtml(a) {
+  const domain = String((a && a.domain) || "").trim();
+  const user = String((a && a.joinUser) || "").trim();
+  if (domain && user) {
+    return `<span class="dj-domain">${esc(domain)}</span><span class="dj-sep">—</span><span class="dj-user">${esc(user)}</span>`;
+  }
+  return esc(domain || user || "Join account");
+}
+
+function azureArcPrincipalTitle(a) {
+  return String((a && a.resourceGroup) || "").trim() || "Arc principal";
+}
+
+function ensureCatalogStableId(item, prefix) {
+  if (!item.id || !String(item.id).trim()) {
+    item.id = (item._id || uid(prefix)).replace(/^[^a-z0-9]+/i, prefix + "-");
+  }
+  return item;
+}
+
+function findDomainJoinAccount(id) {
+  const key = String(id || "").trim();
+  if (!key) return null;
+  return (state.domainJoinAccounts || []).find(a => a.id === key || a._id === key) || null;
+}
+
+function findAzureArcPrincipal(id) {
+  const key = String(id || "").trim();
+  if (!key) return null;
+  return (state.azureArcPrincipals || []).find(a => a.id === key || a._id === key) || null;
+}
+
+/* When the join runs. "specialize" = from the unattend, before anyone logs in (today's
+   path). "deferred" = the unattend stays join-free and a SYSTEM task registered at the end
+   of first-boot provisioning joins afterwards - so domain policy (CIS and friends) lands on
+   a machine that is already fully provisioned. mode stays null until the user touches the
+   toggle; until then a Windows client VM with an OU path defaults to deferred, everything
+   else to specialize. The export always writes the effective value - Build-Vms.ps1 never
+   applies this rule itself. */
+function effectiveDomainJoinMode(s) {
+  const dj = (s && s.domainJoin) || {};
+  if (dj.mode === "deferred" || dj.mode === "specialize") return dj.mode;
+  const img = findImage(s && s.imageId);
+  // A Linux join runs from cloud-init on first boot; there is no specialize pass for
+  // it to sit inside and no SYSTEM task to defer it to, so the timing question does
+  // not apply and must not be exported as though it did.
+  if (isLinuxImage(img)) return "";
+  return (img.kind === "client" && String(dj.ouPath || "").trim()) ? "deferred" : "specialize";
+}
+
+/* The Join timing cell in the attach table. A row is not a card, so the switch drops its
+   chrome and states the timing it is set to rather than naming the action. The AUTO badge
+   marks a VM still following the client + OU rule; touching the switch pins the mode and
+   the badge goes. */
+function domainJoinTimingCell(s) {
+  const deferred = effectiveDomainJoinMode(s) === "deferred";
+  const dj = (s && s.domainJoin) || {};
+  const pinned = dj.mode === "deferred" || dj.mode === "specialize";
+  const label = (deferred ? "After first boot" : "During specialize") +
+    (pinned ? "" : ` <span class="pill role">auto</span>`);
+  return toggle(`data-s="${esc(s._id)}" data-k="djDeferred"`, label, deferred, false, "", "mini");
+}
+
+/* "Use for every VM" mode for Domain Join / Azure Arc — mirrors the cluster blade's
+   addAllVms: a non-destructive global override. Per-VM assignments stay untouched in
+   state; the resolvers below short-circuit while the mode is on, and export flattens
+   the result into per-VM rows so Build-Vms.ps1 needs no global concept. The mode only
+   resolves while the catalog has exactly one entry — the blade blocks adding more. */
+function domainJoinAllVmsAccount() {
+  if (!state.defaults.domainJoinAllVms) return null;
+  return (state.domainJoinAccounts || []).length === 1 ? state.domainJoinAccounts[0] : null;
+}
+function azureArcAllVmsPrincipal() {
+  if (!state.defaults.azureArcAllVms) return null;
+  return (state.azureArcPrincipals || []).length === 1 ? state.azureArcPrincipals[0] : null;
+}
+function effectiveDomainJoinAccount(s) {
+  if (imageRefusesDomainJoin(findImage(s && s.imageId))) return null;
+  const globalAcc = domainJoinAllVmsAccount();
+  if (globalAcc) return globalAcc;
+  const dj = (s && s.domainJoin) || {};
+  return dj.enabled ? findDomainJoinAccount(dj.accountId) : null;
+}
+/* Linux onboards too: Build-Vms.ps1 writes the azcmagent install and connect into the
+   cloud-init seed, so a service principal reaches a Linux VM the same as a Windows one.
+   Host context does not - that is Connect-AzConnectedMachine over PowerShell Direct,
+   which the build warns about and skips - so a Linux VM under such a principal carries
+   no Arc anywhere in the studio either. */
+function effectiveAzureArcPrincipal(s) {
+  // The distribution gets a veto before the principal is even looked up: an image
+  // Arc has no agent for onboards nothing, whichever principal it was attached to.
+  if (imageRefusesAzureArc(findImage(s && s.imageId))) return null;
+  const globalPrincipal = azureArcAllVmsPrincipal();
+  const arc = (s && s.azureArc) || {};
+  const principal = globalPrincipal || (arc.enabled ? findAzureArcPrincipal(arc.principalId) : null);
+  if (!principal) return null;
+  if (principal.authMode === "hostContext" && isLinuxServer(s)) return null;
+  return principal;
+}
+
+function serversForDomainJoinAccount(accountId) {
+  const key = String(accountId || "").trim();
+  const globalAcc = domainJoinAllVmsAccount();
+  if (globalAcc && (globalAcc.id === key || globalAcc._id === key)) return state.servers.filter(s => s.name);
+  return state.servers.filter(s => s.domainJoin && s.domainJoin.enabled && (s.domainJoin.accountId === key));
+}
+
+function serversForArcPrincipal(principalId) {
+  const key = String(principalId || "").trim();
+  const globalPrincipal = azureArcAllVmsPrincipal();
+  if (globalPrincipal && (globalPrincipal.id === key || globalPrincipal._id === key)) return state.servers.filter(s => s.name);
+  return state.servers.filter(s => s.azureArc && s.azureArc.enabled && (s.azureArc.principalId === key));
+}
+
+/* VMs added to the host failover cluster (Add-ClusterVirtualMachineRole). Unrelated to the
+   guest-side Failover-Clustering feature — that builds a cluster *inside* the VMs. */
+function clusterIncludesServer(s) {
+  const c = state.defaults.cluster || {};
+  if (!c.enabled) return false;
+  if (c.addAllVms) return true;
+  return !!(s && s.cluster && s.cluster.enabled);
+}
+
+function serversForCluster() {
+  return state.servers.filter(clusterIncludesServer);
+}
+
+/* Per-VM marks only — used to spot a stale selection left behind after the cluster is turned off. */
+function serversMarkedForCluster() {
+  return state.servers.filter(s => s.cluster && s.cluster.enabled);
+}
+
+function clusterSettings() {
+  return state.defaults.cluster || (state.defaults.cluster = { enabled: false, name: "", addAfterCreate: true });
+}
+
+/* Automatic storage placement (Azure Local style): instead of one global VM/VHD path
+   pair, a catalog of volumes (typically Cluster Shared Volumes). Build-Vms.ps1 then
+   places each VM on the volume with the most usable space at its turn. Per-VM custom
+   paths still win over placement. */
+function storagePlacement() {
+  if (!state.defaults.storagePlacement) state.defaults.storagePlacement = { mode: "manual", volumes: [] };
+  const sp = state.defaults.storagePlacement;
+  if (sp.mode !== "auto") sp.mode = "manual";
+  if (!Array.isArray(sp.volumes)) sp.volumes = [];
+  return sp;
+}
+function storagePlacementVolumesInUse() {
+  return storagePlacement().volumes
+    .map(v => ({ vmPath: String(v.vmPath || "").trim(), vhdPath: String(v.vhdPath || "").trim() }))
+    .filter(v => v.vmPath || v.vhdPath);
+}
+function storagePlacementActive() {
+  return storagePlacement().mode === "auto";
+}
+function normalizeStoragePlacement() {
+  const sp = state.defaults.storagePlacement;
+  if (!sp || typeof sp !== "object") { delete state.defaults.storagePlacement; return; }
+  sp.mode = sp.mode === "auto" ? "auto" : "manual";
+  sp.volumes = Array.isArray(sp.volumes)
+    ? sp.volumes.filter(v => v && typeof v === "object").map(v => ({ vmPath: String(v.vmPath || ""), vhdPath: String(v.vhdPath || "") }))
+    : [];
+}
+
+/* Cluster names are computer objects in AD: NetBIOS rules, 15 chars, no dots. */
+/* Windows path syntax, checked the way Build-Vms.ps1 will have to read it. Blank is
+   never an error here - every caller treats blank as "inherit" and says so itself. */
+function hostPathProblem(value) {
+  const raw = String(value || "");
+  if (!raw.trim()) return "";
+  if (raw !== raw.trim()) return "Path has leading or trailing spaces.";
+  const v = raw;
+
+  const bad = v.match(/[<>"|?*]/);
+  if (bad) return `Path contains ${bad[0]} — Windows does not allow < > " | ? * in a path.`;
+
+  const unc = /^\\\\[^\\/]/.test(v);
+  if (unc) {
+    const parts = v.slice(2).split(/[\\/]+/).filter(Boolean);
+    if (parts.length < 2) return "UNC path needs a server and a share, like \\\\server\\share.";
+  } else if (/^[A-Za-z]:/.test(v)) {
+    if (!/^[A-Za-z]:[\\/]/.test(v)) return "Drive path needs a separator after the colon, like D:\\vms.";
+  } else if (v.startsWith("\\") || v.startsWith("/")) {
+    return "Path starts at the root of the current drive — use a drive letter or a UNC path.";
+  }
+
+  const afterPrefix = unc ? v.slice(2) : v.replace(/^[A-Za-z]:/, "");
+  if (/[\\/]{2,}/.test(afterPrefix)) return "Path has a doubled separator.";
+  if (/:/.test(afterPrefix)) return "Path has a colon outside the drive letter.";
+
+  const segs = afterPrefix.split(/[\\/]+/).filter(Boolean);
+  const trailing = segs.find(x => /[ .]$/.test(x));
+  if (trailing) return `Folder "${trailing}" ends in a space or a dot, which Windows will not keep.`;
+  return "";
+}
+
+function clusterNameProblem(name) {
+  const v = String(name || "").trim();
+  if (!v) return "";                                   // blank = the cluster this host already belongs to
+  if (v.includes(".")) return "Cluster name must be the NetBIOS name, not an FQDN — drop everything after the first dot.";
+  if (v.length > 15) return `Cluster name is ${v.length} characters — the NetBIOS limit is 15.`;
+  if (/[\\/:*?"<>|,;+=\[\]]/.test(v)) return "Cluster name contains characters that are not valid in a computer name.";
+  return "";
+}
+
+/* Shared storage a clustered VM might depend on — VHD Sets attached to this VM. */
+function vhdSetsForServer(s) {
+  const name = String((s && s.name) || "").toLowerCase();
+  if (!name) return [];
+  return state.vhdSets.filter(v => (v.attachTo || []).some(n => String(n).toLowerCase() === name));
+}
+
+function createNetwork(partial) {
+  return Object.assign({
+    _id: uid("net"),
+    id: "",
+    switchName: "",
+    vlanId: null,
+    subnet: "",
+    prefixLength: 24,
+    gateway: "",
+    dnsServers: [""]
+  }, partial || {});
+}
+
+function findNetwork(id) {
+  const key = String(id || "").trim();
+  if (!key) return null;
+  return (state.networks || []).find(n => n.id === key || n._id === key) || null;
+}
+
+function serversForNetwork(networkId) {
+  const key = String(networkId || "").trim();
+  return state.servers.filter(s => s.network && s.network.enabled && s.network.networkId === key);
+}
+
+function findServerNetwork(s) {
+  return (s && s.network && s.network.enabled) ? findNetwork(s.network.networkId) : null;
+}
+
+function networkName(n) {
+  const v = n && n.vlanId;
+  return (v !== null && v !== undefined && String(v).trim() !== "") ? "vl" + v : "network";
+}
+
+function networkCidr(n) {
+  const subnet = String((n && n.subnet) || "").trim();
+  const p = Number(n && n.prefixLength) || 24;
+  return subnet ? subnet + "/" + p : "/" + p;
+}
+
+function networkTitleHtml(n) {
+  return `<span class="dj-domain">${esc(networkName(n))}</span><span class="dj-sep">—</span><span class="dj-user">${esc(networkCidr(n))}</span>`;
+}
+
+function applyNetworkToServer(s, net) {
+  if (!net) return;
+  s.network = { enabled: true, networkId: net.id };
+  s.switchName = net.switchName || s.switchName;
+  s.vlanId = (net.vlanId !== null && net.vlanId !== undefined && String(net.vlanId).trim() !== "") ? Number(net.vlanId) : null;
+  s.prefixLength = Number(net.prefixLength) || 24;
+  s.defaultGateway = net.gateway || "";
+  s.dnsServers = [...(net.dnsServers || [])];
+}
+
+function detachNetworkFromServer(s) {
+  s.network = { enabled: false, networkId: "" };
+}
+
+function syncNetworkToAttachedServers(n) {
+  serversForNetwork(n.id).forEach(s => applyNetworkToServer(s, n));
+  state.servers.forEach(s => (s.nics || []).forEach(nic => {
+    if (nic.network && nic.network.enabled && nic.network.networkId === n.id) applyNetworkToNic(nic, n);
+  }));
+}
+
+/* The network catalog owns every field a bound adapter shows as "Set by the network above".
+   An import writes switch / VLAN / gateway / DNS straight onto the VM rows while leaving the
+   binding in place, so a file whose VLAN had drifted from the catalog left a VM claiming one
+   VLAN while the network it points at was named after another — the Review blade then showed
+   "vl1000" on the Network row next to "100" on the VLAN row. Re-applying every binding after
+   an import keeps the two from disagreeing. */
+function reconcileServersWithNetworks() {
+  state.servers.forEach(s => {
+    const net = findServerNetwork(s);
+    if (net) applyNetworkToServer(s, net);
+    (s.nics || []).forEach(nic => {
+      const nicNet = findNicNetwork(nic);
+      if (nicNet) applyNetworkToNic(nic, nicNet);
+    });
+  });
+}
+
+/* ---------- Network adapters ----------
+   Index 0 is the adapter New-VM already created (switchName / ipAddress / gateway / DNS on the
+   server itself); s.nics holds every adapter added on top of it. Names are what the guest sees:
+   GuestProvision renames the guest's connections to these at first boot, matching adapters by
+   MAC, so Get-NetAdapter shows "vnic-02" instead of Windows' own "Ethernet 2". Addressing is
+   keyed by the same MAC in the unattend, so renaming an adapter never moves an IP. */
+function nicAutoName(index) {
+  return "vnic-" + String(index + 1).padStart(2, "0");
+}
+/* This string becomes the guest's connection name, so keep it to what an adapter name may
+   safely carry — letters, digits, space, hyphen, underscore, dot. Case is left alone. */
+function sanitizeNicName(raw) {
+  return String(raw || "").replace(/[^A-Za-z0-9 ._-]/g, "").slice(0, 40);
+}
+/* What gets stored for an adapter name: blank when it is just the positional default, so the
+   adapter keeps renumbering with its position instead of freezing at the name it was born with. */
+function nicNameInputValue(raw, index) {
+  const clean = sanitizeNicName(raw).trim();
+  return clean.toLowerCase() === nicAutoName(index) ? "" : clean;
+}
+function effectiveNicName(s, index) {
+  const raw = index === 0 ? (s && s.nicName) : (((s && s.nics) || [])[index - 1] || {}).name;
+  return String(raw || "").trim() || nicAutoName(index);
+}
+function createServerNic(s) {
+  return {
+    _id: uid("nic"),
+    // Blank means "follow my position", so removing vnic-02 renumbers vnic-03 down instead of
+    // leaving a hole. A name somebody typed is kept verbatim and never renumbers.
+    name: "",
+    switchName: (state.defaults.availableSwitches || [])[0] || "",
+    vlanId: null,
+    ipAddress: "",
+    prefixLength: 24,
+    network: { enabled: false, networkId: "" }
+  };
+}
+function findNicNetwork(nic) {
+  return (nic && nic.network && nic.network.enabled) ? findNetwork(nic.network.networkId) : null;
+}
+/* No gateway and no DNS: the default route and the resolver belong to the primary adapter.
+   A second default route is the classic way to make a multi-homed guest unreachable. */
+function applyNetworkToNic(nic, net) {
+  if (!net) return;
+  nic.network = { enabled: true, networkId: net.id };
+  nic.switchName = net.switchName || nic.switchName;
+  nic.vlanId = (net.vlanId !== null && net.vlanId !== undefined && String(net.vlanId).trim() !== "") ? Number(net.vlanId) : null;
+  nic.prefixLength = Number(net.prefixLength) || 24;
+}
+function detachNetworkFromNic(nic) {
+  nic.network = { enabled: false, networkId: "" };
+}
+function validateNicIpAddress(s, nic) {
+  const ip = String((nic && nic.ipAddress) || "").trim();
+  if (!ip) return { invalid: false, message: "" };
+  if (!isValidIPv4(ip)) return { invalid: true, message: "Not a valid IPv4 address" };
+  const net = findNicNetwork(nic);
+  const base = net
+    ? { address: net.subnet, prefixLength: Number(net.prefixLength) || 24 }
+    : { address: ip, prefixLength: Number(nic.prefixLength) || 24 };
+  const problem = hostAddressProblem(ip, base.address, base.prefixLength);
+  if (problem) return { invalid: true, message: problem };
+  return { invalid: false, message: "" };
+}
+/* Card header line: "2 adapters · vnic-02 vStorage" and so on. */
+function serverNicSummary(s) {
+  const extra = (s && s.nics) || [];
+  if (!extra.length) return "";
+  return `${extra.length + 1} adapters`;
+}
+
+/* ---------- Automatic start action ---------- */
+function serverAutoStartAction(s) {
+  const raw = String((s && s.automaticStartAction) || "Nothing");
+  return AUTO_START_ACTIONS.some(a => a.id === raw) ? raw : "Nothing";
+}
+function serverAutoStartDelay(s) {
+  const n = Number((s && s.automaticStartDelay) || 0);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+function autoStartActionLabel(s) {
+  const action = serverAutoStartAction(s);
+  if (action === "Nothing") return "Nothing";
+  const delay = serverAutoStartDelay(s);
+  const name = action === "Start" ? "Always start" : "Start if it was running";
+  return delay ? `${name} · ${delay} s delay` : name;
+}
+
+/* Shared by both import paths (config.json and the studio state token): the extra adapters
+   land under `additionalNics` in config.json and under `nics` in a state token. */
+function normalizeServerNicsAndPower(s) {
+  s.templateId = VM_TEMPLATES[s.templateId] ? s.templateId : "";
+  // A name that already equals its positional default is stored as blank, so it keeps
+  // following the position — see createServerNic.
+  s.nicName = nicNameInputValue(s.nicName, 0);
+  // `additionalNics` only ever arrives from a config.json, so when it is there it wins over
+  // whatever `nics` the server object already carried.
+  const incoming = Array.isArray(s.additionalNics) ? s.additionalNics : (Array.isArray(s.nics) ? s.nics : []);
+  delete s.additionalNics;
+  s.nics = incoming.map((raw, i) => ({
+    _id: uid("nic"),
+    name: nicNameInputValue((raw && raw.name) || "", i + 1),
+    switchName: String((raw && raw.switchName) || ""),
+    vlanId: (raw && raw.vlanId !== null && raw.vlanId !== undefined && String(raw.vlanId).trim() !== "") ? Number(raw.vlanId) : null,
+    ipAddress: String((raw && raw.ipAddress) || ""),
+    prefixLength: Number(raw && raw.prefixLength) || 24,
+    network: (raw && raw.network && raw.network.enabled && raw.network.networkId)
+      ? { enabled: true, networkId: String(raw.network.networkId) }
+      : { enabled: false, networkId: "" }
+  }));
+  s.automaticStartAction = serverAutoStartAction(s);
+  s.automaticStartDelay = s.automaticStartAction === "Nothing" ? 0 : serverAutoStartDelay(s);
+  s.nestedVirtualization = nestedVirtRequired(s) || !!s.nestedVirtualization;
+  return s;
+}
+
+/* ---------- IPv4 validation ---------- */
+function isValidIPv4(ip) {
+  const s = String(ip || "").trim();
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+  if (!m) return false;
+  for (let i = 1; i <= 4; i++) { const n = Number(m[i]); if (n < 0 || n > 255) return false; }
+  return true;
+}
+function ipToInt(ip) {
+  const p = String(ip).trim().split(".").map(Number);
+  return ((p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]) >>> 0;
+}
+function ipInRange(ip, start, end) {
+  if (!isValidIPv4(ip) || !isValidIPv4(start) || !isValidIPv4(end)) return null;
+  const v = ipToInt(ip), a = ipToInt(start), b = ipToInt(end);
+  const lo = Math.min(a, b), hi = Math.max(a, b);
+  return v >= lo && v <= hi;
+}
+function intToIp(n) {
+  return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
+}
+/* Everything the address fields need to know about one subnet. `address` may be any address
+   inside it — it is floored to the network address first, so a Network ID typed as 10.10.0.7/24
+   is still measured against 10.10.0.0/24. /31 (RFC 3021 point-to-point) and /32 have no
+   network/broadcast pair to lose, so both ends stay usable there. */
+function subnetInfo(address, prefixLength) {
+  const addr = String(address || "").trim();
+  if (!isValidIPv4(addr)) return null;
+  const prefix = Number(prefixLength) || 24;
+  if (prefix < 1 || prefix > 32) return null;
+  const size = Math.pow(2, 32 - prefix);
+  const network = ipToInt(addr) - (ipToInt(addr) % size);
+  const broadcast = network + size - 1;
+  const hasReserved = prefix <= 30;
+  return {
+    prefix,
+    cidr: intToIp(network) + "/" + prefix,
+    network: intToIp(network),
+    broadcast: intToIp(broadcast),
+    first: intToIp(hasReserved ? network + 1 : network),
+    last: intToIp(hasReserved ? broadcast - 1 : broadcast),
+    hasReserved
+  };
+}
+/** Usable host range derived from Network ID + netmask (network/broadcast excluded, except /31 & /32). */
+function networkUsableRange(n) {
+  const info = subnetInfo(n && n.subnet, (n && n.prefixLength) || 24);
+  return info ? { start: info.first, end: info.last } : null;
+}
+/* The two addresses a subnet keeps for itself. Neither can answer for a host, so neither can be
+   a gateway, a VM address or a DNS server — Windows takes them without complaining and the guest
+   is then unreachable. "" means the address is fine. */
+function reservedAddressProblem(ip, address, prefixLength) {
+  const raw = String(ip || "").trim();
+  const info = subnetInfo(address, prefixLength);
+  if (!info || !isValidIPv4(raw) || !info.hasReserved) return "";
+  if (raw === info.network) return `${raw} is the network address of ${info.cidr} — usable range ${info.first}–${info.last}`;
+  if (raw === info.broadcast) return `${raw} is the broadcast address of ${info.cidr} — usable range ${info.first}–${info.last}`;
+  return "";
+}
+/* Reserved check plus "does it even live here" — for fields that have to hold an address on the
+   subnet itself (gateway, adapter IP). "" means the address is fine. */
+function hostAddressProblem(ip, address, prefixLength) {
+  const raw = String(ip || "").trim();
+  const info = subnetInfo(address, prefixLength);
+  if (!info || !isValidIPv4(raw)) return "";
+  const reserved = reservedAddressProblem(raw, address, prefixLength);
+  if (reserved) return reserved;
+  if (ipInRange(raw, info.first, info.last) === false) {
+    return `Outside ${info.cidr} — usable range ${info.first}–${info.last}`;
+  }
+  return "";
+}
+/* A network is only usable once it can route and resolve, so both boxes are mandatory. Neither
+   has to sit on this subnet though — a routing switch can hand out a gateway from somewhere
+   else, and a resolver is often a forwarder elsewhere — so the only addresses ruled out are the
+   two the subnet keeps for itself. */
+function networkGatewayProblem(n) {
+  const gw = String((n && n.gateway) || "").trim();
+  if (!gw) return "Required — every VM on this network takes it as its default route";
+  return reservedAddressProblem(gw, n && n.subnet, n && n.prefixLength);
+}
+/* A resolver may well sit off this subnet — a forwarder, another VLAN's DC — so the only
+   addresses ruled out here are the two the subnet keeps for itself. */
+function networkDnsProblem(n, value, index) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    const anySet = ((n && n.dnsServers) || []).some(x => String(x || "").trim() !== "");
+    return (!anySet && index === 0) ? "Required — a network needs at least one DNS server" : "";
+  }
+  return reservedAddressProblem(raw, n && n.subnet, n && n.prefixLength);
+}
+/* One line under the whole DNS list — the rows themselves are too narrow to carry a message. */
+function networkDnsListProblem(n) {
+  const rows = ((n && n.dnsServers) || []).length ? n.dnsServers : [""];
+  for (let i = 0; i < rows.length; i++) {
+    const value = String(rows[i] || "").trim();
+    if (value && !isValidIPv4(value)) return "This is not a valid IP address";
+    const problem = networkDnsProblem(n, rows[i], i);
+    if (problem) return problem;
+  }
+  return "";
+}
+/* A Network ID field holds the network address itself, never a host inside it. */
+function subnetAddressProblem(address, prefixLength) {
+  const info = subnetInfo(address, prefixLength);
+  if (!info) return "";
+  const raw = String(address || "").trim();
+  return raw === info.network ? "" : `Not the network address for /${info.prefix} — did you mean ${info.network}?`;
+}
+function patchNetworkUsableRangeHint(n, cardEl) {
+  const hint = cardEl && cardEl.querySelector("[data-usable-hint]");
+  if (!hint) return;
+  const range = networkUsableRange(n);
+  const text = range ? `Usable IP range: ${range.start} – ${range.end}` : "";
+  hint.textContent = text;
+  hint.style.display = text ? "" : "none";
+}
+/* Editing the Network ID moves the subnet under the gateway and the DNS servers that were
+   already typed, so both are re-judged in place rather than waiting for the next full render. */
+function patchNetworkGatewayValidation(n, cardEl) {
+  const gwInput = cardEl && cardEl.querySelector('input[data-nk="gateway"]');
+  if (!gwInput) return;
+  liveValidateIp(gwInput, () => networkGatewayProblem(n), true);
+}
+function patchNetworkDnsValidation(n, cardEl) {
+  if (!cardEl) return;
+  cardEl.querySelectorAll("input[data-dns-i]").forEach(input => {
+    const idx = Number(input.getAttribute("data-dns-i"));
+    const invalid = ipValidationInfo(input.value, networkDnsProblem(n, input.value, idx)).invalid;
+    input.classList.toggle("is-invalid", invalid);
+    input.setAttribute("aria-invalid", invalid ? "true" : "false");
+  });
+  const hint = cardEl.querySelector("[data-dns-hint]");
+  if (hint) {
+    const msg = networkDnsListProblem(n);
+    hint.textContent = msg;
+    hint.style.display = msg ? "" : "none";
+  }
+}
+/* Bound to a studio network, the network's own subnet decides. Unbound, the adapter's IP and
+   prefix are all there is — enough to catch someone typing the network or broadcast address. */
+function serverSubnetBase(s) {
+  const net = findServerNetwork(s);
+  return net
+    ? { address: net.subnet, prefixLength: Number(net.prefixLength) || 24 }
+    : { address: s && s.ipAddress, prefixLength: Number(s && s.prefixLength) || 24 };
+}
+function validateServerIpAddress(s) {
+  const raw = String(s.ipAddress || "").trim();
+  if (!raw) return { invalid: false, message: "" };
+  if (!isValidIPv4(raw)) return { invalid: true, message: "This is not a valid IP address" };
+  const base = serverSubnetBase(s);
+  const problem = hostAddressProblem(raw, base.address, base.prefixLength);
+  if (problem) return { invalid: true, message: problem };
+  return { invalid: false, message: "" };
+}
+/* Off-subnet is allowed — a routing switch can hand out a gateway that lives elsewhere. What is
+   never a gateway is the subnet's own network or broadcast address. */
+function validateServerGateway(s) {
+  const raw = String((s && s.defaultGateway) || "").trim();
+  if (!raw) return { invalid: false, message: "" };
+  if (!isValidIPv4(raw)) return { invalid: true, message: "This is not a valid IP address" };
+  const base = serverSubnetBase(s);
+  const problem = reservedAddressProblem(raw, base.address, base.prefixLength);
+  if (problem) return { invalid: true, message: problem };
+  return { invalid: false, message: "" };
+}
+/* `problem` is whatever the field's own rule found (network address in a gateway box and the
+   like) — a syntactically valid address that still cannot go there. */
+function ipValidationInfo(value, problem) {
+  const trimmed = String(value ?? "").trim();
+  if (trimmed !== "" && !isValidIPv4(trimmed)) {
+    return { trimmed, invalid: true, message: "This is not a valid IP address" };
+  }
+  // A problem is reported for an empty box too — "this one has to be filled in" is one.
+  if (problem) return { trimmed, invalid: true, message: problem };
+  return { trimmed, invalid: false, message: "" };
+}
+function ipInputClassAttrs(value, key, problem) {
+  const { invalid } = ipValidationInfo(value, problem);
+  const bad = invalid || (key ? invalidFieldKeys.has(key) : false);
+  return `class="${bad ? "is-invalid" : ""}" aria-invalid="${bad ? "true" : "false"}"`;
+}
+function ipHintHtml(value, defaultHint, problem) {
+  const { invalid, message } = ipValidationInfo(value, problem);
+  const text = invalid ? message : (defaultHint || "");
+  return `<span class="hint ${invalid ? "err" : ""}" data-ip-hint="1" data-default-hint="${esc(defaultHint || "")}" style="${text ? "" : "display:none"}">${esc(text)}</span>`;
+}
+function ipFieldMarkup(attrs, value, defaultHint, key, problem) {
+  return `<input ${attrs} value="${esc(String(value ?? ""))}" ${ipInputClassAttrs(value, key, problem)}>
+    ${ipHintHtml(value, defaultHint, problem)}`;
+}
+/* `checkWhenEmpty` is for the boxes that have to hold something — an empty one is itself the
+   problem, so the rule still runs on a blank field. */
+function liveValidateIp(inputEl, extraMessageFn, checkWhenEmpty) {
+  const raw = String(inputEl.value || "").trim();
+  let invalid = false, message = "";
+  if (raw && !isValidIPv4(raw)) { invalid = true; message = "This is not a valid IP address"; }
+  else if (extraMessageFn && (raw || checkWhenEmpty)) {
+    const m = extraMessageFn(raw);
+    if (m) { invalid = true; message = m; }
+  }
+  inputEl.classList.toggle("is-invalid", invalid);
+  inputEl.setAttribute("aria-invalid", invalid ? "true" : "false");
+  const fld = inputEl.closest(".field");
+  const hint = fld && fld.querySelector("[data-ip-hint]");
+  if (hint) {
+    const defaultHint = hint.getAttribute("data-default-hint") || "";
+    const text = invalid ? message : defaultHint;
+    hint.textContent = text;
+    hint.classList.toggle("err", invalid);
+    hint.style.display = text ? "" : "none";
+  }
+}
+
+/* Same immediate feedback as liveValidateIp, for fields whose only rule is "must not be empty"
+   (Domain Join / Azure Arc catalog fields) — keeps the red border from lagging a full render. */
+function liveValidateRequired(inputEl) {
+  const invalid = !String(inputEl.value || "").trim();
+  inputEl.classList.toggle("is-invalid", invalid);
+  inputEl.setAttribute("aria-invalid", invalid ? "true" : "false");
+}
+
+function resolvedDomainForServer(s) {
+  const globalAcc = domainJoinAllVmsAccount();
+  if (globalAcc) return String(globalAcc.domain || "").trim();
+  const dj = s.domainJoin || {};
+  if (!dj.enabled) return "";
+  if (dj.accountId) {
+    const acc = findDomainJoinAccount(dj.accountId);
+    return acc ? String(acc.domain || "").trim() : "";
+  }
+  return String(dj.domain || "").trim();
+}
+
+function migrateLegacyIdentityCatalogs(parsed) {
+  // domainJoinAccounts
+  let accounts = Array.isArray(parsed && parsed.domainJoinAccounts) ? parsed.domainJoinAccounts.map(a => {
+    const x = createDomainJoinAccount(a);
+    x._id = uid("dja");
+    return ensureCatalogStableId(x, "dja");
+  }) : [];
+
+  // azureArcPrincipals + legacy defaults.azureArc
+  let principals = Array.isArray(parsed && parsed.azureArcPrincipals) ? parsed.azureArcPrincipals.map(a => {
+    const x = createAzureArcPrincipal(a);
+    x._id = uid("arc");
+    return ensureCatalogStableId(x, "arc");
+  }) : [];
+
+  const legacyArc = parsed && parsed.defaults && parsed.defaults.azureArc;
+  if (legacyArc && legacyArc.available && !principals.length) {
+    const p = createAzureArcPrincipal({
+      subscriptionId: legacyArc.subscriptionId || "",
+      tenantId: legacyArc.tenantId || "",
+      resourceGroup: legacyArc.resourceGroup || "",
+      location: legacyArc.location || "westeurope",
+      authMode: legacyArc.authMode === "hostContext" ? "hostContext" : "servicePrincipal",
+      servicePrincipalAppId: legacyArc.servicePrincipalAppId || "",
+      servicePrincipalSecret: legacyArc.servicePrincipalSecret || ""
+    });
+    ensureCatalogStableId(p, "arc");
+    principals = [p];
+  }
+
+  return { accounts, principals, legacyPrincipalId: principals[0] ? principals[0].id : "" };
+}
+
+function normalizeServerIdentityRefs(s, catalogs) {
+  s.azureArc = Object.assign({ enabled: false, principalId: "" }, s.azureArc || {});
+  s.domainJoin = Object.assign({ enabled: false, accountId: "", ouPath: "", mode: null }, s.domainJoin || {});
+  s.cluster = Object.assign({ enabled: false }, s.cluster || {});
+
+  // Migrate inline DJ credentials → catalog account
+  if (s.domainJoin.enabled && !s.domainJoin.accountId && (s.domainJoin.domain || s.domainJoin.joinUser)) {
+    const domain = String(s.domainJoin.domain || "").trim();
+    const joinUser = String(s.domainJoin.joinUser || "").trim();
+    let acc = catalogs.accounts.find(a => a.domain === domain && a.joinUser === joinUser);
+    if (!acc) {
+      acc = createDomainJoinAccount({
+        domain,
+        joinUser,
+        joinPassword: s.domainJoin.joinPassword || ""
+      });
+      ensureCatalogStableId(acc, "dja");
+      catalogs.accounts.push(acc);
+    }
+    s.domainJoin.accountId = acc.id;
+  }
+  delete s.domainJoin.domain;
+  delete s.domainJoin.joinUser;
+  delete s.domainJoin.joinPassword;
+
+  // Legacy Arc: enabled without principalId → first migrated principal
+  if (s.azureArc.enabled && !s.azureArc.principalId && catalogs.legacyPrincipalId) {
+    s.azureArc.principalId = catalogs.legacyPrincipalId;
+  }
+  return s;
+}
+
+/* Linux golds were briefly named hv-ubuntu-2604 and so on, with the whole name as the
+   id. They now follow the Windows shape - hv-enus-ubuntu2604.vhdx, id "ubuntu2604" -
+   and without this map an old design would resolve through findImage's fallback and
+   come back as a Windows Server VM, silently. A wrong image is worse than an error. */
+const LEGACY_IMAGE_IDS = {
+  "hv-ubuntu-2604": "ubuntu2604",
+  "hv-ubuntu-2404": "ubuntu2404",
+  "hv-debian-13": "debian13",
+};
+
+function normalizeImageId(id) {
+  const key = String(id || "").toLowerCase().trim();
+  if (!key) return "ws2025-datacenter-desktop";
+  return LEGACY_IMAGE_IDS[key] || key;
+}
+
+function defaultImageProfiles() {
+  const o = {};
+  IMAGE_CATALOG.forEach(img => {
+    o[img.id] = { ...img.defaults };
+  });
+  return o;
+}
+
+const state = {
+  blade: "overview",
+  themeId: DEFAULT_THEME_ID,
+  stateModalMode: "save",
+  defaults: {
+    vhdxDirectory: "vhdx",
+    vmPath: "",
+    vhdPath: "",
+    availableSwitches: [],
+    cluster: { enabled: false, name: "", addAfterCreate: true },
+    naming: { vmNameIncludeFqdn: false, folderIncludeFqdn: false, fqdnOverrideEnabled: false, fqdn: "" },
+    sxsSourcePath: "",
+    locale: LOCALE_DEFAULT,
+    keyboardLayout: LOCALE_DEFAULT,
+    passwordLength: 32,
+    imageProfiles: defaultImageProfiles()
+  },
+  domainJoinAccounts: [],
+  azureArcPrincipals: [],
+  networks: [],
+  servers: [],
+  vhdSets: [],
+  expanded: {},
+  nestedOpen: {},
+  nameEdit: {},
+  featureFilter: {},
+  regionFilter: "",
+  regionPickerOpen: false,
+  regionPickerPrincipalId: null,
+  imagePickerOpen: null,
+  templatePickerOpen: null,
+  // Which Windows the template dropdown builds against; every row follows these two.
+  templateRelease: 2025,
+  templateEdition: "Datacenter",
+  usernameTheme: "roman-emperors",
+  memberPicker: { mode: null, targetId: null, selected: [], filter: "" }
+};
+
+function defaultIntegrationServices() {
+  return {
+    shutdown: true,
+    timeSynchronization: false,
+    dataExchange: true,
+    heartbeat: true,
+    backup: true,
+    guestServices: false
+  };
+}
+
+function isNestedOpen(key, defaultOpen) {
+  if (Object.prototype.hasOwnProperty.call(state.nestedOpen, key)) return !!state.nestedOpen[key];
+  return !!defaultOpen;
+}
+
+function uid(prefix) { return (prefix || "x") + Math.random().toString(36).slice(2, 9); }
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+}
+function toast(msg, err) {
+  const t = document.getElementById("toast");
+  const glyph = err
+    ? '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 1.8l6.4 11.4H1.6L8 1.8z"/><path d="M8 6.4v3.2M8 11.4v.1"/></svg>'
+    : '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.4"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg>';
+  t.innerHTML = glyph + `<span>${esc(msg)}</span>`;
+  t.className = "toast show" + (err ? " err" : "");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove("show"), 2800);
+}
+function findImage(id) {
+  const normalized = normalizeImageId(id);
+  return IMAGE_CATALOG.find(x => x.id === normalized) || IMAGE_CATALOG.find(x => x.id === "ws2025-datacenter-desktop");
+}
+function profileFor(id) {
+  const normalized = normalizeImageId(id);
+  return state.defaults.imageProfiles[normalized] || findImage(normalized).defaults;
+}
+function applyImageProfile(server, imageId) {
+  const normalized = normalizeImageId(imageId);
+  const prevImg = findImage(server.imageId);
+  const img = findImage(normalized);
+  const p = profileFor(normalized);
+  const wasClient = prevImg.kind === "client";
+  const isClient = img.kind === "client";
+  server.imageId = normalized;
+  server.experience = img.experience;
+  server.useDifferencingDisk = !!p.useDifferencingDisk;
+  server.enableSecureBoot = !!p.enableSecureBoot;
+  server.enableVtpm = !!p.enableVtpm;
+  server.startAfterCreate = !!p.startAfterCreate;
+  /* Only images that ask for it flip this — an image whose profile is silent leaves a
+     hand-set value alone, so switching a Server image around never clears it. */
+  if (p.nestedVirtualization != null) server.nestedVirtualization = !!p.nestedVirtualization;
+  if (server.memoryGB == null || server._fromImageMem !== false) server.memoryGB = p.memoryGB;
+  if (server.cpuCount == null || server._fromImageCpu !== false) server.cpuCount = p.cpuCount;
+  // RSAT is Win11-only; Server roles/features are Server-only — drop the wrong set on image switch
+  if (wasClient !== isClient) {
+    if (isClient) {
+      server.windowsFeatures = [];
+    } else {
+      server.rsatCapabilities = [];
+      server.clientFeatures = [];
+      server.removeBuiltInApps = false;
+    }
+  }
+  // Client images need a provisioned local account — multi-session excepted, see
+  // supportsBuiltInAdminOnly.
+  if (isClient) {
+    if (!supportsBuiltInAdminOnly(server)) server.builtInAdminOnly = false;
+    if (!String(server.localUserName || "").trim()) {
+      server.localUserName = generateLocalUsername(state.usernameTheme);
+    }
+  }
+}
+
+/* `dc-01` taken → `dc-02`, and so on. Keeps a template from dropping a VM straight into a
+   duplicate-name error the moment it is applied twice. */
+function nextFreeServerName(base, exclude) {
+  const raw = String(base || "").toLowerCase();
+  const m = /^(.*?)-(\d+)$/.exec(raw);
+  const stem = m ? m[1] : raw;
+  const pad = m ? m[2].length : 2;
+  const taken = new Set(state.servers.filter(x => x !== exclude).map(x => String(x.name || "").toLowerCase()));
+  if (!taken.has(raw)) return raw;
+  for (let n = (m ? Number(m[2]) : 1) + 1; n < 100; n++) {
+    const candidate = `${stem}-${String(n).padStart(pad, "0")}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return raw;
+}
+
+/* Applies a VM_TEMPLATES entry to one existing VM: name, image, sizing and the role/feature
+   selection. Addresses, disks and credentials are deliberately left alone — a template that
+   rewrote those would silently undo work on a VM that is already half configured. */
+function applyVmTemplate(server, templateId) {
+  const t = VM_TEMPLATES[templateId];
+  if (!server || !t) return false;
+  server.templateId = templateId;
+  if (t.name) server.name = nextFreeServerName(t.name, server);
+  applyImageProfile(server, templateImageId(t, state.templateRelease, state.templateEdition));
+  server.imageSource = "catalog";
+  server.imageHint = "";
+  if (t.memoryGB != null) server.memoryGB = t.memoryGB;
+  if (t.cpuCount != null) server.cpuCount = t.cpuCount;
+  server.windowsFeatures = [...(t.windowsFeatures || [])];
+  server.rsatCapabilities = [...(t.rsatCapabilities || [])];
+  server.clientFeatures = [...(t.clientFeatures || [])];
+  server.appCompatFod = !!t.appCompatFod;
+  if (t.nestedVirtualization != null) server.nestedVirtualization = !!t.nestedVirtualization;
+  // Hardware a template asks for is only ever added, never cleared: a template that says
+  // nothing about adapters or data disks leaves whatever the VM already has, the same way it
+  // leaves addressing and credentials alone. Extra adapters are created blank so they follow
+  // the VM's own switch and numbering (vnic-02, vnic-03, ...) rather than pinning a switch
+  // name a template could not know.
+  if (t.extraNics != null) {
+    server.nics = [];
+    for (let i = 0; i < t.extraNics; i++) server.nics.push(createServerNic(server));
+  }
+  if (t.additionalDisks) {
+    server.additionalDisks = t.additionalDisks.map((d, i) => {
+      const letter = dataDiskLetter(i);
+      return {
+        letter, name: letter, label: "", path: "",
+        sizeGB: d.sizeGB != null ? d.sizeGB : 100,
+        type: d.type || "Fixed",
+        fileSystem: d.fileSystem || "NTFS"
+      };
+    });
+  }
+  // Both of these are image-conditional; sanitize clears them where the image cannot honour
+  // them (App Compat is Core-only, app removal is Windows 11 client images only).
+  server.removeBuiltInApps = !!t.removeBuiltInApps;
+  server.removeApps = Array.isArray(t.removeApps) ? [...t.removeApps] : null;
+  if (t.includeManagementTools != null) server.includeManagementTools = !!t.includeManagementTools;
+  sanitizeServerFeaturesForImage(server);
+  return true;
+}
+
+/* Mirrors Test-BuiltInAdminOnly in Build-Vms.ps1: AD DS always forces it. */
+function isAdDomainController(server) {
+  return (server && Array.isArray(server.windowsFeatures) && server.windowsFeatures.indexOf("AD-Domain-Services") !== -1);
+}
+/* Client images (Windows 11 Enterprise/Pro) cannot ship with the built-in Administrator as
+   the only account: the client unattend needs a provisioned <LocalAccounts> user or OOBE
+   stalls on account creation and the deployment never finishes. Enterprise multi-session is
+   the one client image where the tick is offered anyway - an AVD session host is run like a
+   server, built-in Administrator included. Every other client stays locked off. */
+function supportsBuiltInAdminOnly(server) {
+  const img = findImage(server && server.imageId);
+  /* Linux has no built-in Administrator: the VM's one account is the local user
+     cloud-init creates. Left on from a Windows image, the flag dropped localUserName
+     from the export and Build-Vms.ps1 fell back to a user called "admin". */
+  if (isLinuxImage(img)) return false;
+  if (img.kind !== "client") return true;
+  return img.id === "w11-enterprise-ms";
+}
+function isBuiltInAdminOnly(server) {
+  if (!supportsBuiltInAdminOnly(server)) return false;
+  return isAdDomainController(server) || !!(server && server.builtInAdminOnly);
+}
+/* Server Core App Compatibility FOD is Core-only — Desktop Experience already has these tools —
+   and Microsoft only ships it from Windows Server 2019 on, so 2016 Core cannot have it. */
+function supportsAppCompatFod(server) {
+  const img = findImage(server && server.imageId);
+  return img.experience === "Core" && imageReleaseYear(img) >= 2019;
+}
+
+function sanitizeServerFeaturesForImage(server) {
+  const img = findImage(server && server.imageId);
+  if (!supportsAppCompatFod(server)) server.appCompatFod = false;
+  else server.appCompatFod = !!server.appCompatFod;
+  if (img.kind === "client") {
+    server.windowsFeatures = [];
+    if (!supportsBuiltInAdminOnly(server)) server.builtInAdminOnly = false;
+    if (!String(server.localUserName || "").trim()) {
+      server.localUserName = generateLocalUsername(state.usernameTheme);
+    }
+    server.rsatCapabilities = Array.isArray(server.rsatCapabilities) ? server.rsatCapabilities.filter(Boolean) : [];
+    // Only ids this build knows how to enable - an unknown feature name is a DISM failure
+    // at build time, and the catalog is the whole list of what the client image carries.
+    server.clientFeatures = (Array.isArray(server.clientFeatures) ? server.clientFeatures : [])
+      .filter(Boolean)
+      .filter(id => CLIENT_FEATURE_CATALOG.some(f => f.id === id));
+    // Built-in app removal covers every Windows 11 client image - N and multi-session included.
+    if (!supportsAppRemoval(server.imageId)) server.removeBuiltInApps = false;
+    else server.removeBuiltInApps = !!server.removeBuiltInApps;
+    // A custom pick keeps only ids the catalog knows; the full set collapses to null
+    // (= all), which exports as the compact removeBuiltInApps: true. A non-empty pick
+    // implies the removal itself - an imported row may carry removeApps alone.
+    if (Array.isArray(server.removeApps)) {
+      const appSel = [...new Set(server.removeApps.filter(id => APP_REMOVAL_IDS.has(id)))];
+      if (appSel.length === 0) {
+        server.removeApps = null;
+      } else {
+        server.removeBuiltInApps = true;
+        server.removeApps = appSel.length === APP_REMOVAL_CATALOG.length ? null : appSel;
+      }
+    } else {
+      server.removeApps = null;
+    }
+  } else {
+    server.rsatCapabilities = [];
+    server.clientFeatures = [];
+    // Server Core ships a subset of the component store — drop anything it cannot install,
+    // otherwise Install-WindowsFeature fails with "The name was not found" at build time.
+    server.windowsFeatures = (Array.isArray(server.windowsFeatures) ? server.windowsFeatures : [])
+      .filter(Boolean)
+      .filter(id => featureIdAvailableOnImage(id, img));
+    server.removeBuiltInApps = false;
+  }
+  return server;
+}
+
+function createServer(name) {
+  const s = {
+    _id: uid("s"),
+    name: (name || "").toLowerCase(),
+    imageId: "ws2025-datacenter-desktop",
+    imageSource: "catalog",
+    imageHint: "",
+    // Studio-only: which VM_TEMPLATES entry this VM started from. Never written to config.json.
+    templateId: "",
+    experience: "DesktopExperience",
+    switchName: (state.defaults.availableSwitches || [])[0] || "",
+    memoryGB: 4,
+    cpuCount: 4,
+    vlanId: null,
+    nicName: "",
+    nics: [],
+    useDifferencingDisk: true,
+    enableSecureBoot: true,
+    enableVtpm: false,
+    startAfterCreate: true,
+    // Hyper-V's own default for a fresh VM is "Nothing", but a lab VM is meant to come back
+    // after a host reboot, so the studio opts every new VM into "start if it was running".
+    automaticStartAction: "StartIfRunning",
+    automaticStartDelay: 0,
+    nestedVirtualization: false,
+    localUserName: generateLocalUsername(state.usernameTheme),
+    // Every new VM starts with a strong password so nobody ships a blank one by accident.
+    localUserPassword: generateLocalPassword(passwordLength()),
+    // Off by default: a new VM gets its own local admin, and admin-only stays a deliberate
+    // tick (AD DS is the one case that forces it — see isBuiltInAdminOnly).
+    builtInAdminOnly: false,
+    appCompatFod: false,
+    ipAddress: "",
+    prefixLength: 24,
+    defaultGateway: "",
+    dnsServers: [""],
+    customPaths: false,
+    vmPath: "",
+    vhdPath: "",
+    osDiskFileName: "",
+    additionalDisks: [],
+    vhdSetIds: [],
+    windowsFeatures: [],
+    includeManagementTools: true,
+    rsatCapabilities: [],
+    clientFeatures: [],
+    removeBuiltInApps: false,
+    removeApps: null,
+    azureArc: { enabled: false, principalId: "" },
+    integrationServices: defaultIntegrationServices(),
+    domainJoin: { enabled: false, accountId: "", ouPath: "", mode: null },
+    cluster: { enabled: !!(state.defaults.cluster && state.defaults.cluster.enabled && state.defaults.cluster.addAllVms) },
+    network: { enabled: false, networkId: "" }
+  };
+  applyImageProfile(s, s.imageId);
+  return s;
+}
+
+function createVhdSet() {
+  return {
+    _id: uid("vs"),
+    name: "",
+    sizeGB: 100,
+    type: "Fixed",
+    path: "",
+    attachTo: []
+  };
+}
+
+function generateLocalPassword(length) {
+  const len = length || 32;
+  // Ambiguous banned: I l 1 O 0 | ` ' " \
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghijkmnopqrstuvwxyz";
+  const numbers = "23456789";
+  const special = "!@#$%^&*-_=+?";
+  const all = upper + lower + numbers + special;
+  const pick = (set) => set[Math.floor(Math.random() * set.length)];
+  const chars = [pick(upper), pick(lower), pick(numbers), pick(special)];
+  while (chars.length < len) chars.push(pick(all));
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join("");
+}
+
+/* The generator length picked in General Settings. Anything outside the offered set —
+   an old state token, a hand-edited import — heals to 32, the length every password
+   used before the picker existed. */
+const PASSWORD_LENGTHS = [16, 32, 64];
+function passwordLength() {
+  const n = Number(state.defaults.passwordLength);
+  return PASSWORD_LENGTHS.includes(n) ? n : 32;
+}
+
+
+function sanitizeDiskNamePart(name) {
+  return String(name || "").toLowerCase().replace(/-/g, "");
+}
+/* Disk file names follow the guest, not the host.
+
+   On Windows a disk file is named for the drive letter the guest will mount it on -
+   c, then d, e, f - so the file on the host and the volume in the VM answer to the
+   same letter. A Linux guest has no drive letters at all: the OS disk is the system
+   disk and the rest are just the second and third disk, so they are numbered. A
+   Linux VM with a file called disk-web01-d.vhdx names a thing that does not exist
+   anywhere inside it. */
+/* How wide the address column needs to be, in characters.
+
+   Fixed at 15ch it fits 255.255.255.255, which no lab ever uses - so every row carried
+   four or five columns of dead space between the badges and the address. Measuring the
+   list instead keeps the column exactly as wide as its widest member: the badges still
+   line up, the addresses still line up, and the gap is gone.
+
+   A floor of 9 stops a list of short addresses from squeezing the column narrower than
+   the "no IP" placeholder and the header need. */
+function ipColumnWidth(servers) {
+  let longest = 5;                                   // "no IP"
+  for (const s of (servers || [])) {
+    const ip = String((s && s.ipAddress) || "").trim();
+    if (ip.length > longest) longest = ip.length;
+  }
+  return Math.min(15, Math.max(9, longest));
+}
+
+function osDiskFileName(serverName, forLinux) {
+  const n = sanitizeDiskNamePart(serverName) || "vm";
+  return forLinux ? `disk-${n}-system.vhdx` : `disk-${n}-c.vhdx`;
+}
+function dataDiskLetter(index) {
+  return String.fromCharCode(100 + index); // d, e, f, ...
+}
+/* What to call a data disk on screen. Windows mounts it on a letter and that letter
+   is the disk as far as anybody using the VM is concerned; Linux does not, so the
+   honest label there is its position - disk 01, disk 02. */
+function dataDiskTag(server, index, disk) {
+  if (isLinuxServer(server)) return String(index + 1).padStart(2, "0");
+  return String((disk && disk.letter) || dataDiskLetter(index)).toUpperCase() + ":";
+}
+function dataDiskFileName(serverName, index, forLinux) {
+  const n = sanitizeDiskNamePart(serverName) || "vm";
+  if (forLinux) return `disk-${n}-${String(index + 1).padStart(2, "0")}.vhdx`;
+  return `disk-${n}-${dataDiskLetter(index)}.vhdx`;
+}
+/* ---- Data disk volumes ----------------------------------------------------
+   Data disks only. The OS volume is formatted by New-Vhdx.ps1 when the gold image
+   is built, so C: never appears here. A data disk with a file system is initialized
+   (GPT), partitioned, formatted and mounted on its drive letter by GuestProvision.ps1
+   at first boot; "None" leaves the disk raw and offline for manual work.            */
+const DATA_DISK_FILE_SYSTEMS = [
+  { id: "NTFS", label: "NTFS" },
+  { id: "ReFS", label: "ReFS" },
+  { id: "None", label: "Leave raw" }
+];
+function diskFileSystem(disk) {
+  const raw = String((disk && disk.fileSystem) || "").trim().toLowerCase();
+  if (raw === "refs") return "ReFS";
+  if (raw === "none") return "None";
+  return "NTFS";
+}
+function defaultDataDiskLabel(disk, index) {
+  return `Data ${(disk && disk.letter ? disk.letter : dataDiskLetter(index)).toUpperCase()}`;
+}
+function effectiveDataDiskLabel(disk, index) {
+  const raw = String((disk && disk.label) || "").trim();
+  return raw || defaultDataDiskLabel(disk, index);
+}
+function vhdSetFileName(attachTo, sequence) {
+  const parts = (attachTo || []).map(sanitizeDiskNamePart).filter(Boolean).slice().sort();
+  const seq = String(sequence || 1).padStart(2, "0");
+  const mid = parts.length ? parts.join("-") : "shared";
+  return `vhds-${mid}-${seq}.vhds`;
+}
+/* ---- Custom disk file names ----------------------------------------------
+   Every disk keeps its generated name until someone renames it explicitly. A stored
+   name that still matches the generated one counts as "not renamed", so renaming the
+   VM keeps re-deriving the file name instead of freezing whatever was exported once. */
+
+function sanitizeDiskFileName(raw, ext) {
+  let v = String(raw ?? "").trim().replace(/[\\/:*?"<>|]/g, "").replace(/\s+/g, "-").toLowerCase();
+  if (!v) return "";
+  const rx = new RegExp(ext.replace(".", "\\.") + "$", "i");
+  v = v.replace(rx, "");
+  if (!v) return "";
+  return v + ext;
+}
+function autoOsDiskFileName(s) { return osDiskFileName((s && s.name) || "vm", isLinuxServer(s)); }
+function autoDataDiskFileName(s, i) { return dataDiskFileName((s && s.name) || "vm", i, isLinuxServer(s)); }
+
+function hasCustomOsDiskName(s) {
+  const v = sanitizeDiskFileName(s && s.osDiskFileName, ".vhdx");
+  return !!v && v !== autoOsDiskFileName(s);
+}
+function effectiveOsDiskFileName(s) {
+  return hasCustomOsDiskName(s) ? sanitizeDiskFileName(s.osDiskFileName, ".vhdx") : autoOsDiskFileName(s);
+}
+function hasCustomDataDiskName(s, d, i) {
+  const v = sanitizeDiskFileName(d && d.fileName, ".vhdx");
+  return !!v && v !== autoDataDiskFileName(s, i);
+}
+function effectiveDataDiskFileName(s, d, i) {
+  return hasCustomDataDiskName(s, d, i) ? sanitizeDiskFileName(d.fileName, ".vhdx") : autoDataDiskFileName(s, i);
+}
+function hasCustomVhdSetName(v, autoFile) {
+  const n = sanitizeDiskFileName(v && v.name, ".vhds");
+  return !!n && n !== autoFile;
+}
+function effectiveVhdSetFileName(v, autoFile) {
+  return hasCustomVhdSetName(v, autoFile) ? sanitizeDiskFileName(v.name, ".vhds") : autoFile;
+}
+
+/** Per-VM VM/VHD path override is a studio-side toggle; the config only carries the paths. */
+function serverUsesCustomPaths(s) {
+  return !!(s && s.customPaths);
+}
+
+/** Generated .vhds file name for the set at `idx` — sets sharing attach targets get a sequence. */
+function vhdSetAutoFileName(v, idx) {
+  const attachTo = (v.attachTo || []).map(n => String(n).toLowerCase());
+  const key = attachTo.map(sanitizeDiskNamePart).filter(Boolean).slice().sort().join("|");
+  let sequence = 0;
+  state.vhdSets.forEach((x, i) => {
+    const k = (x.attachTo || []).map(sanitizeDiskNamePart).filter(Boolean).slice().sort().join("|");
+    if (k === key && i <= idx) sequence++;
+  });
+  return vhdSetFileName(attachTo, sequence < 1 ? 1 : sequence);
+}
+
+function nextVhdSetSequence(attachTo, excludeId) {
+  const key = (attachTo || []).map(sanitizeDiskNamePart).filter(Boolean).slice().sort().join("|");
+  let seq = 1;
+  state.vhdSets.forEach(v => {
+    if (excludeId && v._id === excludeId) return;
+    const k = (v.attachTo || []).map(sanitizeDiskNamePart).filter(Boolean).slice().sort().join("|");
+    if (k === key) seq++;
+  });
+  return seq;
+}
+
+function generateLocalUsername(themeId) {
+  const theme = USERNAME_THEMES[themeId] || USERNAME_THEMES["roman-emperors"];
+  const word = theme.words[Math.floor(Math.random() * theme.words.length)];
+  // Name only — no trailing numbers (Windows local account name)
+  return String(word || "user").toLowerCase().slice(0, 20);
+}
+
+function prefixSelectHtml(attrs, value) {
+  const v = Number(value) || 24;
+  return `<select ${attrs}>
+    ${PREFIX_OPTIONS.map(p => `<option value="${p}" ${p === v ? "selected" : ""}>/${p}</option>`).join("")}
+  </select>`;
+}
+
+/* ---------- theme ---------- */
+function mix(a, b, t) {
+  const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+  const ar = (pa >> 16) & 255, ag = (pa >> 8) & 255, ab = pa & 255;
+  const br = (pb >> 16) & 255, bg = (pb >> 8) & 255, bb = pb & 255;
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const bl = Math.round(ab + (bb - ab) * t);
+  return "#" + [r,g,bl].map(x => x.toString(16).padStart(2, "0")).join("");
+}
+function luminance(hex) {
+  const p = parseInt(hex.slice(1), 16);
+  const r = ((p >> 16) & 255) / 255, g = ((p >> 8) & 255) / 255, b = (p & 255) / 255;
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+let themeModeTab = "dark";
+function currentTheme() {
+  return findTheme(state.themeId);
+}
+function findTheme(id) {
+  return THEMES[id] || THEMES[DEFAULT_THEME_ID];
+}
+/* Three chips — accent, a band hue, and the surface they sit on — so a family reads as a
+   temperature at a glance rather than as an abstract colour list. */
+function themeSwatchHtml(theme) {
+  const colors = [theme.elevated, theme.accent, theme.fg];
+  return '<span class="swatch">' + colors.map(c => `<i style="background:${c}"></i>`).join("") + "</span>";
+}
+function applyTheme(themeId) {
+  const theme = findTheme(themeId);
+  if (!theme) return;
+  state.themeId = theme.id;
+  const root = document.documentElement;
+  const dark = theme.mode === "dark";
+  const bands = theme.bands;
+  root.dataset.theme = theme.id;
+  root.dataset.mode = theme.mode;
+  const set = (k, v) => root.style.setProperty(k, v);
+
+  /* Structure and text — authored values, not derived. */
+  set("--bg", theme.bg); set("--bg-elevated", theme.elevated);
+  set("--bg-subtle", theme.subtle); set("--bg-hover", theme.hover);
+  set("--fg", theme.fg); set("--fg-muted", theme.muted);
+  set("--border", theme.border); set("--border-strong", theme.borderStrong);
+  set("--divider", theme.divider);
+  set("--input-border", theme.borderStrong);
+
+  /* The single accent. */
+  set("--accent", theme.accent); set("--accent-hover", theme.accentHover);
+  set("--accent-soft", theme.accentSoft); set("--accent-border", theme.accentBorder);
+  set("--accent-fg", theme.accentFg);
+  set("--nav-active-border", theme.accent);
+
+  /* The chrome is neutral now — the accent only draws the hairline under it (see .topbar). */
+  set("--topbar", theme.elevated);
+  set("--topbar-fg", theme.fg);
+
+  /* Status is the one other place colour is allowed. */
+  set("--success", theme.success); set("--danger", theme.danger); set("--warn", theme.warn);
+  set("--warn-soft", dark ? mix(theme.bg, theme.warn, 0.2) : mix(theme.elevated, theme.warn, 0.25));
+  set("--danger-fg", luminance(theme.danger) < 0.55 ? "#ffffff" : "#1b1b1b");
+  set("--success-text", dark ? mix(theme.success, "#ffffff", 0.12) : mix(theme.success, "#000000", 0.1));
+  set("--danger-text", dark ? mix(theme.danger, "#ffffff", 0.12) : mix(theme.danger, "#000000", 0.1));
+
+  /* Two badge hues that predate the band system; keep them on their band so they stay
+     consistent with the icon a row carries. */
+  set("--role-client", bands.host);
+  set("--role-linux", bands.linux);
+  set("--role-server", bands.work);
+  set("--flag-nested", bands.ident);
+  /* PVE VM Studio: the job log's tag colours are Write-Log's - the host and identity bands,
+     and the log's own third warm colour (New-Vhdx's `yellow`), darkened on light themes. */
+  set("--band-host", bands.host);
+  set("--band-ident", bands.ident);
+  set("--log-yellow", dark ? "#e6de78" : "#7d6f0a");
+  /* Secrets are reached from Deploy and the blade's own icon already sits on that band;
+     the reveal control takes the same hue rather than a colour invented for it. */
+  set("--secret-glyph", bands.deploy);
+
+  /* PowerShell preview. Syntax highlighting needs more than one hue, so it reads the
+     bands rather than inventing colours — same five values the icons use. */
+  const psEditorBg = dark ? mix(theme.bg, "#000000", 0.35) : mix(theme.subtle, "#000000", 0.02);
+  set("--ps-editor-bg", psEditorBg);
+  set("--ps-gutter-fg", theme.muted);
+  set("--ps-gutter-border", dark ? mix(psEditorBg, "#ffffff", 0.12) : mix(psEditorBg, "#000000", 0.08));
+  set("--ps-fg", theme.fg);
+  set("--ps-comment", theme.muted);
+  set("--ps-string", bands.work);
+  set("--ps-param", bands.host);
+  set("--ps-cmdlet", bands.deploy);
+  set("--ps-variable", bands.host);
+  set("--ps-keyword", bands.ident);
+  set("--ps-number", bands.work);
+  set("--ps-operator", theme.muted);
+
+  const nameEl = document.getElementById("themeName");
+  if (nameEl) nameEl.textContent = theme.name;
+  const swatchEl = document.getElementById("themeSwatch");
+  if (swatchEl) swatchEl.outerHTML = themeSwatchHtml(theme).replace('class="swatch"', 'class="swatch" id="themeSwatch"');
+  renderThemeList();
+
+  /* Icons are data URIs tinted for this theme, so they cannot follow via CSS — the blade
+     and the nav have to be rebuilt, and the favicon and brand mark repainted by hand. */
+  applyThemedChrome(theme);
+  if (typeof renderNav === "function" && document.getElementById("nav")) render();
+}
+
+/* Every themed <img> that lives in static markup rather than in a render function. */
+function applyThemedChrome(theme) {
+  const favicon = document.getElementById("favicon");
+  if (favicon) favicon.href = tintIcon("mark.svg", theme);
+  document.querySelectorAll("[data-icon]").forEach(el => {
+    el.src = el.hasAttribute("data-icon-on-accent")
+      ? tintIconOnAccent(el.getAttribute("data-icon"), theme)
+      : tintIcon(el.getAttribute("data-icon"), theme);
+  });
+}
+
+function renderThemeList() {
+  const tabDark = document.getElementById("tabDark");
+  const tabLight = document.getElementById("tabLight");
+  if (!tabDark || !tabLight) return;
+  tabDark.innerHTML = moonIcon() + "Dark · " + FAMILIES.length;
+  tabLight.innerHTML = sunIcon() + "Light · " + FAMILIES.length;
+  tabDark.classList.toggle("active", themeModeTab === "dark");
+  tabLight.classList.toggle("active", themeModeTab === "light");
+  /* Three families per tab, not a flat list — the family is the choice, the tab is the mode.
+     The default leads: it is what a fresh workspace is already on, so it reads oddly
+     anywhere but first. Ordering is derived, so it follows THEME_DEFAULT on its own. */
+  const ordered = FAMILIES.slice().sort((a, b) =>
+    (a.id === THEME_DEFAULT ? 0 : 1) - (b.id === THEME_DEFAULT ? 0 : 1));
+  document.getElementById("themeList").innerHTML = ordered.map(f => {
+    const t = THEMES[f.id + "_" + themeModeTab];
+    const selected = t.id === state.themeId;
+    const badge = f.id === THEME_DEFAULT ? '<span class="pill tag">Default</span>' : "";
+    return `<button type="button" class="btn row ${selected ? "selected" : ""}" data-theme-id="${esc(t.id)}">
+      <span class="radio"></span>
+      ${themeSwatchHtml(t)}
+      <span class="tname">${esc(f.name)}</span>
+      ${badge}
+    </button>`;
+  }).join("");
+}
+function openThemePopover() {
+  themeModeTab = findTheme(state.themeId).mode || "dark";
+  renderThemeList();
+  document.getElementById("themePopover").classList.add("open");
+}
+function closeThemePopover() {
+  document.getElementById("themePopover").classList.remove("open");
+}
+
+/* ---------- config / state encode ---------- */
+function namingDefaults() {
+  const n = state.defaults.naming || {};
+  const vm = !!n.vmNameIncludeFqdn;   // off unless the config says otherwise
+  return {
+    vmNameIncludeFqdn: vm,
+    folderIncludeFqdn: vm && !!n.folderIncludeFqdn,
+    fqdnOverrideEnabled: vm && !!n.fqdnOverrideEnabled,
+    fqdn: String(n.fqdn || "").trim()
+  };
+}
+function namingConfig() {
+  const n = namingDefaults();
+  const out = { vmNameIncludeFqdn: n.vmNameIncludeFqdn, folderIncludeFqdn: n.folderIncludeFqdn };
+  // Only written when the toggle is on - Build-Vms.ps1 reads the key's presence as "use this".
+  if (n.fqdnOverrideEnabled) out.fqdn = namingFqdnOverride();
+  return out;
+}
+/* The fixed suffix typed in General Settings › Naming, "" while the toggle is off or the
+   box is empty. */
+function namingFqdnOverride() {
+  const n = namingDefaults();
+  if (!n.fqdnOverrideEnabled) return "";
+  return n.fqdn.replace(/\.+$/, "").toLowerCase();
+}
+/* Mirrors Get-ServerNamingSuffix in Build-Vms.ps1 — preview only. The fixed FQDN wins over
+   Domain Join, so the first DC — which builds the domain rather than joining one — still
+   gets the suffix on its Hyper-V object and its folders. */
+function namingSuffixForServer(s) {
+  const fixed = namingFqdnOverride();
+  if (fixed) return fixed;
+  return String(resolvedDomainForServer(s || {}) || "").replace(/\.+$/, "").toLowerCase();
+}
+
+function buildConfig() {
+  const defaults = {
+    vhdxDirectory: state.defaults.vhdxDirectory || "vhdx",
+    vmPath: state.defaults.vmPath || "",
+    vhdPath: state.defaults.vhdPath || "",
+    availableSwitches: [...(state.defaults.availableSwitches || [])].filter(Boolean),
+    locale: state.defaults.locale || LOCALE_DEFAULT,
+    keyboardLayout: state.defaults.locale || LOCALE_DEFAULT,
+    naming: namingConfig()
+  };
+  if (state.defaults.sxsSourcePath) defaults.sxsSourcePath = state.defaults.sxsSourcePath;
+  if (storagePlacementActive()) {
+    const volumes = storagePlacementVolumesInUse();
+    if (volumes.length) {
+      defaults.storagePlacement = {
+        mode: "auto",
+        volumes: volumes.map(v => {
+          const row = {};
+          if (v.vmPath) row.vmPath = v.vmPath;
+          if (v.vhdPath) row.vhdPath = v.vhdPath;
+          return row;
+        })
+      };
+    }
+  }
+  if (state.defaults.cluster && state.defaults.cluster.enabled) {
+    // addAfterCreate stays the host-wide master switch; each VM then opts in with its
+    // own cluster.enabled, written per server below.
+    defaults.cluster = {
+      enabled: true,
+      name: state.defaults.cluster.name || "",
+      addAfterCreate: state.defaults.cluster.addAfterCreate !== false
+    };
+  }
+
+  const domainJoinAccounts = (state.domainJoinAccounts || []).map(a => {
+    ensureCatalogStableId(a, "dja");
+    return {
+      id: a.id,
+      domain: a.domain || "",
+      joinUser: a.joinUser || "",
+      joinPassword: a.joinPassword || ""
+    };
+  });
+
+  const azureArcPrincipals = (state.azureArcPrincipals || []).map(a => {
+    ensureCatalogStableId(a, "arc");
+    const row = {
+      id: a.id,
+      subscriptionId: a.subscriptionId || "",
+      tenantId: a.tenantId || "",
+      resourceGroup: a.resourceGroup || "",
+      location: a.location || "westeurope",
+      authMode: a.authMode === "hostContext" ? "hostContext" : "servicePrincipal"
+    };
+    if (row.authMode === "servicePrincipal") {
+      row.servicePrincipalAppId = a.servicePrincipalAppId || "";
+      if (a.servicePrincipalSecret) row.servicePrincipalSecret = a.servicePrincipalSecret;
+    }
+    return row;
+  });
+
+  const networks = (state.networks || []).map(n => {
+    ensureCatalogStableId(n, "net");
+    const row = {
+      id: n.id,
+      vlanId: (n.vlanId === "" || n.vlanId == null) ? null : Number(n.vlanId),
+      switchName: n.switchName || "",
+      networkId: n.subnet || "",
+      prefixLength: Number(n.prefixLength) || 24
+    };
+    if (n.gateway) row.gateway = n.gateway;
+    const dns = (n.dnsServers || []).filter(x => String(x || "").trim() !== "");
+    if (dns.length) row.dnsServers = dns;
+    return row;
+  });
+
+  const servers = state.servers.map(s => {
+    const row = {
+      name: String(s.name || "").toLowerCase().slice(0, NETBIOS_MAX),
+      imageId: normalizeImageId(s.imageId),
+      experience: findImage(s.imageId).experience,
+      switchName: s.switchName,
+      memoryGB: Number(s.memoryGB) || 4,
+      cpuCount: Number(s.cpuCount) || 2,
+      vlanId: s.vlanId === "" || s.vlanId == null ? null : Number(s.vlanId),
+      useDifferencingDisk: !!s.useDifferencingDisk,
+      enableSecureBoot: effectiveSecureBoot(s),
+      enableVtpm: !!s.enableVtpm,
+      startAfterCreate: !!s.startAfterCreate,
+      nicName: effectiveNicName(s, 0),
+      automaticStartAction: serverAutoStartAction(s),
+      automaticStartDelay: serverAutoStartAction(s) === "Nothing" ? 0 : serverAutoStartDelay(s),
+      /* Built-in-Administrator-only provisions no <LocalAccounts>, so exporting a name
+         would advertise an account that never gets created. The studio keeps it in state
+         so it comes back when the toggle goes off; the config just does not carry it. */
+      localUserName: isBuiltInAdminOnly(s) ? undefined : s.localUserName,
+      localUserPassword: s.localUserPassword,
+      builtInAdminOnly: isBuiltInAdminOnly(s),
+      ipAddress: s.ipAddress,
+      prefixLength: Number(s.prefixLength) || 24,
+      defaultGateway: s.defaultGateway,
+      osDiskFileName: effectiveOsDiskFileName(s),
+      includeManagementTools: s.includeManagementTools !== false,
+      integrationServices: Object.assign(defaultIntegrationServices(), s.integrationServices || {})
+    };
+    // Per-VM placement overrides defaults.vmPath / defaults.vhdPath on the host.
+    if (serverUsesCustomPaths(s)) {
+      const vmp = String(s.vmPath || "").trim();
+      const vhp = String(s.vhdPath || "").trim();
+      if (vmp) row.vmPath = vmp;
+      if (vhp) row.vhdPath = vhp;
+    }
+    if (s.nestedVirtualization) row.nestedVirtualization = true;
+    if (s.imageSource === "custom" && s.imageHint) row.imageHint = s.imageHint;
+    const dns = (s.dnsServers || []).filter(x => String(x || "").trim() !== "");
+    if (dns.length) row.dnsServers = dns;
+    // Adapters beyond the one New-VM creates. Networks are resolved here, the way the primary
+    // adapter's are — Build-Vms.ps1 never reads the `networks` catalog.
+    const extraNics = (s.nics || []).map((nic, i) => {
+      const nicRow = {
+        name: effectiveNicName(s, i + 1),
+        switchName: String(nic.switchName || ""),
+        vlanId: (nic.vlanId === "" || nic.vlanId == null) ? null : Number(nic.vlanId)
+      };
+      const nicIp = String(nic.ipAddress || "").trim();
+      if (nicIp) {
+        nicRow.ipAddress = nicIp;
+        nicRow.prefixLength = Number(nic.prefixLength) || 24;
+      }
+      return nicRow;
+    });
+    if (extraNics.length) row.additionalNics = extraNics;
+    const disks = (s.additionalDisks || []).map((d, i) => {
+      const fs = diskFileSystem(d);
+      const row = {
+        sizeGB: Number(d.sizeGB) || 100,
+        type: d.type === "Dynamic" ? "Dynamic" : "Fixed",
+        fileName: effectiveDataDiskFileName(s, d, i),
+        fileSystem: fs
+      };
+      // A drive letter is a Windows idea. On Linux the disk is numbered and mounted
+      // by whatever the guest decides, so sending one would be inventing a fact.
+      if (!isLinuxServer(s)) {
+        row.letter = d.letter || dataDiskLetter(i);
+        row.name = row.letter;
+      }
+      // Only a formatted volume carries a label - "Leave raw" has nothing to name.
+      if (fs !== "None") row.label = effectiveDataDiskLabel(d, i);
+      if (d.path) row.path = d.path;
+      return row;
+    });
+    if (disks.length) row.additionalDisks = disks;
+    const vhdSetIds = [...(s.vhdSetIds || [])];
+    if (vhdSetIds.length) row.vhdSetIds = vhdSetIds;
+    const features = [...new Set((s.windowsFeatures || []).filter(Boolean))];
+    if (imageTakesServerRoles(findImage(s.imageId)) && features.length) row.windowsFeatures = features;
+    const rsat = [...new Set((s.rsatCapabilities || []).filter(Boolean))];
+    if (findImage(s.imageId).kind === "client" && rsat.length) row.rsatCapabilities = rsat;
+    const clientFeatures = [...new Set((s.clientFeatures || []).filter(Boolean))];
+    if (findImage(s.imageId).kind === "client" && clientFeatures.length) row.clientFeatures = clientFeatures;
+    if (supportsAppRemoval(s.imageId) && s.removeBuiltInApps) {
+      const appSel = appRemovalSelection(s);
+      if (appSel === null) row.removeBuiltInApps = true;
+      else if (appSel.length) row.removeApps = [...appSel];
+      // An empty custom pick exports nothing - removal that removes no apps is off.
+    }
+    if (supportsAppCompatFod(s) && s.appCompatFod) row.appCompatFod = true;
+    /* Linux. osFamily is the field Build-Vms.ps1 branches on - it is what tells the
+       builder to render a cloud-init seed ISO instead of writing an unattend.xml into
+       the disk, and to pick the third-party UEFI CA Secure Boot template. */
+    if (isLinuxServer(s)) {
+      row.osFamily = "linux";
+      const sshKey = String(s.sshAuthorizedKey || "").trim();
+      if (sshKey) row.sshAuthorizedKey = sshKey;
+      const pkgs = linuxPackageList(s);
+      if (pkgs.length) row.packages = pkgs;
+      /* Always written, empty list included: absent means a file older than the
+         picker, and Build-Vms.ps1 reads that as the behaviour it used to have. */
+    }
+    // "Use for every VM" resolves at export time into per-VM rows, exactly like the
+    // cluster blade's addAllVms - Build-Vms.ps1 only ever sees per-VM domainJoin/azureArc.
+    // Same veto as the card: an image with no way to join gets no domainJoin block,
+    // which Build-Vms.ps1 would only drop with a warning.
+    const djRefused = imageRefusesDomainJoin(findImage(s.imageId));
+    const globalDjAccount = djRefused ? null : domainJoinAllVmsAccount();
+    if (globalDjAccount) {
+      row.domainJoin = { enabled: true, accountId: globalDjAccount.id };
+      if (s.domainJoin && s.domainJoin.ouPath) row.domainJoin.ouPath = s.domainJoin.ouPath;
+      row.domainJoin.mode = effectiveDomainJoinMode(s);
+      if (globalDjAccount.domain) row.domainJoin.domain = globalDjAccount.domain;
+      if (globalDjAccount.joinUser) row.domainJoin.joinUser = globalDjAccount.joinUser;
+      if (globalDjAccount.joinPassword) row.domainJoin.joinPassword = globalDjAccount.joinPassword;
+    }
+    else if (!djRefused && s.domainJoin && s.domainJoin.enabled && s.domainJoin.accountId) {
+      const acc = findDomainJoinAccount(s.domainJoin.accountId);
+      row.domainJoin = { enabled: true, accountId: s.domainJoin.accountId };
+      if (s.domainJoin.ouPath) row.domainJoin.ouPath = s.domainJoin.ouPath;
+      row.domainJoin.mode = effectiveDomainJoinMode(s);
+      // Dual-write resolved credentials so Build-Vms works even if catalog lookup fails
+      if (acc) {
+        if (acc.domain) row.domainJoin.domain = acc.domain;
+        if (acc.joinUser) row.domainJoin.joinUser = acc.joinUser;
+        if (acc.joinPassword) row.domainJoin.joinPassword = acc.joinPassword;
+      }
+    }
+    /* The group lists are Linux's business only, and they are resolved HERE rather
+       than in Build-Vms.ps1 for the same reason the credentials are: one place that
+       knows about accounts, overrides and defaults, and a config.json that says what
+       will happen rather than what to look up. An empty list is omitted entirely, so
+       an untouched field leaves the realm default alone. */
+    if (row.domainJoin && isLinuxServer(s)) {
+      delete row.domainJoin.mode;
+      const acc = findDomainJoinAccount(row.domainJoin.accountId);
+      const names = (list) => (Array.isArray(list) ? list : []).map(x => String(x).trim()).filter(Boolean);
+      const own = names(s.djSudoGroups);
+      const sudo = own.length ? own : names(acc && acc.sudoGroups);
+      const login = names(acc && acc.loginGroups);
+      if (sudo.length) row.domainJoin.sudoGroups = sudo;
+      if (login.length) row.domainJoin.loginGroups = login;
+    }
+    // Explicit true/false either way: Build-Vms.ps1 only falls back to the host-wide
+    // addAfterCreate when a VM carries no cluster block at all (pre-blade configs).
+    if (state.defaults.cluster && state.defaults.cluster.enabled) {
+      row.cluster = { enabled: clusterIncludesServer(s) };
+    }
+    // Same veto as the card: no azureArc block for an image Arc has no agent for, so
+    // Build-Vms.ps1 is never handed a VM it would spend a package install and three
+    // connect retries failing to onboard.
+    const globalArcPrincipal = azureArcAllVmsPrincipal();
+    if (!imageRefusesAzureArc(findImage(s.imageId)) &&
+        (globalArcPrincipal || (s.azureArc && s.azureArc.enabled && s.azureArc.principalId))) {
+      const p = globalArcPrincipal || findAzureArcPrincipal(s.azureArc.principalId);
+      row.azureArc = { enabled: true, principalId: globalArcPrincipal ? globalArcPrincipal.id : s.azureArc.principalId };
+      // Dual-write resolved landing-zone fields so Build-Vms works even if catalog lookup fails
+      if (p) {
+        if (p.subscriptionId) row.azureArc.subscriptionId = p.subscriptionId;
+        if (p.tenantId) row.azureArc.tenantId = p.tenantId;
+        if (p.resourceGroup) row.azureArc.resourceGroup = p.resourceGroup;
+        if (p.location) row.azureArc.location = p.location;
+        row.azureArc.authMode = p.authMode === "hostContext" ? "hostContext" : "servicePrincipal";
+        if (row.azureArc.authMode === "servicePrincipal") {
+          if (p.servicePrincipalAppId) row.azureArc.servicePrincipalAppId = p.servicePrincipalAppId;
+          if (p.servicePrincipalSecret) row.azureArc.servicePrincipalSecret = p.servicePrincipalSecret;
+        }
+      }
+    }
+    if (s.network && s.network.enabled && s.network.networkId) {
+      row.network = { enabled: true, networkId: s.network.networkId };
+    }
+    return row;
+  });
+
+  const vhdSets = state.vhdSets.map((v, idx) => {
+    const attachTo = (v.attachTo || []).map(n => String(n).toLowerCase());
+    const row = {
+      // Stored without the extension, the way Build-Vms.ps1 expects it.
+      name: effectiveVhdSetFileName(v, vhdSetAutoFileName(v, idx)).replace(/\.vhds$/i, ""),
+      sizeGB: Number(v.sizeGB) || 100,
+      type: v.type === "Dynamic" ? "Dynamic" : "Fixed",
+      attachTo
+    };
+    if (v.path) row.path = v.path;
+    return row;
+  });
+
+  const cfg = { defaults, servers };
+  if (domainJoinAccounts.length) cfg.domainJoinAccounts = domainJoinAccounts;
+  if (azureArcPrincipals.length) cfg.azureArcPrincipals = azureArcPrincipals;
+  if (networks.length) cfg.networks = networks;
+  if (vhdSets.length) cfg.vhdSets = vhdSets;
+  return cfg;
+}
+
+/** Embedded lab sample — replaces the old standalone config.sample.json (HTML + assets only). */
+function sampleConfigDocument() {
+  return {
+    defaults: {
+      vhdxDirectory: "vhdx",
+      availableSwitches: ["vExternal"],
+      locale: "default",
+      keyboardLayout: "default",
+      naming: { vmNameIncludeFqdn: false, folderIncludeFqdn: false }
+    },
+    servers: [
+      {
+        name: "dc-01",
+        imageId: "ws2025-datacenter-desktop",
+        imageHint: "",
+        experience: "DesktopExperience",
+        switchName: "vExternal",
+        memoryGB: 4,
+        cpuCount: 4,
+        vlanId: null,
+        useDifferencingDisk: true,
+        enableSecureBoot: true,
+        enableVtpm: false,
+        startAfterCreate: true,
+        localUserName: generateLocalUsername(state.usernameTheme),
+        localUserPassword: "ChangeMe!123",
+        ipAddress: "10.10.10.10",
+        prefixLength: 24,
+        defaultGateway: "10.10.10.1",
+        dnsServers: ["10.10.10.10"],
+        additionalDisks: [],
+        vhdSetIds: [],
+        windowsFeatures: ["AD-Domain-Services", "DNS", "GPMC"],
+        includeManagementTools: true,
+        rsatCapabilities: [],
+        integrationServices: Object.assign(defaultIntegrationServices(), { timeSynchronization: false, guestServices: false })
+      },
+      {
+        name: "app-01",
+        imageId: "ws2025-standard-desktop",
+        imageHint: "",
+        experience: "DesktopExperience",
+        switchName: "vExternal",
+        memoryGB: 8,
+        cpuCount: 4,
+        vlanId: 20,
+        useDifferencingDisk: true,
+        enableSecureBoot: true,
+        enableVtpm: false,
+        startAfterCreate: true,
+        localUserName: generateLocalUsername(state.usernameTheme),
+        localUserPassword: "ChangeMe!123",
+        ipAddress: "10.10.10.50",
+        prefixLength: 24,
+        defaultGateway: "10.10.10.1",
+        dnsServers: ["10.10.10.10", "10.10.10.11"],
+        additionalDisks: [{ name: "data1", sizeGB: 100, type: "Fixed" }],
+        vhdSetIds: [],
+        windowsFeatures: ["Web-Server", "Web-Mgmt-Console", "Web-Asp-Net45"],
+        includeManagementTools: true,
+        rsatCapabilities: [],
+        integrationServices: Object.assign(defaultIntegrationServices(), { timeSynchronization: false, guestServices: false })
+      },
+      {
+        name: "files-01",
+        imageId: "ws2025-datacenter-core",
+        imageHint: "",
+        experience: "Core",
+        switchName: "vExternal",
+        memoryGB: 4,
+        cpuCount: 2,
+        vlanId: null,
+        useDifferencingDisk: true,
+        enableSecureBoot: true,
+        enableVtpm: false,
+        startAfterCreate: true,
+        localUserName: generateLocalUsername(state.usernameTheme),
+        localUserPassword: "ChangeMe!123",
+        ipAddress: "10.10.10.51",
+        prefixLength: 24,
+        defaultGateway: "10.10.10.1",
+        dnsServers: ["10.10.10.10"],
+        additionalDisks: [],
+        vhdSetIds: [],
+        windowsFeatures: ["FS-FileServer", "FS-Resource-Manager"],
+        includeManagementTools: true,
+        rsatCapabilities: [],
+        integrationServices: Object.assign(defaultIntegrationServices(), { timeSynchronization: false, guestServices: false })
+      }
+    ]
+  };
+}
+
+function applyConfigDocument(parsed, opts) {
+  const replace = !!(opts && opts.replace);
+  if (parsed && parsed.defaults) {
+    const incoming = Object.assign({}, parsed.defaults);
+    delete incoming.azureArc;
+    delete incoming.imageProfiles;
+    state.defaults = Object.assign(state.defaults, incoming);
+    if (!state.defaults.imageProfiles) state.defaults.imageProfiles = defaultImageProfiles();
+    IMAGE_CATALOG.forEach(img => {
+      if (!state.defaults.imageProfiles[img.id]) state.defaults.imageProfiles[img.id] = { ...img.defaults };
+    });
+  }
+  const catalogs = migrateLegacyIdentityCatalogs(parsed || {});
+  if (replace || !(state.domainJoinAccounts || []).length) state.domainJoinAccounts = catalogs.accounts;
+  else if (catalogs.accounts.length) {
+    catalogs.accounts.forEach(a => {
+      if (!state.domainJoinAccounts.some(x => x.id === a.id)) state.domainJoinAccounts.push(a);
+    });
+  }
+  if (replace || !(state.azureArcPrincipals || []).length) state.azureArcPrincipals = catalogs.principals;
+  else if (catalogs.principals.length) {
+    catalogs.principals.forEach(a => {
+      if (!state.azureArcPrincipals.some(x => x.id === a.id)) state.azureArcPrincipals.push(a);
+    });
+  }
+  // Keep catalogs object linked to live arrays for normalizeServerIdentityRefs mutations
+  catalogs.accounts = state.domainJoinAccounts;
+  catalogs.principals = state.azureArcPrincipals;
+  catalogs.legacyPrincipalId = catalogs.legacyPrincipalId || (state.azureArcPrincipals[0] && state.azureArcPrincipals[0].id) || "";
+
+  const incomingNetworks = Array.isArray(parsed && parsed.networks) ? parsed.networks.map(net => {
+    const x = createNetwork({
+      switchName: net.switchName || "",
+      vlanId: net.vlanId ?? null,
+      subnet: net.networkId || net.subnet || "",
+      prefixLength: net.prefixLength || 24,
+      gateway: net.gateway || "",
+      dnsServers: Array.isArray(net.dnsServers) ? net.dnsServers : [""],
+      id: net.id || ""
+    });
+    x._id = uid("net");
+    return ensureCatalogStableId(x, "net");
+  }) : [];
+  if (replace || !(state.networks || []).length) state.networks = incomingNetworks;
+  else if (incomingNetworks.length) {
+    // A config carries every field of a network, so the imported definition wins over the one
+    // already in the catalog — leaving the old one in place made the file's VLAN or gateway
+    // look ignored while the VMs from the same file took theirs from it.
+    incomingNetworks.forEach(net => {
+      const existing = state.networks.find(x => x.id === net.id);
+      if (existing) Object.assign(existing, net, { _id: existing._id });
+      else state.networks.push(net);
+    });
+  }
+
+  // Configs written before the Failover Cluster blade had no per-VM flag: an enabled
+  // cluster with addAfterCreate registered *every* VM. Keep that meaning on import.
+  const parsedCluster = (parsed && parsed.defaults && parsed.defaults.cluster) || null;
+  const legacyClusterAll = !!(parsedCluster && parsedCluster.enabled && parsedCluster.addAfterCreate !== false);
+
+  let list = [];
+  if (Array.isArray(parsed)) list = parsed;
+  else if (parsed && Array.isArray(parsed.servers)) list = parsed.servers;
+  if (replace) {
+    state.servers = [];
+    state.expanded = {};
+  }
+  let added = 0, updated = 0;
+  list.forEach(row => {
+    const name = String(row.name || "").toLowerCase().slice(0, NETBIOS_MAX);
+    if (!name) return;
+    let s = state.servers.find(x => x.name === name);
+    if (!s) {
+      s = createServer(name);
+      state.servers.push(s);
+      added++;
+    } else {
+      updated++;
+    }
+    Object.assign(s, row);
+    s.name = name;
+    s._id = s._id || uid("s");
+    s.imageId = normalizeImageId(s.imageId);
+    s.imageHint = s.imageHint || "";
+    s.imageSource = s.imageSource === "custom" || !!(s.imageHint && String(s.imageHint).trim()) ? "custom" : "catalog";
+    s.additionalDisks = s.additionalDisks || [];
+    s.windowsFeatures = Array.isArray(s.windowsFeatures) ? s.windowsFeatures : [];
+    s.includeManagementTools = s.includeManagementTools !== false;
+    s.builtInAdminOnly = !!s.builtInAdminOnly;
+    s.appCompatFod = !!s.appCompatFod;
+    s.vmPath = String(s.vmPath || "");
+    s.vhdPath = String(s.vhdPath || "");
+    // The toggle itself is studio-only — a config that carries paths arrives with it on.
+    s.customPaths = !!(s.vmPath.trim() || s.vhdPath.trim());
+    if (!String(s.localUserName || "").trim()) s.localUserName = generateLocalUsername(state.usernameTheme);
+    s.rsatCapabilities = Array.isArray(s.rsatCapabilities) ? s.rsatCapabilities : [];
+    s.clientFeatures = Array.isArray(s.clientFeatures) ? s.clientFeatures : [];
+    s.integrationServices = Object.assign(defaultIntegrationServices(), s.integrationServices || {});
+    normalizeServerNicsAndPower(s);
+    normalizeServerIdentityRefs(s, catalogs);
+    if (!Object.prototype.hasOwnProperty.call(row, "cluster") && legacyClusterAll) s.cluster.enabled = true;
+    sanitizeServerFeaturesForImage(s);
+    state.expanded[s._id] = true;
+  });
+  reconcileServersWithNetworks();
+  if (parsed && Array.isArray(parsed.vhdSets)) {
+    state.vhdSets = parsed.vhdSets.map(v => Object.assign(createVhdSet(), v, { _id: uid("vs") }));
+  } else if (replace) {
+    state.vhdSets = [];
+  }
+  if (typeof state.defaults.sxsSourcePath !== "string") state.defaults.sxsSourcePath = "";
+  state.defaults.naming = namingDefaults();
+  if (!SHOW_LOCALE_CARD || (state.defaults.locale !== LOCALE_DEFAULT && !LOCALE_CATALOG[state.defaults.locale])) state.defaults.locale = LOCALE_DEFAULT;
+  state.defaults.keyboardLayout = state.defaults.locale;
+  state.defaults.passwordLength = passwordLength();
+  normalizeStoragePlacement();
+  delete state.defaults.uiLanguage;
+  return { added, updated };
+}
+
+function encodeState() {
+  const payload = {
+    themeId: state.themeId,
+    usernameTheme: state.usernameTheme,
+    defaults: state.defaults,
+    domainJoinAccounts: state.domainJoinAccounts.map(({ _id, ...rest }) => rest),
+    azureArcPrincipals: state.azureArcPrincipals.map(({ _id, ...rest }) => rest),
+    networks: (state.networks || []).map(({ _id, ...rest }) => rest),
+    servers: state.servers.map(({ _id, ...rest }) => rest),
+    vhdSets: state.vhdSets.map(({ _id, ...rest }) => rest)
+  };
+  return STATE_PREFIX + btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+}
+function decodeState(text) {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith(STATE_PREFIX)) throw new Error("State must start with " + STATE_PREFIX);
+  const parsed = JSON.parse(decodeURIComponent(escape(atob(trimmed.slice(STATE_PREFIX.length)))));
+  state.defaults = Object.assign({
+    vhdxDirectory: "vhdx",
+    vmPath: "",
+    vhdPath: "",
+    availableSwitches: [],
+    cluster: { enabled: false, name: "", addAfterCreate: true },
+    naming: { vmNameIncludeFqdn: false, folderIncludeFqdn: false, fqdnOverrideEnabled: false, fqdn: "" },
+    sxsSourcePath: "",
+    locale: LOCALE_DEFAULT,
+    keyboardLayout: LOCALE_DEFAULT,
+    passwordLength: 32,
+    imageProfiles: defaultImageProfiles()
+  }, parsed.defaults || {});
+  delete state.defaults.azureArc;
+  delete state.defaults.uiLanguage;
+  state.defaults.naming = namingDefaults();
+  if (!SHOW_LOCALE_CARD || (state.defaults.locale !== LOCALE_DEFAULT && !LOCALE_CATALOG[state.defaults.locale])) state.defaults.locale = LOCALE_DEFAULT;
+  state.defaults.keyboardLayout = state.defaults.locale;
+  state.defaults.passwordLength = passwordLength();
+  normalizeStoragePlacement();
+  if (!state.defaults.imageProfiles) state.defaults.imageProfiles = defaultImageProfiles();
+  IMAGE_CATALOG.forEach(img => {
+    if (!state.defaults.imageProfiles[img.id]) state.defaults.imageProfiles[img.id] = { ...img.defaults };
+  });
+  const catalogs = migrateLegacyIdentityCatalogs(parsed);
+  state.domainJoinAccounts = catalogs.accounts;
+  state.azureArcPrincipals = catalogs.principals;
+  catalogs.accounts = state.domainJoinAccounts;
+  catalogs.principals = state.azureArcPrincipals;
+  state.networks = (parsed.networks || []).map(net => ensureCatalogStableId(Object.assign(createNetwork(), net, { _id: uid("net") }), "net"));
+  state.servers = (parsed.servers || []).map(s => {
+    const n = createServer(s.name);
+    Object.assign(n, s);
+    n._id = uid("s");
+    n.name = String(n.name || "").toLowerCase();
+    n.imageId = normalizeImageId(n.imageId);
+    n.imageHint = n.imageHint || "";
+    n.imageSource = n.imageSource === "custom" || !!(n.imageHint && String(n.imageHint).trim()) ? "custom" : "catalog";
+    n.additionalDisks = n.additionalDisks || [];
+    n.vhdSetIds = n.vhdSetIds || [];
+    n.windowsFeatures = Array.isArray(n.windowsFeatures) ? n.windowsFeatures : [];
+    n.includeManagementTools = n.includeManagementTools !== false;
+    n.builtInAdminOnly = !!n.builtInAdminOnly;
+    n.appCompatFod = !!n.appCompatFod;
+    if (!String(n.localUserName || "").trim()) n.localUserName = generateLocalUsername(state.usernameTheme);
+    n.rsatCapabilities = Array.isArray(n.rsatCapabilities) ? n.rsatCapabilities : [];
+    n.clientFeatures = Array.isArray(n.clientFeatures) ? n.clientFeatures : [];
+    n.integrationServices = Object.assign(defaultIntegrationServices(), n.integrationServices || {});
+    normalizeServerNicsAndPower(n);
+    normalizeServerIdentityRefs(n, catalogs);
+    sanitizeServerFeaturesForImage(n);
+    return n;
+  });
+  state.vhdSets = (parsed.vhdSets || []).map(v => Object.assign(createVhdSet(), v, { _id: uid("vs") }));
+  reconcileServersWithNetworks();
+  if (parsed.themeId) applyTheme(parsed.themeId);
+  if (parsed.usernameTheme) state.usernameTheme = parsed.usernameTheme;
+}
+
+/* Errors and warnings stop the download once, with the findings in front of you.
+   Notes are not blocking - they describe what the build will do on purpose. */
+function downloadConfig() {
+  const issues = validate();
+  const blocking = issues.filter(i => i.level === "error" || i.level === "warn");
+  if (blocking.length) { openExportGate(blocking); return; }
+  downloadConfigNow();
+}
+
+function openExportGate(blocking) {
+  const errors = blocking.filter(i => i.level === "error").length;
+  const warnings = blocking.length - errors;
+  const parts = [];
+  if (errors) parts.push(`${errors} error${errors === 1 ? "" : "s"}`);
+  if (warnings) parts.push(`${warnings} warning${warnings === 1 ? "" : "s"}`);
+  document.getElementById("exportGateTitle").textContent =
+    errors ? "This config still has errors" : "This config has warnings";
+  document.getElementById("exportGateHelp").textContent = errors
+    ? `${parts.join(" and ")}. Build-Vms.ps1 will very likely refuse or fail on this — fix them in Review and validate first.`
+    : `${parts.join(" and ")}. The build can still run, but check these are deliberate.`;
+  document.getElementById("exportGateList").innerHTML = blocking.map(i => `
+    <div class="issue ${i.level}">${i.level === "error" ? SVG_ALERT : SVG_INFO}
+      <div class="issue-text">${esc(i.text)}<span class="issue-where">${esc(i.where)}</span></div>
+    </div>`).join("");
+  document.getElementById("exportGateOverlay").classList.add("open");
+}
+function closeExportGate() { document.getElementById("exportGateOverlay").classList.remove("open"); }
+
+function downloadConfigNow() {
+  const json = JSON.stringify(buildConfig(), null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "config.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast("config.json downloaded");
+}
+
+/* A package list is an array of rows on screen and a deduplicated array in the
+   contract, but a state token written before this card existed carries the single
+   space-or-comma separated string the old field produced - so every read goes
+   through here and nothing else has to know both shapes. */
+function linuxPackageRows(s) {
+  const raw = s.linuxPackages;
+  if (Array.isArray(raw)) return raw.map(x => String(x || ""));
+  return String(raw || "").split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
+}
+function linuxPackageList(s) {
+  return [...new Set(linuxPackageRows(s).map(x => x.trim()).filter(Boolean))];
+}
+
+/* The private half of a generated key, kept in memory and nowhere else - keyed by
+   the VM's id. Keys are per VM only; there is no shared default. Deliberately NOT in state: the save
+   token is a string people paste into chats and tickets, and a private key that
+   travels that way is a key that has to be replaced. The consequence is stated on
+   the card - download it now, or generate another one. */
+const sshPrivateKeys = {};
+/* Which of those have been downloaded since they were generated - same lifetime, same
+   keying. It is what turns the Passwords blade's key column into a to-do list. */
+const sshKeysDownloaded = {};
+
+function sshUint32(n) {
+  return new Uint8Array([(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]);
+}
+/* Everything in an OpenSSH blob is a length-prefixed string; these two build one. */
+function sshString(bytes) {
+  const body = typeof bytes === "string" ? new TextEncoder().encode(bytes) : bytes;
+  return sshBytes([sshUint32(body.length), body]);
+}
+function sshBytes(parts) {
+  const total = parts.reduce((n, part) => n + part.length, 0);
+  const out = new Uint8Array(total);
+  let at = 0;
+  parts.forEach(part => { out.set(part, at); at += part.length; });
+  return out;
+}
+function sshBase64(bytes) {
+  let binary = "";
+  bytes.forEach(b => { binary += String.fromCharCode(b); });
+  return btoa(binary);
+}
+/* The seed is the 32 bytes inside the PKCS#8 CurvePrivateKey OCTET STRING. Browsers
+   currently export Ed25519 without the optional public-key attribute, which would
+   put the seed last - but that is an option the format allows, so the marker is
+   matched rather than the tail assumed. */
+function sshEd25519Seed(pkcs8) {
+  for (let i = 0; i + 36 <= pkcs8.length; i++) {
+    if (pkcs8[i] === 0x04 && pkcs8[i + 1] === 0x22 && pkcs8[i + 2] === 0x04 && pkcs8[i + 3] === 0x20) {
+      return pkcs8.slice(i + 4, i + 36);
+    }
+  }
+  return pkcs8.slice(pkcs8.length - 32);
+}
+/* Ed25519 rather than RSA: it is one line of authorized_keys, every OpenSSH since
+   6.5 takes it, and the private half is a 32-byte seed rather than a key the
+   browser would have to re-encode as PKCS#1. */
+async function generateSshKeyPair(comment) {
+  if (!window.crypto || !crypto.subtle) {
+    throw new Error("This browser exposes no WebCrypto - run ssh-keygen -t ed25519 instead.");
+  }
+  let pair;
+  try {
+    pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+  } catch (err) {
+    throw new Error("This browser cannot generate Ed25519 keys - run: ssh-keygen -t ed25519 -C \"" + comment + "\"");
+  }
+  const pub = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+  const seed = sshEd25519Seed(new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey)));
+  const type = "ssh-ed25519";
+  const pubBlob = sshBytes([sshString(type), sshString(pub)]);
+  /* The check integers are written twice and compared on load - that is how ssh
+     tells a wrong passphrase from a corrupt file. Unencrypted here, so any value
+     does, as long as both copies match. */
+  const check = crypto.getRandomValues(new Uint8Array(4));
+  let priv = sshBytes([
+    check, check,
+    sshString(type), sshString(pub), sshString(sshBytes([seed, pub])), sshString(comment)
+  ]);
+  /* Padded to the cipher block size with 1, 2, 3... even for cipher "none", whose
+     block size is 8. ssh-keygen refuses a file padded any other way. */
+  const padding = [];
+  for (let i = 1; ((priv.length + padding.length) & 7) !== 0; i++) padding.push(i);
+  priv = sshBytes([priv, new Uint8Array(padding)]);
+  const blob = sshBytes([
+    new TextEncoder().encode("openssh-key-v1\0"),
+    sshString("none"), sshString("none"), sshString(""),
+    sshUint32(1), sshString(pubBlob), sshString(priv)
+  ]);
+  const body = (sshBase64(blob).match(/.{1,70}/g) || []).join("\n");
+  return {
+    publicKey: type + " " + sshBase64(pubBlob) + " " + comment,
+    privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----\n" + body + "\n-----END OPENSSH PRIVATE KEY-----\n"
+  };
+}
+/* One writer for every file this studio hands out, so config.json and a private key
+   cannot disagree about how a download is made. */
+function downloadTextFile(name, text, mime) {
+  const blob = new Blob([text], { type: mime || "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+/* A store-only ZIP, built here because one click may only start one download - a
+   browser asked for six files at once blocks five of them or asks first. No
+   compression: a key is a few hundred bytes. Entries are marked "made by Unix" with
+   mode 0600, so unzip hands back files ssh will accept without a chmod. */
+const ZIP_CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    table[n] = c >>> 0;
+  }
+  return table;
+})();
+function zipCrc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = ZIP_CRC_TABLE[(c ^ bytes[i]) & 255] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function buildZip(files) {
+  const enc = new TextEncoder();
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  const parts = [], central = [];
+  let offset = 0;
+  files.forEach(f => {
+    const name = enc.encode(f.name);
+    const data = enc.encode(f.text);
+    const crc = zipCrc32(data);
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true); local.setUint16(4, 20, true); local.setUint16(6, 0x0800, true);
+    local.setUint16(8, 0, true); local.setUint16(10, dosTime, true); local.setUint16(12, dosDate, true);
+    local.setUint32(14, crc, true); local.setUint32(18, data.length, true); local.setUint32(22, data.length, true);
+    local.setUint16(26, name.length, true); local.setUint16(28, 0, true);
+    parts.push(new Uint8Array(local.buffer), name, data);
+    const cd = new DataView(new ArrayBuffer(46));
+    cd.setUint32(0, 0x02014b50, true); cd.setUint16(4, (3 << 8) | 20, true); cd.setUint16(6, 20, true);
+    cd.setUint16(8, 0x0800, true); cd.setUint16(10, 0, true); cd.setUint16(12, dosTime, true); cd.setUint16(14, dosDate, true);
+    cd.setUint32(16, crc, true); cd.setUint32(20, data.length, true); cd.setUint32(24, data.length, true);
+    cd.setUint16(28, name.length, true); cd.setUint16(30, 0, true); cd.setUint16(32, 0, true);
+    cd.setUint16(34, 0, true); cd.setUint16(36, 0, true); cd.setUint32(38, (0o100600 << 16) >>> 0, true);
+    cd.setUint32(42, offset, true);
+    central.push(new Uint8Array(cd.buffer), name);
+    offset += 30 + name.length + data.length;
+  });
+  const cdSize = central.reduce((n, a) => n + a.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+  end.setUint32(12, cdSize, true); end.setUint32(16, offset, true);
+  return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: "application/zip" });
+}
+function downloadBlob(name, blob) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* The comment is what shows up in authorized_keys and in `ssh-add -l`, so it says
+   which VM the key was cut for rather than which browser cut it. */
+function sshKeyComment(s) {
+  const user = String(s.localUserName || "").trim() || "root";
+  const host = String(s.name || "").trim() || "vm";
+  return user + "@" + host;
+}
+function sshKeyFileName(s) {
+  const host = String(s.name || "").trim() || "vm";
+  return host + "_id_ed25519";
+}
+function downloadIcon() {
+  return `<img class="glyph" src="${iconSrc("download.svg")}" width="16" height="16" alt="" aria-hidden="true">`;
+}
+
+function openStateModal(mode) {
+  state.stateModalMode = mode;
+  document.getElementById("stateOverlay").classList.add("open");
+  document.getElementById("stateModalTitle").textContent = mode === "save" ? "Save state" : "Resume state";
+  document.getElementById("stateModalHelp").textContent = mode === "save"
+    ? "Copy this token and keep it. The studio is stateless — paste it later to restore everything."
+    : "Paste a HVSS1. token from a previous Save state.";
+  document.getElementById("stateActionBtn").textContent = mode === "save" ? "Done" : "Restore";
+  document.getElementById("stateCopyBtn").style.display = mode === "save" ? "" : "none";
+  document.getElementById("stateText").value = mode === "save" ? encodeState() : "";
+}
+function closeStateModal() { document.getElementById("stateOverlay").classList.remove("open"); }
+function copyStateText() {
+  navigator.clipboard.writeText(document.getElementById("stateText").value).then(() => toast("State copied"));
+}
+function handleStateModalAction() {
+  if (state.stateModalMode === "save") { closeStateModal(); return; }
+  try {
+    decodeState(document.getElementById("stateText").value);
+    closeStateModal();
+    render();
+    toast("State restored");
+  } catch (e) {
+    toast(e.message || "Invalid state", true);
+  }
+}
+
+function field(label, html) { return `<label class="field">${label}${html}</label>`; }
+/* A field label carrying its own glyph — the label is a flex row so the icon does not
+   claim a line of its own inside the column-stacked .field. */
+function fieldLabel(icon, text) {
+  return `<span class="field-label"><img src="${iconSrc(icon)}" alt="">${esc(text)}</span>`;
+}
+/* A defaults path, locked like a file-name cell: readonly until the pencil, so a stray
+   click in a text box cannot quietly repoint where every VM gets written. */
+function pathField(key, value, placeholder, extraAttrs) {
+  const unlocked = !!state.nameEdit["gs:" + key];
+  return `
+    <div class="edit-field">
+      <input data-d="${esc(key)}" data-name-input="gs:${esc(key)}" value="${esc(value || "")}"
+             placeholder="${esc(placeholder || "")}" spellcheck="false" ${unlocked ? "" : "readonly"} ${extraAttrs || ""}>
+      <button class="btn icon" type="button" data-name-edit="gs:${esc(key)}"
+              title="${unlocked ? "Done" : "Edit path"}" aria-label="${unlocked ? "Done" : "Edit path"}">${unlocked ? checkIcon() : pencilIcon()}</button>
+    </div>`;
+}
+
+function plusIcon() {
+  return `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 3.2v9.6M3.2 8h9.6"/></svg>`;
+}
+function chipRemoveIcon() {
+  return `<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>`;
+}
+
+/* A list of domain groups, typed one at a time and kept as chips.
+
+   Not a comma-separated text box: an AD group name has spaces in it more often than
+   not, and a box that splits on commas cannot tell "Domain Admins, Backup Operators"
+   from one group whose name a comma happens to sit inside. A chip is a whole name,
+   entered deliberately, and the only character it cannot contain is a newline.
+
+   What gets typed is what the domain calls the group. The down-level form is accepted
+   too and the prefix is dropped: a Linux box joined with realmd resolves groups
+   fully qualified against the realm (use_fully_qualified_names), so AD\Domain Admins
+   reaches sssd as "Domain Admins@<realm>" and never as anything with a backslash. */
+function groupChipList(opts) {
+  const list = Array.isArray(opts.values) ? opts.values : [];
+  const chips = list.map((group, i) => `
+    <span class="chip">${esc(group)}<button class="chip-x" type="button" data-grp-del="${esc(opts.key)}" data-grp-i="${i}"
+      title="Remove ${esc(group)}" aria-label="Remove ${esc(group)}">${chipRemoveIcon()}</button></span>`).join("");
+  // The list sits UNDER the box that fills it, so a chip lands where the eye already is
+  // after pressing +. One line of hint either way: while the list is empty it says what
+  // empty MEANS, which is the part that decides whether to type anything at all.
+  return `
+    <div class="chip-add">
+      <input data-grp-input="${esc(opts.key)}" placeholder="${esc(opts.placeholder || "")}" spellcheck="false" autocomplete="off">
+      <button class="btn icon" type="button" data-grp-add="${esc(opts.key)}" title="Add this group" aria-label="Add this group">${plusIcon()}</button>
+    </div>
+    ${list.length ? `<div class="chip-list">${chips}</div>` : ""}
+    <span class="hint">${esc(list.length ? (opts.hint || "") : (opts.empty || ""))}</span>`;
+}
+
+/* Where a chip list writes to. "dja:<id>:<field>" is an account's own list, "s:<id>"
+   the per-VM sudo override - the same key spelling the buttons carry. */
+function groupChipTarget(key) {
+  const parts = String(key || "").split(":");
+  if (parts[0] === "dja") {
+    const account = (state.domainJoinAccounts || []).find(x => x._id === parts[1]);
+    return account ? { owner: account, field: parts[2] } : null;
+  }
+  if (parts[0] === "s") {
+    const server = state.servers.find(x => x._id === parts[1]);
+    return server ? { owner: server, field: "djSudoGroups" } : null;
+  }
+  return null;
+}
+
+/* A typed name on its way into the list. The backslash form is unwound here rather
+   than at export so the chip shows what the VM will actually look up, and a name that
+   is already qualified is left exactly as it is. */
+function normalizeGroupName(text) {
+  let name = String(text || "").replace(/\s+/g, " ").trim();
+  const slash = name.lastIndexOf("\\");
+  if (slash >= 0) name = name.slice(slash + 1).trim();
+  return name;
+}
+
+function addGroupChip(key, text) {
+  const target = groupChipTarget(key);
+  const name = normalizeGroupName(text);
+  if (!target || !name) return false;
+  const list = Array.isArray(target.owner[target.field]) ? target.owner[target.field] : [];
+  if (list.some(x => String(x).toLowerCase() === name.toLowerCase())) return false;
+  target.owner[target.field] = list.concat([name]);
+  return true;
+}
+
+function trashIcon() {
+  return `<img class="glyph" src="${iconSrcDanger("trash.svg")}" width="16" height="16" alt="" aria-hidden="true">`;
+}
+function pencilIcon() {
+  return `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.3 2.3l2.4 2.4M12.1 1.5a1.2 1.2 0 011.7 0l.7.7a1.2 1.2 0 010 1.7L5.6 12.8 2.5 13.5l.7-3.1z"/></svg>`;
+}
+function revertIcon() {
+  return `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.7 6.6h4V2.6"/><path d="M3.4 6.6A5.4 5.4 0 118 13.4"/></svg>`;
+}
+function checkIcon() {
+  return `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.4l3.2 3.2L13 4.8"/></svg>`;
+}
+function eyeIcon() {
+  return `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.3 8S3.8 3.7 8 3.7 14.7 8 14.7 8 12.2 12.3 8 12.3 1.3 8 1.3 8z"/><circle cx="8" cy="8" r="1.9"/></svg>`;
+}
+function eyeOffIcon() {
+  return `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.4 4a6.3 6.3 0 011.6-.2c4.2 0 6.7 4.2 6.7 4.2a12.3 12.3 0 01-2.4 2.8"/><path d="M3.7 5.2A12.3 12.3 0 001.3 8s2.5 4.3 6.7 4.3a6.3 6.3 0 002.2-.4"/><path d="M6.6 6.6a2 2 0 002.8 2.8"/><path d="M2.2 2.2l11.6 11.6"/></svg>`;
+}
+function copyIcon() {
+  return `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5.6" y="5.6" width="8" height="8" rx="1.3"/><path d="M10.6 5.6V3.7a1.3 1.3 0 00-1.3-1.3H3.7a1.3 1.3 0 00-1.3 1.3v5.6a1.3 1.3 0 001.3 1.3h1.9"/></svg>`;
+}
+function regenIcon() {
+  return `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.3 7.3A5.4 5.4 0 003.9 4.6"/><path d="M2.7 8.7a5.4 5.4 0 009.4 2.7"/><path d="M13.5 2.8v3.5h-3.5M2.5 13.2V9.7h3.5"/></svg>`;
+}
+
+/* Locked file-name cell: readonly input plus a pencil that unlocks it, and a revert
+   arrow that drops the custom name so the generated one takes over again. */
+function diskNameCell(opts) {
+  const unlocked = !!state.nameEdit[opts.key];
+  const custom = !!opts.custom;
+  return `
+    <div class="disk-name-cell">
+      <img src="${iconSrc(opts.icon || "disk.svg")}" alt="">
+      <input class="disk-name-input" data-name-input="${esc(opts.key)}" value="${esc(opts.value)}"
+             title="${esc(opts.value)}" spellcheck="false" ${unlocked ? "" : "readonly"} ${opts.bind}
+             aria-label="Disk file name">
+      ${opts.badge || ""}
+      <span class="disk-name-actions">
+        ${custom ? `<button class="btn icon ghost" type="button" title="Back to the generated name" aria-label="Back to the generated name" data-name-reset="${esc(opts.key)}">${revertIcon()}</button>` : ""}
+        <button class="btn icon ghost" type="button" title="${unlocked ? "Done renaming" : "Rename file"}" aria-label="${unlocked ? "Done renaming" : "Rename file"}" data-name-edit="${esc(opts.key)}">${unlocked ? checkIcon() : pencilIcon()}</button>
+      </span>
+    </div>`;
+}
+const DIFF_DISK_TIP = "Creates a small child VHDX linked to the gold parent (lab/VDI). Saves space, but the gold image must stay read-only and available — if the parent is moved or lost, every child breaks. Leave off for a full independent copy of the gold disk.";
+const REMOVE_APPS_TIP = "Offline-removes built-in Windows 11 provisioned apps from this VM's own disk before first boot — every app individually tickable below, all ticked by default. A short protected list (Store, Terminal, Notepad, Photos, ...) is never offered and never touched. Windows 11 client images only — off by default.";
+
+/** Mirrors Build-Vms.ps1 Remove-OfflineProvisionedApps' $targetApps, one row per
+    provisioned package. The id here IS the package DisplayName the removal matches on —
+    keep the two lists identical or a ticked app silently survives the bake. Categories
+    only group the card visually; every row toggles alone. */
+const APP_REMOVAL_CATALOG = [
+  { id: "Microsoft.XboxApp",                      label: "Xbox Console Companion",  cat: "Gaming", icon: "app-xbox.svg" },
+  { id: "Microsoft.GamingApp",                    label: "Xbox (Game Pass)",        cat: "Gaming", icon: "app-xbox.svg" },
+  { id: "Microsoft.XboxGamingOverlay",            label: "Xbox Game Bar",           cat: "Gaming", icon: "app-xbox.svg" },
+  { id: "Microsoft.XboxGameOverlay",              label: "Xbox Game Bar Plugin",    cat: "Gaming", icon: "app-xbox.svg" },
+  { id: "Microsoft.XboxIdentityProvider",         label: "Xbox Identity Provider",  cat: "Gaming", icon: "app-xbox.svg" },
+  { id: "Microsoft.XboxSpeechToTextOverlay",      label: "Xbox Speech to Text",     cat: "Gaming", icon: "app-xbox.svg" },
+  { id: "Microsoft.Xbox.TCUI",                    label: "Xbox Live in-game UI",    cat: "Gaming", icon: "app-xbox.svg" },
+  { id: "Microsoft.MicrosoftSolitaireCollection", label: "Solitaire Collection",    cat: "Gaming", icon: "app-solitaire.svg" },
+  { id: "MSTeams",                                label: "Teams (new)",             cat: "Communication", icon: "app-teams.svg" },
+  { id: "MicrosoftTeams",                         label: "Teams (classic)",         cat: "Communication", icon: "app-teams.svg" },
+  { id: "Microsoft.SkypeApp",                     label: "Skype",                   cat: "Communication", icon: "app-call.svg" },
+  { id: "microsoft.windowscommunicationsapps",    label: "Mail and Calendar",       cat: "Communication", icon: "app-mail.svg" },
+  { id: "Microsoft.OutlookForWindows",            label: "Outlook (new)",           cat: "Communication", icon: "app-outlook.svg" },
+  { id: "Microsoft.People",                       label: "People",                  cat: "Communication", icon: "app-people.svg" },
+  { id: "Microsoft.YourPhone",                    label: "Phone Link",              cat: "Communication", icon: "app-phone-link.svg" },
+  { id: "Microsoft.Copilot",                      label: "Copilot",                 cat: "Assistants & Bing", icon: "app-copilot.svg" },
+  { id: "Microsoft.549981C3F5F10",                label: "Cortana",                 cat: "Assistants & Bing", icon: "app-cortana.svg" },
+  { id: "Microsoft.BingSearch",                   label: "Bing Search",             cat: "Assistants & Bing", icon: "app-search.svg" },
+  { id: "Microsoft.BingNews",                     label: "News",                    cat: "Assistants & Bing", icon: "app-news.svg" },
+  { id: "Microsoft.BingWeather",                  label: "Weather",                 cat: "Assistants & Bing", icon: "app-weather.svg" },
+  { id: "Microsoft.ZuneVideo",                    label: "Movies & TV",             cat: "Media & creative", icon: "app-movies.svg" },
+  { id: "Microsoft.ZuneMusic",                    label: "Media Player",            cat: "Media & creative", icon: "app-music.svg" },
+  { id: "Microsoft.WindowsCamera",                label: "Camera",                  cat: "Media & creative", icon: "app-camera.svg" },
+  { id: "Clipchamp.Clipchamp",                    label: "Clipchamp",               cat: "Media & creative", icon: "app-clipchamp.svg" },
+  { id: "Microsoft.WindowsSoundRecorder",         label: "Sound Recorder",          cat: "Media & creative", icon: "app-recorder.svg" },
+  { id: "Microsoft.MSPaint",                      label: "Paint 3D",                cat: "Media & creative", icon: "app-paint.svg" },
+  { id: "Microsoft.Microsoft3DViewer",            label: "3D Viewer",               cat: "Media & creative", icon: "app-3d.svg" },
+  { id: "Microsoft.MixedReality.Portal",          label: "Mixed Reality Portal",    cat: "Media & creative", icon: "app-vr.svg" },
+  { id: "Microsoft.Whiteboard",                   label: "Whiteboard",              cat: "Media & creative", icon: "app-whiteboard.svg" },
+  { id: "Microsoft.MicrosoftOfficeHub",           label: "Microsoft 365 (Office)",  cat: "Productivity", icon: "app-office.svg" },
+  { id: "Microsoft.Office.OneNote",               label: "OneNote",                 cat: "Productivity", icon: "app-onenote.svg" },
+  { id: "Microsoft.Todos",                        label: "To Do",                   cat: "Productivity", icon: "app-todo.svg" },
+  { id: "Microsoft.MicrosoftStickyNotes",         label: "Sticky Notes",            cat: "Productivity", icon: "app-sticky.svg" },
+  { id: "Microsoft.MicrosoftJournal",             label: "Journal",                 cat: "Productivity", icon: "app-journal.svg" },
+  { id: "Microsoft.PowerAutomateDesktop",         label: "Power Automate",          cat: "Productivity", icon: "app-automate.svg" },
+  { id: "Microsoft.WindowsAlarms",                label: "Clock (Alarms)",          cat: "Productivity", icon: "app-alarms.svg" },
+  { id: "Microsoft.WindowsMaps",                  label: "Maps",                    cat: "Productivity", icon: "app-maps.svg" },
+  { id: "Microsoft.WindowsFeedbackHub",           label: "Feedback Hub",            cat: "System & help", icon: "app-feedback.svg" },
+  { id: "Microsoft.GetHelp",                      label: "Get Help",                cat: "System & help", icon: "app-gethelp.svg" },
+  { id: "Microsoft.Getstarted",                   label: "Tips (Get Started)",      cat: "System & help", icon: "app-tips.svg" },
+  { id: "Microsoft.Windows.DevHome",              label: "Dev Home",                cat: "System & help", icon: "app-devhome.svg" },
+  { id: "MicrosoftCorporationII.QuickAssist",     label: "Quick Assist",            cat: "System & help", icon: "app-quickassist.svg" },
+  { id: "MicrosoftCorporationII.MicrosoftFamily", label: "Family Safety",           cat: "System & help", icon: "app-family.svg" }
+];
+const APP_REMOVAL_IDS = new Set(APP_REMOVAL_CATALOG.map(a => a.id));
+
+/* Category -> icon band, chosen so no two adjacent categories share a hue. The glyphs
+   are registered host blue and re-tinted per row at render time via iconSrcBand. */
+const APP_CAT_BANDS = {
+  "Gaming":            "work",
+  "Communication":     "host",
+  "Assistants & Bing": "ident",
+  "Media & creative":  "deploy",
+  "Productivity":      "work",
+  "System & help":     "host"
+};
+
+/** The set of package ids this VM removes. null = the full catalog (the compact
+    removeBuiltInApps: true shape); an array = a custom pick. */
+function appRemovalSelection(s) {
+  return Array.isArray(s.removeApps) ? s.removeApps : null;
+}
+function appRemovalCount(s) {
+  const sel = appRemovalSelection(s);
+  return sel === null ? APP_REMOVAL_CATALOG.length : sel.length;
+}
+function appRemovalHas(s, id) {
+  const sel = appRemovalSelection(s);
+  return sel === null || sel.includes(id);
+}
+function tipHost() {
+  let el = document.getElementById("tip-host");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "tip-host";
+    el.setAttribute("aria-hidden", "true");
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function hideFloatingTip() {
+  const host = document.getElementById("tip-host");
+  if (host) host.innerHTML = "";
+}
+function floatingTipHtml(anchor) {
+  const kind = anchor.getAttribute("data-tip-kind") || "info";
+  if (kind === "warn") {
+    return esc(anchor.getAttribute("data-tip-body") || anchor.getAttribute("aria-label") || "");
+  }
+  const title = anchor.getAttribute("data-tip-title") || "About";
+  const body = anchor.getAttribute("data-tip-body") || "";
+  const id = anchor.getAttribute("data-tip-id") || "";
+  return `<span class="tip-title">${esc(title)}</span>${esc(body)}${id ? `<span class="tip-id">Installs: ${esc(id)}</span>` : ""}`;
+}
+function showFloatingTip(anchor) {
+  const host = tipHost();
+  const kind = anchor.getAttribute("data-tip-kind") || "info";
+  const bubble = document.createElement("div");
+  bubble.className = kind === "warn" ? "tip-float tip-float-warn" : "tip-float tip-float-info";
+  bubble.innerHTML = floatingTipHtml(anchor);
+  host.innerHTML = "";
+  host.appendChild(bubble);
+  const r = anchor.getBoundingClientRect();
+  const pad = 8;
+  const bw = bubble.offsetWidth || 280;
+  const bh = bubble.offsetHeight || 80;
+  let left = Math.min(window.innerWidth - bw - pad, Math.max(pad, r.right - bw));
+  let top = r.bottom + 8;
+  if (top + bh > window.innerHeight - pad) top = Math.max(pad, r.top - bh - 8);
+  bubble.style.left = left + "px";
+  bubble.style.top = top + "px";
+}
+/* Stroke-drawn like the pencil / eye / regen glyphs — the filled Fluent triangle stood
+   out as the one solid icon in an otherwise line-drawn set. */
+function warnIconSvg(cls) {
+  return `<svg${cls ? ` class="${cls}"` : ""} viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6.9 2.9 1.55 12.2a1.27 1.27 0 0 0 1.1 1.9h10.7a1.27 1.27 0 0 0 1.1-1.9L9.1 2.9a1.27 1.27 0 0 0-2.2 0z"/><path d="M8 6.2v3.3"/><path d="M8 11.7h.01"/></svg>`;
+}
+/* Both tips can sit inside a <label> now, so the click must not activate the label's
+   checkbox — hence the preventDefault next to the stopPropagation. */
+function warnTip(text) {
+  return `<span class="tip-warn" tabindex="0" role="img" aria-label="${esc(text)}" data-tip-kind="warn" data-tip-body="${esc(text)}" onclick="event.stopPropagation();event.preventDefault()">${warnIconSvg("tip-warn-icon")}</span>`;
+}
+function warnBanner(text) {
+  if (!text) return "";
+  return `<span class="warn-banner" title="${esc(text)}" onclick="event.stopPropagation()">${warnIconSvg()}<span class="warn-banner-text">${esc(text)}</span></span>`;
+}
+function infoTip(title, body, featureId) {
+  const icon = `<svg class="tip-info-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM8 14a6 6 0 1 1 0-12 6 6 0 0 1 0 12Zm-.75-3.25a.75.75 0 0 0 1.5 0v-3.5a.75.75 0 0 0-1.5 0v3.5ZM8 5.5A.75.75 0 1 0 8 4a.75.75 0 0 0 0 1.5Z"/></svg>`;
+  const label = title ? `${title}. ${body || ""}` : (body || "");
+  return `<span class="tip-info" tabindex="0" role="img" aria-label="${esc(label)}" data-tip-kind="info" data-tip-title="${esc(title || "About")}" data-tip-body="${esc(body || "")}" data-tip-id="${esc(featureId || "")}" onclick="event.stopPropagation();event.preventDefault()">${icon}</span>`;
+}
+function featureWarnText(item) {
+  if (!item) return "";
+  return item.postConfig || item.hint || "";
+}
+function featureInfoTip(item) {
+  if (!item) return "";
+  const info = item.info || `Installs ${item.id} via Install-WindowsFeature / Add-WindowsCapability.`;
+  return `<span class="role-tips">${infoTip(item.label, info, item.id)}</span>`;
+}
+/* `sub` is trusted markup (same contract as toolbox toggleField) — a short second
+   line inside the row, so long explanations stop needing a separate <p class=hint>. */
+function toggle(attrs, label, checked, disabled, sub, variant) {
+  const dis = disabled ? " disabled" : "";
+  const subHtml = sub ? `<span class="toggle-sub">${sub}</span>` : "";
+  return `<label class="toggle${variant ? ` ${variant}` : ""}${disabled ? " disabled" : ""}"><input type="checkbox" ${attrs}${checked ? " checked" : ""}${dis}><span class="toggle-track"><span class="toggle-thumb"></span></span><span class="toggle-label">${label}${subHtml}</span></label>`;
+}
+/* The tip rides inside the toggle's own label, right after the text — parked outside the
+   bordered row it squeezed the row narrower than its neighbours and the switch looked
+   cropped against the card edge. */
+function toggleWithWarn(attrs, label, checked, tip) {
+  return toggle(attrs, `${label}${warnTip(tip)}`, checked);
+}
+
+/* Every blocking finding may name the field it came from. The keys are collected once per
+   render so each blade can put a red border on exactly what Review is complaining about. */
+let invalidFieldKeys = new Set();
+let lastValidation = [];
+
+function refreshValidation() {
+  try { lastValidation = validate(); }
+  catch (e) { lastValidation = []; }
+  /* field may be one key or a list — "nothing here is filled in" is one message about
+     several inputs, and marking only the first of them reads as a bug. */
+  invalidFieldKeys = new Set(
+    lastValidation.filter(i => i.level === "error" && i.field)
+      .flatMap(i => Array.isArray(i.field) ? i.field : [i.field]));
+}
+
+/** `${inv("s:" + s._id + ":name")}` inside a class attribute marks the field red. */
+function inv(key) { return invalidFieldKeys.has(key) ? " is-invalid" : ""; }
+function invAria(key) { return invalidFieldKeys.has(key) ? ' aria-invalid="true"' : ""; }
+
+/** Count of blocking findings — drives the red badge on the Review blade. */
+function reviewErrorCount() {
+  return lastValidation.filter(i => i.level === "error").length;
+}
+
+function navBadge(id) {
+  if (id === "networks" && state.networks.length) return `<span class="nav-badge">${state.networks.length}</span>`;
+  if (id === "cluster") {
+    const c = state.defaults.cluster || {};
+    if (!c.enabled) return "";
+    const nodes = serversForCluster().length;
+    return nodes ? `<span class="nav-badge ok">${nodes}</span>` : `<span class="nav-badge err">0</span>`;
+  }
+  if (id === "domainjoin" && state.domainJoinAccounts.length) return `<span class="nav-badge">${state.domainJoinAccounts.length}</span>`;
+  if (id === "azurearc" && state.azureArcPrincipals.length) return `<span class="nav-badge">${state.azureArcPrincipals.length}</span>`;
+  if (id === "servers") return `<span class="nav-badge ${state.servers.length ? "ok" : ""}">${state.servers.length}</span>`;
+  if (id === "vhdsets" && state.vhdSets.length) return `<span class="nav-badge">${state.vhdSets.length}</span>`;
+  if (id === "review") {
+    const errors = reviewErrorCount();
+    return errors ? `<span class="nav-badge err">${errors}</span>` : `<span class="nav-badge ok">OK</span>`;
+  }
+  if (id === "passwords") {
+    const rows = credentialRows();
+    if (!rows.length) return "";
+    const missing = rows.filter(r => !r.value).length;
+    return missing ? `<span class="nav-badge err">${missing}</span>` : `<span class="nav-badge">${rows.length}</span>`;
+  }
+  return "";
+}
+
+function renderNav() {
+  let lastGroup = "";
+  document.getElementById("nav").innerHTML = BLADES.map(b => {
+    let head = "";
+    if (b.group !== lastGroup) {
+      lastGroup = b.group;
+      head = `<div class="nav-group">${esc(b.group)}</div>`;
+    }
+    return `${head}
+    <button class="nav-item ${state.blade === b.id ? "active" : ""}" data-blade="${b.id}">
+      <img src="${iconSrc(b.icon)}" alt=""><span class="nav-label">${esc(b.label)}</span>${navBadge(b.id)}
+    </button>`;
+  }).join("");
+}
+
+/* Pipeline strip on the Overview blade. `here` marks the stage the studio itself covers. */
+const OVERVIEW_FLOW = [
+  { icon: "iso-media.svg",   title: "ISO or cloud image", sub: "A Windows ISO in a PVE storage, Linux from its publisher" },
+  { icon: "gold-image.svg",  title: "Golds",              sub: "Baked once by the server, parked as templates" },
+  { icon: "overview.svg",    title: "This studio",        sub: "Design the VMs in the browser", here: true },
+  { icon: "first-boot.svg",  title: "Deploy",             sub: "Linked clones, a seed for the first boot" },
+  { icon: "update.svg",      title: "Jobs",               sub: "Every build with its log and progress" },
+  { icon: "vm.svg",          title: "Running VMs",        sub: "Named, addressed, joined, signed in" }
+];
+
+function overviewStep(num, icon, title, badge, bodyHtml) {
+  return `
+    <div class="step">
+      <div class="step-rail"><div class="step-num">${num}</div></div>
+      <div class="step-body">
+        <div class="step-title"><img src="${iconSrc(icon)}" alt="">${title}${badge ? ` <span class="pill tag">${badge}</span>` : ""}</div>
+        ${bodyHtml}
+      </div>
+    </div>`;
+}
+
+function renderOverview() {
+  const core = state.servers.filter(s => findImage(s.imageId).kind === "core").length;
+  const client = state.servers.filter(s => findImage(s.imageId).kind === "client").length;
+  const linux = state.servers.filter(s => isLinuxServer(s)).length;
+  const desktop = state.servers.length - core - client - linux;
+  const errors = reviewErrorCount();
+
+  return `
+    <div class="blade-toolbar">
+      <div class="page-title"><img src="${iconSrc("overview.svg")}"> Overview</div>
+    </div>
+
+    <div class="hero">
+      <div class="hero-icon"><img src="${iconSrc("mark.svg")}" alt=""></div>
+      <div class="hero-body">
+        <h2>Create Proxmox VE VMs here</h2>
+        <p>Design your machines in the blades on the left - the studio keeps the lab on the server as you go - then
+        <strong>Deploy</strong> builds them on the cluster from the golds, each VM as a job you can follow.</p>
+      </div>
+    </div>
+
+    <div class="chips">
+      <span class="pill">Virtual machines: ${state.servers.length}</span>
+      <span class="pill">Desktop: ${desktop}</span>
+      <span class="pill">Core: ${core}</span>
+      <span class="pill">Client: ${client}</span>
+      <span class="pill">Linux: ${linux}</span>
+      <span class="pill">Data disks: ${state.servers.reduce((n, s) => n + (s.additionalDisks || []).length, 0)}</span>
+      <span class="pill">Networks: ${(state.networks || []).length}</span>
+      <span class="pill">Domain Join: ${state.domainJoinAccounts.length}</span>
+      <span class="pill">Azure Arc: ${state.azureArcPrincipals.length}</span>
+      <span class="pill status ${errors ? "off" : "on"}">${errors ? errors + " error(s)" : "No errors"}</span>
+    </div>
+
+    ${gsCard("ov-flow", "overview.svg", "The pipeline", "Where this studio sits", `
+      <div class="flow">
+        ${OVERVIEW_FLOW.map(n => `
+          <div class="flow-node ${n.here ? "here" : ""}">
+            <img src="${iconSrc(n.icon)}" alt="">
+            <div class="fn-title">${esc(n.title)}</div>
+            <div class="fn-sub">${esc(n.sub)}</div>
+          </div>`).join("")}
+      </div>
+      <div class="tip-box"><img src="${iconSrc("help.svg")}" alt="">
+        <div>A gold is baked once per image and reused by every VM built from it. Baking is slow; building a VM from a gold
+        takes seconds for Linux and minutes for Windows - it is a linked clone, the Hyper-V studio's differencing disk.</div>
+      </div>
+    `, "", true)}
+
+    ${gsCard("ov-howto", "validate.svg", "How to use this studio", "End to end, in order", `
+      <div class="steps">
+
+        ${overviewStep(1, "gold-image.svg", "Bake the golds", "Golds", `
+          <p>A gold is one prepared image per Linux distribution or Windows edition - a PVE template in the pool
+          <code>vm-studio</code>, IDs from 9000. Every VM you build later is a clone of one.</p>
+          <ul>
+            <li><strong>Linux</strong> - pick the distribution; PVE downloads the cloud image itself and checks its checksum,
+            the studio bakes updates, packages, region and features into it and seals it.</li>
+            <li><strong>Windows</strong> - upload the ISO into a PVE storage (ISO Images → Upload), pick it and an edition.
+            The bake is New-Vhdx.ps1's: WinPE applies the image, audit mode installs the virtio drivers and guest agent,
+            sysprep generalizes, WinPE sets region, policies and the KMS client key offline. It boots a WinPE the studio
+            distils from a Windows ISO once - General Settings → Windows.</li>
+          </ul>
+          <div class="row"><button class="btn" type="button" data-goto="golds"><img src="${iconSrc("gold-image.svg")}" alt=""> Open Golds</button></div>
+        `)}
+
+        ${overviewStep(2, "settings.svg", "Set the defaults", "General Settings", `
+          <p>Naming, the local account generator, and the studio's own parts: the WinPE and virtio-win release Windows golds
+          get, the studio's DNS name and its certificate (Let's Encrypt renews itself).</p>
+          <div class="row"><button class="btn" type="button" data-goto="general"><img src="${iconSrc("settings.svg")}" alt=""> Open General Settings</button></div>
+        `)}
+
+        ${overviewStep(3, "vnet.svg", "Describe your networks once", "Recommended", `
+          <p>The blade lists the cluster's <strong>bridges and VNets</strong> - read from PVE, nothing to type. Below them, a
+          network is a subnet: bridge, VLAN, prefix, gateway and DNS servers. Attach a VM to one and the studio fills in its
+          bridge, gateway and DNS, and warns if the IP you type falls outside the usable range.</p>
+          <div class="row"><button class="btn" type="button" data-goto="networks"><img src="${iconSrc("vnet.svg")}" alt=""> Open Networks</button></div>
+        `)}
+
+        ${overviewStep(4, "vm.svg", "Add the virtual machines", "The main event", `
+          <p>One card per VM, and everything that VM needs is on it. The fastest start is the <strong>Template</strong> section
+          at the top: Domain Controller, File Server, Root CA, Print Server... fill in a name, an image, sizing and the matching
+          roles in one go. Everything stays editable afterwards.</p>
+          <ul>
+            <li><strong>Identity</strong> - the name (15 characters for Windows) and the image; it builds from that image's
+            newest gold.</li>
+            <li><strong>Local admin</strong> - a local account with a generated password, or built-in Administrator only.</li>
+            <li><strong>CPU / RAM</strong>, <strong>Network</strong> (one card per adapter, a bridge and VLAN each),
+            <strong>Disks</strong> (data disks lettered from D: upwards).</li>
+            <li><strong>Roles &amp; features</strong> - Windows roles, features and RSAT tools, installed at first boot.</li>
+          </ul>
+          <div class="row"><button class="btn" type="button" data-goto="servers"><img src="${iconSrc("vm.svg")}" alt=""> Open Virtual machines</button></div>
+        `)}
+
+        ${overviewStep(5, "identity.svg", "Join a domain, onboard to Arc", "Optional", `
+          <p>Define a join account once under <strong>Domain Join</strong> and attach it to the VMs that need it, with a target
+          OU per machine. Linux VMs join through realmd and sssd. <strong>Azure Arc</strong> works the same way with a service
+          principal.</p>
+          <div class="row"><button class="btn" type="button" data-goto="domainjoin"><img src="${iconSrc("identity.svg")}" alt=""> Open Domain Join</button></div>
+        `)}
+
+        ${overviewStep(6, "search.svg", "Check your work", "Review and validate", `
+          <p>Every check runs as you type, against the cluster as it is: names, bridges, IPs inside their subnets, credentials,
+          identity references. The nav badge counts the errors; Deploy refuses while there are any.</p>
+          <div class="row"><button class="btn" type="button" data-goto="review"><img src="${iconSrc("search.svg")}" alt=""> Open Review</button></div>
+        `)}
+
+        ${overviewStep(7, "first-boot.svg", "Deploy", "What Build-Vms.ps1 did", `
+          <p><strong>Deploy</strong> lists the lab's VMs against what exists and builds the ones that do not: a linked clone of
+          the gold, the hardware, a seed CD for the first boot (cloud-init for Linux, the answer file for Windows), then the
+          seed goes - it holds the passwords. VMs that exist are left alone.</p>
+          <div class="row"><button class="btn" type="button" data-goto="deploy"><img src="${iconSrc("first-boot.svg")}" alt=""> Open Deploy</button></div>
+        `)}
+
+        ${overviewStep(8, "update.svg", "Follow it", "Jobs", `
+          <p>Every bake and build is a job with its own log - the PowerShell studio's tags and colours - and the progress bar
+          while it runs. Logs stay after the job ends.</p>
+        `)}
+
+        ${overviewStep(9, "vm-overview.svg", "Sign in", "VM overview · Passwords", `
+          <p>The VM overview has every VM's address, sign-in and the SSH / RDP lines; Passwords has the generated
+          credentials in one place.</p>
+        `)}
+
+      </div>
+    `, "", false)}
+
+    ${gsCard("ov-blades", "overview.svg", "Blade guide", "What each page on the left is for", `
+      <div class="guide">
+        ${BLADES.map(b => `
+          <button class="guide-item" type="button" data-goto="${esc(b.id)}">
+            <img src="${iconSrc(b.icon)}" alt="">
+            <span>
+              <span class="guide-name">${esc(b.label)}</span>
+              <span class="guide-desc">${esc(b.desc || "")}</span>
+            </span>
+          </button>`).join("")}
+      </div>
+    `, "", false)}
+
+    ${gsCard("ov-ssh", "keys.svg", "Using the SSH keys", "Lock the key file down, then connect - Linux, macOS, Windows", renderSshKeyHowto(), "", false)}
+
+    ${gsCard("ov-state", "save.svg", "Labs", "Saved on the server as you go", `
+      <p style="margin:0 0 10px; color:var(--fg-muted); line-height:1.6">A lab is one design - its VMs, networks, identity
+      and defaults. The studio saves it a second after every change (the badge next to its name in the top bar says so) and
+      keeps as many labs as you like: the lab menu switches between them and creates new ones.</p>
+      <ul style="margin:0; padding-left:18px; line-height:1.8; color:var(--fg-muted)">
+        <li><strong style="color:var(--fg)">Two people, one lab</strong> - whoever saves second is told, and reloads; nothing is overwritten silently.</li>
+        <li><strong style="color:var(--fg)">Import token</strong> - takes over a design from the Hyper-V VM Studio (its <code>HVSS1.</code> state token).</li>
+      </ul>
+      <div class="warn-box" style="margin:12px 0 0">Passwords, join credentials and Arc secrets are part of the lab and live in the
+      studio's database on its container. Keep the container as private as the Proxmox VE hosts themselves.</div>
+    `, "", false)}`;
+}
+
+/* How to use a downloaded key, per client OS. OpenSSH refuses a private key anyone else
+   can read ("UNPROTECTED PRIVATE KEY FILE! ... This private key will be ignored."), and a
+   browser download lands with the Downloads folder's permissions, so the first step on
+   every platform is taking the file back to its owner. A fixed example, never the loaded
+   config: this is documentation, and a real domain or user name has no business in it.
+   The VM overview's SSH button carries the real line for each VM. */
+function renderSshKeyHowto() {
+  const file = "lnx-01_id_ed25519";
+  const target = "labadmin@lnx-01.lab.example.invalid";
+  const unix = [
+    "mkdir -p ~/.ssh && chmod 700 ~/.ssh",
+    `mv ~/Downloads/${file} ~/.ssh/`,
+    `chmod 600 ~/.ssh/${file}`,
+    `ssh -i ~/.ssh/${file} ${target}`
+  ].join("\n");
+  const unixZip = [
+    "unzip ~/Downloads/ssh-keys.zip -d ~/.ssh",
+    "chmod 600 ~/.ssh/*_id_ed25519"
+  ].join("\n");
+  const win = [
+    `$key = "$env:USERPROFILE\\.ssh\\${file}"`,
+    `New-Item -ItemType Directory -Force "$env:USERPROFILE\\.ssh" | Out-Null`,
+    `Move-Item "$env:USERPROFILE\\Downloads\\${file}" $key`,
+    `icacls $key /inheritance:r /grant:r "$($env:USERDOMAIN)\\$($env:USERNAME):F"`,
+    `ssh -i $key ${target}`
+  ].join("\n");
+  const winZip = [
+    `Expand-Archive "$env:USERPROFILE\\Downloads\\ssh-keys.zip" "$env:USERPROFILE\\.ssh" -Force`,
+    `Get-ChildItem "$env:USERPROFILE\\.ssh\\*_id_ed25519" | ForEach-Object {`,
+    `    icacls $_.FullName /inheritance:r /grant:r "$($env:USERDOMAIN)\\$($env:USERNAME):F"`,
+    `}`
+  ].join("\n");
+  const block = (text, lang) => `
+    <div class="cmd-block"><pre>${lang === "ps" ? highlightPowerShell(text) : highlightShell(text)}</pre>
+      <button class="btn icon" type="button" data-ov-copy="${esc(text)}" title="Copy" aria-label="Copy commands">${copyIcon()}</button></div>`;
+  return `
+    <p class="hint" style="font-size:12.5px;margin:0 0 12px">Generate a key pair on a Linux VM's card, then download it from the
+    card or from Passwords - one <code>&lt;vm&gt;_id_ed25519</code> file, or every key at once in <code>ssh-keys.zip</code>.
+    OpenSSH ignores a private key that anyone but you can read, and a fresh download is readable by more than you, so lock
+    it down first.</p>
+    <div class="ssh-howto">
+      <div>
+        <div class="ssh-os"><img src="${iconSrcBand("vm.svg", "linux")}" alt="">Linux and macOS <span class="hint">Terminal</span></div>
+        ${block(unix, "sh")}
+        <div class="ssh-os ssh-sub">From <code>ssh-keys.zip</code></div>
+        ${block(unixZip, "sh")}
+        <p class="hint">The zip already marks every key 600, so <code>unzip</code> keeps them private; the chmod covers an
+        archive tool that drops the mode (macOS Archive Utility can).</p>
+      </div>
+      <div>
+        <div class="ssh-os"><img src="${iconSrc("os-client.svg")}" alt="">Windows <span class="hint">PowerShell, built-in OpenSSH client</span></div>
+        ${block(win, "ps")}
+        <div class="ssh-os ssh-sub">From <code>ssh-keys.zip</code></div>
+        ${block(winZip, "ps")}
+        <p class="hint"><code>/inheritance:r</code> drops the rights the file picked up from its folder;
+        <code>/grant:r</code> leaves you as the only account on it. Windows OpenSSH also accepts Administrators and SYSTEM.</p>
+      </div>
+    </div>
+    <div class="tip-box" style="margin-top:12px"><img src="${iconSrc("help.svg")}" alt="">
+      <div>Seeing <code>Permissions 0644 for '…' are too open</code> or <code>bad permissions</code>? That is this step, not
+      the VM. The VM overview's SSH button copies the same <code>ssh -i</code> line for each Linux VM.</div>
+    </div>`;
+}
+
+/* Just enough of a shell tokenizer for the one-line commands this studio prints, in the
+   same editor palette as the PowerShell viewer: the command word, its flags, numbers,
+   operators, and paths or user@host targets as the string colour. */
+function highlightShell(code) {
+  return String(code || "").split("\n").map(line => {
+    let commandNext = true;
+    return line.split(/(\s+)/).map(tok => {
+      if (!tok || /^\s+$/.test(tok)) return tok;
+      let cls;
+      if (tok === "&&" || tok === "|" || tok === ";") { commandNext = true; cls = "ps-operator"; }
+      else if (commandNext) { commandNext = false; cls = "ps-cmdlet"; }
+      else if (/^-/.test(tok)) cls = "ps-param";
+      else if (/^\d+$/.test(tok)) cls = "ps-number";
+      else if (/[\/~@*]/.test(tok)) cls = "ps-string";
+      else cls = "ps-ident";
+      return `<span class="ps-tok ${cls}">${esc(tok)}</span>`;
+    }).join("");
+  }).join("\n");
+}
+
+function gs(key, defaultOpen) { return (state.expanded[key] === undefined ? !!defaultOpen : !!state.expanded[key]); }
+/* `badge` is trusted markup pinned to the right of the head — status pills belong there,
+   never stacked under the title where they read as part of the description. */
+function gsCard(key, icon, title, meta, bodyHtml, iconAttrs, defaultOpen, badge) {
+  return `
+    <div class="card collapsible ${gs(key, defaultOpen) ? "" : "collapsed"}">
+      <div class="card-head" data-toggle="${esc(key)}">
+        <div class="card-lead">
+          <span class="card-chevron">${chevron()}</span>
+          <div class="card-icon"><img src="${String(icon).startsWith("data:") ? icon : iconSrc(icon)}" ${iconAttrs || ""}></div>
+          <div>
+            <div class="card-title">${title}</div>
+            ${meta ? `<div class="card-meta">${meta}</div>` : ""}
+          </div>
+        </div>
+        ${badge ? `<div class="card-actions">${badge}</div>` : ""}
+      </div>
+      <div class="card-body">${bodyHtml}</div>
+    </div>`;
+}
+
+function renderGeneral() {
+  const d = state.defaults;
+  const c = d.cluster || {};
+  const themeLabel = (USERNAME_THEMES[state.usernameTheme] || {}).label || state.usernameTheme;
+  const nm = namingDefaults();
+  // Prefer a real VM with a suffix, then any VM, then a generic one. The fixed FQDN is
+  // the whole config's, so it stands in even while the VM list is still empty.
+  const nmSample = state.servers.find(s => namingSuffixForServer(s)) || state.servers[0];
+  const namingExample = (() => {
+    const short = (nmSample && String(nmSample.name || "").trim()) || "dc-01";
+    const domain = namingFqdnOverride() || (nmSample ? namingSuffixForServer(nmSample) : "") || "ad.example.invalid";
+    return {
+      short, domain,
+      vmName: nm.vmNameIncludeFqdn ? short + "." + domain : short,
+      folder: nm.folderIncludeFqdn ? short + "." + domain : short
+    };
+  })();
+
+  /* The Naming card's preview: the VM's name in Proxmox VE, and the reminder that none of
+     it reaches the guest. */
+  const namingTree = (() => {
+    return `
+      <div class="name-tree">
+        <div class="name-tree-row"><img src="${iconSrc("servers.svg")}" alt="">Proxmox VE</div>
+        <div class="name-tree-row"><span class="nt-branch">└──</span><img src="${iconSrc("vm.svg")}" alt=""><span class="nt-leaf">${esc(namingExample.vmName)}</span></div>
+        <div class="name-tree-guest">
+          <img src="${iconSrc("os-server-desktop.svg")}" alt="">
+          Inside the guest the <code>ComputerName</code> stays <code>${esc(namingExample.short)}</code> either way.
+        </div>
+      </div>`;
+  })();
+
+  return `
+    <div class="blade-toolbar">
+      <div class="page-title"><img src="${iconSrc("settings.svg")}"> General Settings</div>
+    </div>
+
+    ${gsCard("gs-username", "users.svg", "Local username theme", esc(themeLabel), `
+      <p class="hint" style="margin-bottom:10px">Used by the Generate button on each virtual machine card.</p>
+      <div class="grid-2">
+        ${field("Theme", `<select data-uname-theme-global="1">
+          ${Object.keys(USERNAME_THEMES).map(tid => `<option value="${tid}" ${state.usernameTheme===tid?"selected":""}>${esc(USERNAME_THEMES[tid].label)}</option>`).join("")}
+        </select>`)}
+      </div>`, "", true)}
+
+    ${gsCard("gs-passwords", "secret.svg", `Password generator ${infoTip("Password generator", "Length for every password the Generate buttons produce — on new VMs, on the regenerate arrows, and on the Passwords blade. Always upper/lower/number/special with no ambiguous I/l/1 or O/0. Changing the length immediately regenerates the local password of every VM already on the list.")}`, `${passwordLength()} characters`, `
+      <div class="grid-2">
+        ${field("Length", `<select data-pwlen="1">
+          ${PASSWORD_LENGTHS.map(n => `<option value="${n}" ${passwordLength()===n?"selected":""}>${n} characters</option>`).join("")}
+        </select>`)}
+      </div>`, "", true)}
+
+    ${!SHOW_LOCALE_CARD ? "" : gsCard("gs-locale", "language.svg", "Locale / keyboard", d.locale === LOCALE_DEFAULT ? "Default — from gold image" : esc(LOCALE_CATALOG[d.locale] || d.locale || "de-DE"), `
+      <p class="hint" style="margin-bottom:10px">Regional format + keyboard echoed into every VM's answer file at deploy time. <strong>Default</strong> inherits whatever <code>New-Vhdx.ps1</code> actually baked into each VM's gold <code>.vhdx</code> (read from its <code>.vhdx.json</code> sidecar, written beside the gold). An explicit tag has to match what the gold was actually built with. Not a per-VM override, and not a UI language change — the gold's own shipped UI language is always kept as-is.</p>
+      <div class="grid-2">
+        ${field("Locale", `<select data-d="locale">
+          <option value="${LOCALE_DEFAULT}" ${d.locale===LOCALE_DEFAULT?"selected":""}>Default — inherit from gold image</option>
+          ${Object.keys(LOCALE_CATALOG).map(tag => `<option value="${tag}" ${d.locale===tag?"selected":""}>${esc(tag)} — ${esc(LOCALE_CATALOG[tag])}</option>`).join("")}
+        </select>`)}
+      </div>`, "", true)}
+
+    ${(() => {
+      /* PVE VM Studio: where the VMs go - the Hyper-V studio's VM/VHD paths, as a node and
+         a storage of the cluster. "Auto" = the gold's node, the gold's storage (a linked
+         clone has to stay there anyway). */
+      const inv = typeof cluster !== "undefined" && cluster.inventory;
+      const nodes = inv ? inv.nodes.filter(n => n.status === "online").map(n => n.node) : [];
+      const storages = inv ? [...new Set(inv.storages.filter(x => (x.content || "").split(",").includes("images")).map(x => x.storage))] : [];
+      const sel = (key, list, autoLabel) => `<select data-d="${key}">
+          <option value="" ${!d[key] ? "selected" : ""}>${esc(autoLabel)}</option>
+          ${list.map(v => `<option value="${esc(v)}" ${d[key] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}
+          ${d[key] && !list.includes(d[key]) ? `<option value="${esc(d[key])}" selected>${esc(d[key])} (not in the cluster)</option>` : ""}
+        </select>`;
+      return gsCard("gs-paths", "storage.svg", "Where VMs go", `${d.pveNode || "node: auto"} · ${d.pveStorage || "storage: auto"}`, `
+      <div class="grid-2" style="align-items:start">
+        ${field(fieldLabel("servers.svg", "Node"), sel("pveNode", nodes, "Auto - the gold's node") +
+          `<span class="hint">Another node needs the gold on shared storage.</span>`)}
+        ${field(fieldLabel("disk.svg", "Storage for full copies"), sel("pveStorage", storages, "Auto - the gold's storage") +
+          `<span class="hint">Linked clones always stay on the gold's storage.</span>`)}
+      </div>`, "", false);
+    })()}
+
+    ${gsCard("gs-naming", "vm.svg", `Naming ${infoTip("Naming", "The suffix comes from each VM's Domain Join unless the fixed FQDN below is set — a VM with neither always stays on its short name. The guest's own NetBIOS ComputerName in the answer file is never affected by any of these toggles; it is always the short name.")}`, (nm.vmNameIncludeFqdn ? "FQDN VM name" : "short VM name") + (namingFqdnOverride() ? ` · ${esc(namingFqdnOverride())}` : ""), `
+      <div class="toggle-grid" style="grid-template-columns:1fr">
+        ${toggle(`data-nm="vmNameIncludeFqdn"`, "PVE VM name includes the FQDN", nm.vmNameIncludeFqdn, false,
+          nm.vmNameIncludeFqdn ? "The VM's name in Proxmox VE becomes <code>computerName.domain</code>." : "The VM keeps the short computer name in Proxmox VE.")}
+        ${toggle(`data-nm="fqdnOverrideEnabled"`, `Use one fixed FQDN for every VM ${infoTip("Fixed FQDN",
+          "A domain the build creates rather than joins — the first DC of a fresh forest — has no Domain Join account to read a suffix from, so the VM names would fall back to the short name. Typing the domain here gives every VM in this lab the same suffix, whether it joins the domain or builds it.")}`,
+          nm.fqdnOverrideEnabled, !nm.vmNameIncludeFqdn,
+          !nm.vmNameIncludeFqdn ? "Needs the PVE VM name toggle above."
+            : (nm.fqdnOverrideEnabled ? "Overrides the Domain Join suffix on every VM, joined or not." : "Off — each VM uses its own Domain Join domain."))}
+      </div>
+      ${nm.vmNameIncludeFqdn && nm.fqdnOverrideEnabled ? `
+      <div class="grid-2" style="margin-top:12px">
+        ${field(fieldLabel("identity.svg", "Fixed FQDN"), `
+          <input data-nm="fqdn" value="${esc(nm.fqdn)}" spellcheck="false"
+                 placeholder="ad.example.invalid"
+                 class="${inv("d:namingFqdn")}"${invAria("d:namingFqdn")}>
+          <span class="hint">Used for every VM in this lab — the domain a fresh DC builds, not one it joins.</span>`)}
+      </div>` : ""}
+      <p class="hint" style="margin:14px 0 8px"><code>${esc(namingExample.short)}</code> with the suffix <code>${esc(namingExample.domain)}</code> is built as:</p>
+      ${namingTree}`, "", false)}
+
+    ${!SHOW_IMAGE_DEFAULTS ? "" : gsCard("image-defaults", "shared-gallery.svg", "Image defaults", "Per-image differencing, Secure Boot, memory/CPU", `
+      <p class="hint" style="margin-bottom:12px">Matches <code>New-Vhdx.ps1</code> filenames. Expand an image below to edit its defaults.</p>
+      ${IMAGE_CATALOG.map(img => {
+        const p = profileFor(img.id);
+        const open = isNestedOpen("img-" + img.id, false);
+        return `
+        <div class="section collapsible ${open ? "" : "collapsed"}" style="margin-top:10px">
+          <div class="section-head" data-nested="img-${esc(img.id)}">
+            <span class="section-chevron">${chevron()}</span>
+            <img src="${imageIconSrc(img)}"> ${esc(img.label)}
+            <span class="section-meta">${esc(img.id)}</span>
+          </div>
+          <div class="section-body">
+            <div class="toggle-grid" style="margin-top:12px">
+              ${toggleWithWarn(`data-ip="${esc(img.id)}" data-k="useDifferencingDisk"`, "Differencing disk", p.useDifferencingDisk, DIFF_DISK_TIP)}
+              ${toggle(`data-ip="${esc(img.id)}" data-k="enableSecureBoot"`, "Secure Boot", p.enableSecureBoot)}
+              ${toggle(`data-ip="${esc(img.id)}" data-k="enableVtpm"`, "vTPM (Win11)", p.enableVtpm)}
+              ${toggle(`data-ip="${esc(img.id)}" data-k="startAfterCreate"`, "Start after create", p.startAfterCreate)}
+            </div>
+            <div class="grid-2" style="margin-top:10px">
+              ${field("Default memory (GB)", `<input type="number" min="1" data-ip="${esc(img.id)}" data-k="memoryGB" value="${esc(p.memoryGB)}">`)}
+              ${field("Default CPU", `<input type="number" min="1" data-ip="${esc(img.id)}" data-k="cpuCount" value="${esc(p.cpuCount)}">`)}
+            </div>
+          </div>
+        </div>`;
+      }).join("")}`)}`;
+}
+
+function renderNetworksBlade() {
+  const switches = state.defaults.availableSwitches || [];
+  return `
+    <div class="blade-toolbar">
+      <div class="page-title"><img src="${iconSrc("vnet.svg")}"> Networks</div>
+      ${(state.networks || []).length ? `<div class="row">
+        <button class="btn primary" type="button" id="addNetwork"><img src="${iconSrcOnAccent("vnet.svg")}" alt=""> Add network</button>
+      </div>` : ""}
+    </div>
+
+    ${gsCard("gs-switches", "vlan.svg", "Bridges and VNets",
+      switches.length ? `${switches.length} in the cluster` : "none found", `
+      <p class="hint" style="margin-bottom:10px">Read from the cluster: every node's Linux bridges and OVS bridges, and the SDN VNets.
+      They are managed in Proxmox VE (a node's System → Network, Datacenter → SDN); networks and VMs pick from this list.</p>
+      ${switches.length ? `<div class="chips">${switches.map(sw => `<span class="pill"><img src="${iconSrc("vlan.svg")}" alt=""> ${esc(sw)}</span>`).join("")}</div>`
+        : `<div class="req-box">${SVG_ALERT}<div><strong>No bridge found.</strong> Every VM attaches to a bridge or VNet - PVE creates <code>vmbr0</code> at install.</div></div>`}`, "", true,
+      switches.length ? "" : `<span class="pill status off">Required</span>`)}
+
+    <div class="card-stack">
+      ${(state.networks || []).map(n => {
+        ensureCatalogStableId(n, "net");
+        const open = !!state.expanded[n._id];
+        const attached = serversForNetwork(n.id);
+        return `
+        <article class="card collapsible ${open ? "" : "collapsed"}" data-net-card="${esc(n._id)}">
+          <div class="card-head" data-toggle="${esc(n._id)}">
+            <div class="card-lead">
+              <span class="card-chevron">${chevron()}</span>
+              <div class="card-icon"><img src="${iconSrc("vnet.svg")}"></div>
+              <div>
+                <div class="card-title">${networkTitleHtml(n)}</div>
+                <div class="card-meta">${attached.length} VM(s) attached</div>
+              </div>
+            </div>
+            <div class="card-actions">
+              <button class="btn icon danger-text" type="button" title="Remove network" aria-label="Remove network" data-del-net="${esc(n._id)}">${trashIcon()}</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="field-group">Connection</div>
+            <div class="grid-2">
+              ${field("Bridge / VNet", `<select data-net="${esc(n._id)}" data-nk="switchName">
+                ${String(n.switchName || "").trim() ? "" : `<option value="" selected>— select a bridge —</option>`}
+                ${switches.map(sw => `<option value="${esc(sw)}" ${n.switchName===sw?"selected":""}>${esc(sw)}</option>`).join("")}
+                ${!switches.includes(n.switchName) && n.switchName ? `<option value="${esc(n.switchName)}" selected>${esc(n.switchName)}</option>` : ""}
+              </select>`)}
+              ${field("VLAN ID", `<input data-net="${esc(n._id)}" data-nk="vlanId" value="${esc(n.vlanId ?? "")}" placeholder="blank = untagged">
+                <span class="hint">${vlanHintText(n.vlanId)}</span>`)}
+            </div>
+            <div class="field-group">IP settings</div>
+            <div class="grid-2" style="align-items:start">
+              <label class="field">Network ID / netmask
+                <div class="ip-prefix-row">
+                  <input data-net="${esc(n._id)}" data-nk="subnet" value="${esc(n.subnet)}" placeholder="10.10.10.0" ${ipInputClassAttrs(n.subnet, `net:${n._id}:subnet`, subnetAddressProblem(n.subnet, n.prefixLength))}>
+                  ${prefixSelectHtml(`data-net="${esc(n._id)}" data-nk="prefixLength"`, n.prefixLength)}
+                </div>
+                ${ipHintHtml(n.subnet, "", subnetAddressProblem(n.subnet, n.prefixLength))}
+                ${(() => {
+                  const range = networkUsableRange(n);
+                  const text = range ? `Usable IP range: ${range.start} – ${range.end}` : "";
+                  return `<span class="hint" data-usable-hint="1" style="${text ? "" : "display:none"}">${esc(text)}</span>`;
+                })()}
+              </label>
+              ${field("Gateway", ipFieldMarkup(`data-net="${esc(n._id)}" data-nk="gateway" placeholder="10.10.10.1"`, n.gateway, "", `net:${n._id}:gateway`, networkGatewayProblem(n)))}
+            </div>
+            <div class="field-group">DNS servers</div>
+            <div class="grid-2">
+              <label class="field">Search order
+                <div class="dns-list" style="display:flex; flex-direction:column; gap:6px">
+                  ${(n.dnsServers && n.dnsServers.length ? n.dnsServers : [""]).map((dns, i) => `
+                    <div class="dns-row">
+                      <input data-net="${esc(n._id)}" data-dns-i="${i}" value="${esc(dns)}" placeholder="10.10.10.10" style="background-image:url('${iconSrc("dns.svg")}')" ${ipInputClassAttrs(dns, `net:${n._id}:dns:${i}`, networkDnsProblem(n, dns, i))}>
+                      ${(n.dnsServers||[]).length > 1 ? `<button class="btn icon danger-text" type="button" title="Remove DNS server" aria-label="Remove DNS server" data-dns-del="${esc(n._id)}" data-dns-del-i="${i}">${trashIcon()}</button>` : ""}
+                    </div>`).join("")}
+                  <button class="btn" type="button" data-dns-add="${esc(n._id)}" style="align-self:flex-start;margin-top:4px"><img src="${iconSrc("dns.svg")}" alt=""> Add DNS server</button>
+                </div>
+                ${(() => {
+                  const msg = networkDnsListProblem(n);
+                  return `<span class="hint err" data-dns-hint="1" style="${msg ? "" : "display:none"}">${esc(msg)}</span>`;
+                })()}
+              </label>
+            </div>
+            <div class="field-group">Attached virtual machines</div>
+            <button type="button" class="btn field" data-open-net-picker="${esc(n._id)}">
+              <img src="${iconSrc("vm.svg")}"> Choose virtual machines…
+            </button>
+            ${attached.length ? `
+            <div class="cl-grid attach" style="margin-top:10px">
+              <div class="cl-grid-head">
+                <div>Virtual machine</div>
+                <div>Address on this network</div>
+                <div></div>
+              </div>
+              ${attached.map(s => `
+              <div class="cl-row">
+                ${vmGridCell(s)}
+                <div class="cl-note">${esc(s.ipAddress || "no static IP")}</div>
+                <div class="cl-detach"><button class="btn icon danger-text" type="button" title="Detach ${esc(serverDisplayName(s))}" aria-label="Detach ${esc(serverDisplayName(s))}" data-net-detach="${esc(s._id)}">${trashIcon()}</button></div>
+              </div>`).join("")}
+            </div>` : '<p class="hint" style="margin:10px 0 0">No VMs attached — this network binds nothing.</p>'}
+          </div>
+        </article>`;
+      }).join("") || `<div class="empty-state"><div class="ue-icon"><img src="${iconSrc("vnet.svg")}"></div><h3>No networks yet</h3><p>Add a VLAN / subnet, then attach VMs and set their static IPs.</p>
+        <div class="ue-actions"><button class="btn primary" type="button" id="addNetwork"><img src="${iconSrcOnAccent("vnet.svg")}" alt=""> Add network</button></div></div>`}
+    </div>`;
+}
+
+function sunIcon() {
+  return `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3.1"/><path d="M8 1.4v1.5M8 13.1v1.5M1.4 8h1.5M13.1 8h1.5M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"/></svg>`;
+}
+function moonIcon() {
+  return `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.4 10.3A5.9 5.9 0 016.1 3a.6.6 0 00-.9-.6 6.9 6.9 0 108.8 8.8.6.6 0 00-.6-.9z"/></svg>`;
+}
+function chevron() {
+  return `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M6 3l5 5-5 5"/></svg>`;
+}
+
+function hasFeature(list, id) {
+  return (list || []).indexOf(id) >= 0;
+}
+
+function toggleFeatureId(list, id, on) {
+  const set = new Set(list || []);
+  if (on) set.add(id); else set.delete(id);
+  return [...set];
+}
+
+/** Search haystack for a catalog entry — label, feature id and hand-written keywords. */
+function featureSearchText(item) {
+  return `${item.label || ""} ${item.id || ""} ${item.keywords || ""}`.toLowerCase();
+}
+
+/** True when the entry, or any of its children, matches the search box. */
+function featureMatchesFilter(item, filter) {
+  if (!filter) return true;
+  if (featureSearchText(item).includes(filter)) return true;
+  return (item.children || []).some(c => featureSearchText(c).includes(filter));
+}
+
+/** Role/RSAT tree entry by feature id — both catalogs share the same shape. */
+function findRoleTreeDef(id) {
+  return ROLE_CATALOG.find(r => r.id === id) || SERVER_RSAT_CATALOG.find(r => r.id === id) || null;
+}
+
+/** Any catalog entry by feature id, parents and children alike. */
+function findWindowsFeatureDef(id) {
+  const flat = FEATURE_CATALOG.find(f => f.id === id);
+  if (flat) return flat;
+  for (const parent of [...ROLE_CATALOG, ...SERVER_RSAT_CATALOG]) {
+    if (parent.id === id) return parent;
+    const child = (parent.children || []).find(c => c.id === id);
+    if (child) return child;
+  }
+  return null;
+}
+
+/** ws2019-... → 2019. Used for the handful of features Core gained or lost between releases. */
+function imageReleaseYear(img) {
+  const hit = /(\d{4})/.exec(String((img && img.id) || ""));
+  return hit ? Number(hit[1]) : 0;
+}
+
+/* Server Core ships a subset of the component store: anything Microsoft leaves out fails with
+   "The role, role service, or feature name is not valid ... The name was not found."
+   Sources: learn.microsoft.com/windows-server/administration/server-core/server-core-removed-roles
+   and .../server-core-roles-and-services. */
+function featureAvailableOnImage(item, img) {
+  if (!item || !img || img.experience !== "Core") return true;
+  if (item.noCore) return false;
+  const year = imageReleaseYear(img);
+  if (item.noCoreFrom && year >= item.noCoreFrom) return false;
+  if (item.noCoreBefore && year < item.noCoreBefore) return false;
+  return true;
+}
+
+/** Why a role preset cannot be applied to this image, or "" when it can. Two ways it
+    cannot: an `essential` feature the image does not ship, which would apply a subset
+    under a name that promises the whole thing, and nothing usable at all, which applies
+    nothing while reporting success. Both used to be a toast counting what was dropped. */
+function rolePresetBlockReason(preset, img) {
+  if (!preset || !img) return "";
+  const missing = (preset.essential || []).filter(id => !featureIdAvailableOnImage(id, img));
+  if (missing.length) {
+    return `Not on this image — ${preset.label} needs ${missing.map(windowsFeatureLabel).join(", ")}.`;
+  }
+  if (!preset.features.some(id => featureIdAvailableOnImage(id, img))) {
+    return `Not on this image — no part of ${preset.label} is available.`;
+  }
+  return "";
+}
+
+/** Feature id installable on this VM's image — unknown ids are left alone. */
+function featureIdAvailableOnImage(id, img) {
+  const def = findWindowsFeatureDef(id);
+  return def ? featureAvailableOnImage(def, img) : true;
+}
+
+/** Role services this image actually ships. */
+function availableRoleChildren(role, img) {
+  return (role.children || []).filter(c => featureAvailableOnImage(c, img));
+}
+
+/**
+ * The `selfPayload` group this role service belongs to, if any. Server Manager checks
+ * the parent role for you when you tick one of its role services; here that matters
+ * only for a group whose own id is an install, because otherwise the group would be
+ * pulled in as a dependency of the child and arrive without its defaults.
+ */
+function findSelfPayloadParent(childId) {
+  return [...ROLE_CATALOG, ...SERVER_RSAT_CATALOG]
+    .find(r => r.selfPayload && (r.children || []).some(c => c.id === childId)) || null;
+}
+
+function roleParentSelected(features, role) {
+  if (!role.children || !role.children.length) return hasFeature(features, role.id);
+  return role.children.some(c => hasFeature(features, c.id)) || hasFeature(features, role.id);
+}
+
+function checkMarkSvg() {
+  return `<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6.5 11.2 3.3 8l1.1-1.1 2.1 2.1 5-5L12.6 5.1 6.5 11.2z"/></svg>`;
+}
+
+function renderFeatureListRow(opts) {
+  const on = !!opts.on;
+  const warn = opts.item ? featureWarnText(opts.item) : "";
+  return `<div class="role-tree-item">
+    <div class="role-row ${on ? "on" : ""}" ${opts.attrs} role="checkbox" aria-checked="${on ? "true" : "false"}">
+      <span class="role-check">${checkMarkSvg()}</span>
+      <img class="role-icon" src="${iconSrc(opts.icon || "servers.svg")}" alt="">
+      <div class="role-label">
+        <div class="role-label-row">
+          <span class="role-name">${esc(opts.label)}</span>
+          ${warnBanner(warn)}
+        </div>
+      </div>
+      ${opts.item ? featureInfoTip(opts.item) : ""}
+    </div>
+  </div>`;
+}
+
+/** True when every part of a preset this image can install is already selected — what makes
+    a preset a toggle rather than a button. Features the image does not ship are ignored, so
+    the answer is about the design rather than about the catalog. */
+function rolePresetApplied(preset, features, img) {
+  const usable = preset.features.filter(id => featureIdAvailableOnImage(id, img));
+  return usable.length > 0 && usable.every(id => hasFeature(features, id));
+}
+
+/** A role that names a preset carries it inside its own card, between the role row and its
+    role services — a deployment shape belongs where the role is, not in the preset strip
+    three screens up. It appears with the role services, once the role is ticked: a shortcut
+    for arranging that role's own services has nothing to say to somebody who has not picked
+    the role, and a permanently visible toggle reads as a setting rather than a shortcut.
+    Off unticks exactly what it ticked. */
+function renderRolePresetToggle(s, role, features) {
+  const preset = role.preset ? ROLE_PRESETS[role.preset] : null;
+  if (!preset) return "";
+  const img = findImage(s.imageId);
+  const blocked = rolePresetBlockReason(preset, img);
+  const on = rolePresetApplied(preset, features, img);
+  const sub = blocked || preset.sub || "";
+  return `<div class="role-preset${blocked ? " blocked" : ""}">
+    ${toggle(`data-role-preset="${esc(s._id)}" data-preset="${esc(role.preset)}"`,
+      esc(preset.label), on, !!blocked, esc(sub))}
+  </div>`;
+}
+
+function renderRoleTreeRow(s, role, features) {
+  const selected = roleParentSelected(features, role);
+  const kids = availableRoleChildren(role, findImage(s.imageId));
+  const hasChildren = !!kids.length;
+  const childrenHtml = (selected && hasChildren) ? `
+    <div class="role-children">
+      <div class="role-children-head">Role services</div>
+      ${kids.map(c => {
+        const childOn = hasFeature(features, c.id);
+        return `<div class="role-child ${childOn ? "on" : ""}" data-feat-toggle="${esc(s._id)}" data-feat="${esc(c.id)}" role="checkbox" aria-checked="${childOn ? "true" : "false"}">
+          <span class="role-check">${checkMarkSvg()}</span>
+          <div class="rc-main">
+            <span class="rc-label">${esc(c.label)}</span>
+            ${warnBanner(featureWarnText(c))}
+          </div>
+          ${featureInfoTip(c)}
+        </div>`;
+      }).join("")}
+    </div>` : "";
+
+  return `<div class="role-tree-item">
+    <div class="role-row ${selected ? "on" : ""}" data-role-toggle="${esc(s._id)}" data-role="${esc(role.id)}" role="checkbox" aria-checked="${selected ? "true" : "false"}">
+      <span class="role-check">${checkMarkSvg()}</span>
+      <img class="role-icon" src="${iconSrc(role.icon || "servers.svg")}" alt="">
+      <div class="role-label">
+        <div class="role-label-row">
+          <span class="role-name">${esc(role.label)}</span>
+          ${warnBanner(featureWarnText(role))}
+        </div>
+        ${hasChildren ? `<span class="role-hint">${selected ? kids.length + " services" : "has role services"}</span>` : ""}
+      </div>
+      ${featureInfoTip(role)}
+    </div>
+    ${selected ? renderRolePresetToggle(s, role, features) : ""}
+    ${childrenHtml}
+  </div>`;
+}
+
+/* Azure Local is an appliance OS: its role set is fixed by the platform, and
+   Install-WindowsFeature is not how you change it. Images that say so get no picker. */
+function imageTakesServerRoles(img) {
+  return !!img && img.kind !== "client" && !img.noServerRoles;
+}
+
+/* Offline removal of the provisioned app packages: every Windows client edition carries
+   them, N and multi-session included. Asked in four places, so it lives in one. */
+function supportsAppRemoval(imageId) {
+  return /^w1[01]-/.test(String(imageId || ""));
+}
+
+/* The Linux answer to Roles & features. It sits on the card wherever the Windows
+   one would, and it renders with the same row as the RSAT list - a picker somebody
+   has already learned once should not have to be learned twice. */
+function renderServerRolesSection(s) {
+  const img = findImage(s.imageId);
+  // Azure Local gets a section explaining why it has no roles. A Linux machine gets
+  // nothing at all: "no Windows roles here" is not news on a Debian box, it is just a
+  // Windows-shaped hole in the card.
+  if (isLinuxImage(img)) return "";
+  if (img.noServerRoles) {
+    const open = isNestedOpen(s._id + "-roles", false);
+    return `
+    <div class="section collapsible ${open ? "" : "collapsed"}">
+      <div class="section-head" data-nested="${esc(s._id)}-roles">
+        <span class="section-chevron">${chevron()}</span>
+        <img src="${iconSrc("extensions.svg")}"> Roles &amp; features
+        <span class="section-meta">not applicable</span>
+      </div>
+      <div class="section-body">
+        <p class="hint" style="margin:12px 0 0">${esc(img.label)} ships its own fixed role set — it is an appliance OS, not
+        Windows Server, so <code>Install-WindowsFeature</code> is not how you change what it runs. Build-Vms.ps1 installs
+        nothing extra into it.</p>
+      </div>
+    </div>`;
+  }
+  const isClient = img.kind === "client";
+  const filter = (state.featureFilter[s._id] || "").toLowerCase().trim();
+  const features = s.windowsFeatures || [];
+  const rsat = s.rsatCapabilities || [];
+  const clientFeatures = s.clientFeatures || [];
+  const open = isNestedOpen(s._id + "-roles", false);
+
+  let body = "";
+  let headTip = "";
+  if (isClient) {
+    const filtered = RSAT_CATALOG.filter(r => !filter || r.label.toLowerCase().includes(filter) || r.id.toLowerCase().includes(filter));
+    // One list, two install mechanisms. A client admin toolbox is a client admin toolbox to
+    // whoever is ticking it, so the in-box optional features sit at the top of the same list
+    // rather than in a section of their own - the row's own tip says where its payload comes
+    // from, and that is the only place the difference matters.
+    const filteredClientFeatures = CLIENT_FEATURE_CATALOG.filter(f => !filter || f.label.toLowerCase().includes(filter) || f.id.toLowerCase().includes(filter));
+    const clientRows = [
+      ...filteredClientFeatures.map(f => renderFeatureListRow({
+        on: hasFeature(clientFeatures, f.id),
+        icon: f.icon,
+        label: f.label,
+        item: f,
+        attrs: `data-clientfeat-toggle="${esc(s._id)}" data-clientfeat="${esc(f.id)}"`
+      })),
+      ...filtered.map(r => renderFeatureListRow({
+        on: hasFeature(rsat, r.id),
+        icon: r.icon,
+        label: r.label,
+        item: r,
+        attrs: `data-rsat-toggle="${esc(s._id)}" data-cap="${esc(r.id)}"`
+      }))
+    ];
+    body = `
+      <p class="hint" style="margin:10px 0 10px">Client OS — install RSAT tools.</p>
+      ${fodBanner("Windows 11 <em>Languages and Optional Features</em>",
+        "otherwise every RSAT capability below is a separate Windows Update download on first boot — slow, and blocked by a WSUS without optional content. The Hyper-V tools are in the image already and never need it.",
+        "https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/features-on-demand-v2--capabilities")}
+      <div class="feature-presets" style="margin-top:12px">
+        ${Object.keys(RSAT_PRESETS).map(pid => `<button class="btn sm" type="button" data-rsat-preset="${esc(s._id)}" data-preset="${esc(pid)}"><img src="${iconSrc("paw.svg")}"> ${esc(RSAT_PRESETS[pid].label)}</button>`).join("")}
+        <button class="btn sm" type="button" data-rsat-clear="${esc(s._id)}">Clear</button>
+      </div>
+      <input class="feature-search" data-feat-filter="${esc(s._id)}" value="${esc(state.featureFilter[s._id]||"")}" placeholder="Search RSAT tools…">
+      <div class="role-tree">
+        ${clientRows.join("") || `<div class="hint" style="padding:12px">No matches.</div>`}
+      </div>`;
+  } else {
+    const onImage = item => featureAvailableOnImage(item, img);
+    const roles = ROLE_CATALOG.filter(r => onImage(r) && featureMatchesFilter(r, filter));
+    const feats = FEATURE_CATALOG.filter(f => onImage(f) && featureMatchesFilter(f, filter));
+    const rsatTools = SERVER_RSAT_CATALOG.filter(r => onImage(r) && featureMatchesFilter(r, filter));
+    const coreHidden = img.experience === "Core"
+      ? [...ROLE_CATALOG, ...FEATURE_CATALOG, ...SERVER_RSAT_CATALOG].filter(x => !onImage(x)).length
+      : 0;
+    headTip = infoTip("Roles & features",
+      "Installs binaries via Install-WindowsFeature (offline when possible). Dependencies resolve automatically." + (coreHidden
+        ? ` This is a Server Core image, so ${coreHidden} entr${coreHidden === 1 ? "y is" : "ies are"} hidden — Microsoft does not ship them in the Core component store: AD CS tools, File Services tools, Print, NPAS, NLB, BitLocker tools, Volume Activation, WDS tools, Failover Cluster Manager, IIS console, RD Session Host / Gateway / Web Access.` : ""));
+    body = `
+      ${toggle(`data-s="${esc(s._id)}" data-k="includeManagementTools"`, "Include management tools", s.includeManagementTools !== false)}
+      <input class="feature-search" style="margin-top:10px" data-feat-filter="${esc(s._id)}" value="${esc(state.featureFilter[s._id]||"")}" placeholder="Search roles, features and RSAT tools…">
+      <div class="role-tree" style="margin-top:8px">
+        ${roles.map(r => renderRoleTreeRow(s, r, features)).join("") || `<div class="hint" style="padding:12px">No matches.</div>`}
+      </div>
+      <div class="section-head" style="margin-top:14px"><img src="${iconSrc("settings.svg")}"> Features</div>
+      <div class="role-tree">
+        ${feats.map(f => renderFeatureListRow({
+          on: hasFeature(features, f.id),
+          icon: f.icon,
+          label: f.label,
+          item: f,
+          attrs: `data-feat-toggle="${esc(s._id)}" data-feat="${esc(f.id)}"`
+        })).join("") || `<div class="hint" style="padding:12px">No matches.</div>`}
+      </div>
+      <div class="section-head" style="margin-top:14px"><img src="${iconSrc("administrative-units.svg")}"> Remote server administration tools (RSAT)
+        ${infoTip("RSAT", "Management consoles and PowerShell modules for roles hosted elsewhere — installed with Install-WindowsFeature, no role binaries." + (supportsAppCompatFod(s)
+          ? " On Server Core the MMC snap-ins also need the App Compatibility FOD below; PowerShell modules work without it." : ""))}</div>
+      <div class="role-tree">
+        ${rsatTools.map(r => renderRoleTreeRow(s, r, features)).join("") || `<div class="hint" style="padding:12px">No matches.</div>`}
+      </div>
+      ${renderServerAppCompatBlock(s)}`;
+  }
+
+  const count = isClient ? rsat.length + clientFeatures.length : features.length;
+  const meta = `${count} selected${!isClient && supportsAppCompatFod(s) && s.appCompatFod ? " · App Compat FOD" : ""}`;
+  return `
+    <div class="section collapsible ${open ? "" : "collapsed"}">
+      <div class="section-head" data-nested="${esc(s._id)}-roles">
+        <span class="section-chevron">${chevron()}</span>
+        <img src="${iconSrc(isClient ? "administrative-units.svg" : "extensions.svg")}"> ${isClient ? "RSAT tools" : "Roles & features"}
+        ${headTip}
+        <span class="section-meta">${meta}</span>
+      </div>
+      <div class="section-body">${body}</div>
+    </div>`;
+}
+
+function renderServerArcSection(s) { return ""; }
+
+function renderServerAppsSection(s) {
+  if (isLinuxServer(s)) return "";
+  if (!supportsAppRemoval(s.imageId)) return "";
+  const open = isNestedOpen(s._id + "-apps", false);
+  const total = APP_REMOVAL_CATALOG.length;
+  // Removal is on exactly when at least one app is picked; the count is 0 when off.
+  const count = s.removeBuiltInApps ? appRemovalCount(s) : 0;
+  const meta = count === 0 ? "off" : (count === total ? `all ${total} apps` : `${count} of ${total} apps`);
+  // The main toggle IS the all-apps switch: on means the whole catalog goes, and a
+  // custom pick below shows it off while the picker's own meta carries the count.
+  const allOn = count === total;
+
+  const pickerOpen = isNestedOpen(s._id + "-applist", false);
+  const cats = [];
+  APP_REMOVAL_CATALOG.forEach(a => { if (!cats.includes(a.cat)) cats.push(a.cat); });
+  const picker = `
+      <div class="section collapsible ${pickerOpen ? "" : "collapsed"}" style="margin-top:12px">
+        <div class="section-head" data-nested="${esc(s._id)}-applist">
+          <span class="section-chevron">${chevron()}</span>
+          <img src="${iconSrc("client-apps.svg")}"> Choose apps
+          <span class="section-meta">${count === 0 ? "none" : (allOn ? "all" : `${count} of ${total}`)}</span>
+        </div>
+        <div class="section-body">
+          ${cats.map(cat => `
+          <div class="app-cat-head">${esc(cat)}</div>
+          ${APP_REMOVAL_CATALOG.filter(a => a.cat === cat).map(a => {
+            const on = !!s.removeBuiltInApps && appRemovalHas(s, a.id);
+            return `<div title="${esc(a.id)}">${toggle(`data-app-toggle="${esc(s._id)}" data-app="${esc(a.id)}"`,
+              `<img class="app-glyph" src="${iconSrcBand(a.icon, APP_CAT_BANDS[a.cat] || "host")}" alt=""> ${esc(a.label)}`, on)}</div>`;
+          }).join("")}`).join("")}
+        </div>
+      </div>`;
+
+  return `
+    <div class="section collapsible ${open ? "" : "collapsed"}">
+      <div class="section-head" data-nested="${esc(s._id)}-apps">
+        <span class="section-chevron">${chevron()}</span>
+        <img src="${iconSrc("client-apps.svg")}"> Built-in apps
+        <span class="section-meta">${meta}</span>
+      </div>
+      <div class="section-body">
+        <div style="margin-top:12px">
+          ${toggleWithWarn(`data-s="${esc(s._id)}" data-k="removeBuiltInApps"`, "Remove all built-in apps (offline, before first boot)", allOn, REMOVE_APPS_TIP)}
+        </div>
+        ${picker}
+      </div>
+    </div>`;
+}
+
+function fodBanner(medium, note, docsUrl) {
+  return `<div class="fod-banner">
+    <img src="${iconSrc("download.svg")}" alt="">
+    <div><strong>Keep the ${medium} ISO in <code>media\\</code></strong> — ${note}${docsUrl
+      ? ` <a href="${esc(docsUrl)}" target="_blank" rel="noopener">Microsoft docs</a>` : ""}</div>
+  </div>`;
+}
+
+/** App Compatibility FOD — rendered inside the Roles & features section, Core images only. */
+function renderServerAppCompatBlock(s) {
+  if (!supportsAppCompatFod(s)) return "";
+  const on = !!s.appCompatFod;
+  const tools = appCompatFodTools(findImage(s.imageId));
+  const toolsOpen = isNestedOpen(s._id + "-fodtools", false);
+  return `
+    <div class="section-head" style="margin-top:14px"><img src="${iconSrc("monitor.svg")}"> App Compatibility (Server Core)
+      ${infoTip("App Compatibility (Server Core)", "Feature on Demand, not a Windows feature — a slice of the Desktop Experience binaries. It is where a Core VM gets its consoles from, which is why the RSAT list above only offers Core's own tools. Costs disk; the first boot doubles as the required restart.")}</div>
+    ${fodBanner("Windows Server <em>Languages and Optional Features</em>",
+      "the one matching this VM's release. Without it the guest pulls the FOD from Windows Update on first boot.",
+      "https://learn.microsoft.com/en-us/windows-server/get-started/server-core-app-compatibility-feature-on-demand?tabs=iso-image")}
+    <div class="role-tree" style="margin-top:12px">
+      ${renderFeatureListRow({
+        on,
+        icon: "monitor.svg",
+        label: "Server Core App Compatibility FOD",
+        item: APP_COMPAT_FOD_ITEM,
+        attrs: `data-appcompat-toggle="${esc(s._id)}"`
+      })}
+    </div>
+    <div class="section collapsible ${toolsOpen ? "" : "collapsed"}" style="margin-top:12px">
+      <div class="section-head" data-nested="${esc(s._id)}-fodtools">
+        <span class="section-chevron">${chevron()}</span>
+        <img src="${iconSrc("overview.svg")}"> Tools in this package
+        <span class="section-meta">${tools.length} tools · ${on ? "installed on this VM" : "not installed"}</span>
+      </div>
+      <div class="section-body">
+        ${tools.length < APP_COMPAT_FOD_TOOLS.length
+          ? `<p class="hint" style="margin:10px 0 0">Hyper-V Manager and Task Scheduler need Windows Server 2022 or later, so this release does not get them.</p>` : ""}
+        <div class="fod-grid" role="table" aria-label="Tools in the Server Core App Compatibility FOD">
+          <div class="fod-grid-head" role="row">
+            <span role="columnheader">Tool</span>
+            <span role="columnheader">Command</span>
+            <span role="columnheader">Type</span>
+          </div>
+          ${tools.map(t => `
+            <div class="fod-row" role="row">
+              <div class="fod-cell-tool" role="cell">
+                <img src="${iconSrc(esc(t.icon))}" alt="">
+                <span class="fod-name">${esc(t.label)}</span>
+                ${warnBanner(t.warn)}
+              </div>
+              <span class="fod-file" role="cell">${esc(t.file)}</span>
+              <span class="fod-type" role="cell">${esc(t.type)}</span>
+            </div>`).join("")}
+        </div>
+      </div>
+    </div>`;
+}
+
+/* Head line every adapter card shares: name as the title, then what it is plugged into.
+   The name is an input rather than a label so it stays out of the field grid below. */
+function nicCardHead(opts) {
+  const unlocked = !!state.nameEdit[opts.key];
+  return `
+    <div class="nic-card-head">
+      <img src="${iconSrc("nic.svg")}" alt="">
+      <input class="nic-name-input" data-name-input="${esc(opts.key)}" ${opts.nameBind} value="${esc(opts.name)}"
+             placeholder="${esc(opts.placeholder)}" spellcheck="false" ${unlocked ? "" : "readonly"}
+             aria-label="Adapter name"
+             title="Adapter name — the guest's connection is renamed to this at first boot">
+      <span class="nic-name-actions">
+        ${opts.custom ? `<button class="btn icon ghost" type="button" title="Back to ${esc(opts.placeholder)}" aria-label="Back to ${esc(opts.placeholder)}" data-name-reset="${esc(opts.key)}">${revertIcon()}</button>` : ""}
+        <button class="btn icon ghost" type="button" title="${unlocked ? "Done renaming" : "Rename adapter"}" aria-label="${unlocked ? "Done renaming" : "Rename adapter"}" data-name-edit="${esc(opts.key)}">${unlocked ? checkIcon() : pencilIcon()}</button>
+      </span>
+      ${opts.primary ? `<span class="nic-badge">Primary</span>` : ""}
+      <span class="nic-card-meta">${esc(opts.meta)}</span>
+      ${opts.remove || ""}
+    </div>`;
+}
+
+/* "vStorage · VLAN 20 · 10.20.0.50" — the one line that answers "what is this NIC" without
+   reading a single field. */
+function nicMetaLine(switchName, vlanId, ipAddress) {
+  const parts = [String(switchName || "").trim() || "no switch"];
+  if (vlanId !== null && vlanId !== undefined && String(vlanId).trim() !== "") parts.push("VLAN " + vlanId);
+  parts.push(String(ipAddress || "").trim() || "DHCP");
+  return parts.join(" · ");
+}
+
+/* The adapter New-VM creates. The only one with a gateway and a resolver, so its fields split
+   into what it is plugged into and what address it carries. */
+function renderPrimaryNicCard(s) {
+  const attached = findServerNetwork(s);
+  const switches = state.defaults.availableSwitches || [];
+  const range = attached ? networkUsableRange(attached) : null;
+  const defaultHint = range ? `Usable range ${range.start}–${range.end}` : "";
+  const { invalid, message } = validateServerIpAddress(s);
+  const gatewayCheck = validateServerGateway(s);
+  const hintText = invalid ? message : defaultHint;
+  return `
+    <div class="nic-card is-primary">
+      ${nicCardHead({
+        primary: true,
+        key: `nic:${s._id}:0`,
+        custom: !!String(s.nicName || "").trim(),
+        name: effectiveNicName(s, 0),
+        placeholder: nicAutoName(0),
+        nameBind: `data-s="${esc(s._id)}" data-k="nicName"`,
+        meta: nicMetaLine(s.switchName, s.vlanId, s.ipAddress)
+      })}
+      <div class="field-group">Connection</div>
+      <div class="grid-3">
+        ${field("Network", `<select data-s="${esc(s._id)}" data-k="networkAttach" class="${inv(`s:${s._id}:networkAttach`)}"${invAria(`s:${s._id}:networkAttach`)}>
+          <option value="">— none (manual) —</option>
+          ${(state.networks || []).map(n => `<option value="${esc(n.id)}" ${attached && attached.id === n.id ? "selected" : ""}>${esc(networkName(n))} — ${esc(networkCidr(n))}</option>`).join("")}
+        </select>
+        <span class="hint">${attached ? `bridge, VLAN, gateway & DNS from ${esc(networkName(attached))}` : "Pick a network to auto-fill everything below"}</span>`)}
+        ${field("Bridge / VNet", `<select data-s="${esc(s._id)}" data-k="switchName" class="${inv(`s:${s._id}:switchName`)}"${invAria(`s:${s._id}:switchName`)} ${attached ? "disabled" : ""}>
+          ${String(s.switchName || "").trim() ? "" : `<option value="" selected>— select a bridge —</option>`}
+          ${switches.map(sw => `<option value="${esc(sw)}" ${s.switchName === sw ? "selected" : ""}>${esc(sw)}</option>`).join("")}
+          ${!switches.includes(s.switchName) && s.switchName ? `<option value="${esc(s.switchName)}" selected>${esc(s.switchName)}</option>` : ""}
+        </select>
+        <span class="hint">${attached ? "Set by the network above" : "The bridge or VNet this adapter plugs into"}</span>`)}
+        ${field("VLAN ID", `<input data-s="${esc(s._id)}" data-k="vlanId" value="${esc(s.vlanId ?? "")}" placeholder="blank = untagged" ${attached ? "disabled" : ""}>
+        <span class="hint">${attached ? "Set by the network above" : vlanHintText(s.vlanId)}</span>`)}
+      </div>
+      <div class="field-group">IP settings</div>
+      <div class="grid-2">
+        <label class="field">Static IP address / prefix
+          <div class="ip-prefix-row">
+            <input data-s="${esc(s._id)}" data-k="ipAddress" value="${esc(s.ipAddress)}" placeholder="10.10.10.50" class="${invalid || invalidFieldKeys.has(`s:${s._id}:ipAddress`) ? "is-invalid" : ""}" aria-invalid="${invalid ? "true" : "false"}">
+            ${prefixSelectHtml(`data-s="${esc(s._id)}" data-k="prefixLength"${attached ? " disabled" : ""}`, s.prefixLength)}
+          </div>
+          <span class="hint ${invalid ? "err" : ""}" data-ip-hint="1" data-default-hint="${esc(defaultHint)}" style="${hintText ? "" : "display:none"}">${esc(hintText)}</span>
+        </label>
+        ${field("Gateway", ipFieldMarkup(
+          `data-s="${esc(s._id)}" data-k="defaultGateway" ${attached ? "disabled" : ""}`,
+          s.defaultGateway,
+          attached ? "Set by the network above" : "",
+          `s:${s._id}:defaultGateway`,
+          gatewayCheck.message))}
+      </div>
+      <!-- 20px, the same step the section headings use, so the DNS block does not sit tighter
+           under the addresses than the addresses sit under their heading. -->
+      <div class="field-group">DNS servers</div>
+      <div class="grid-2">
+        ${attached
+          ? field("Search order", `<input value="${esc((s.dnsServers || []).filter(x => String(x || "").trim() !== "").join(", ") || "—")}" disabled>`)
+          : `<label class="field">Search order
+          <div class="dns-list" style="display:flex; flex-direction:column; gap:6px">
+            ${(s.dnsServers && s.dnsServers.length ? s.dnsServers : [""]).map((dns, i) => `
+              <div class="dns-row">
+                <input data-s="${esc(s._id)}" data-dns-i="${i}" value="${esc(dns)}" placeholder="10.10.10.10" style="background-image:url('${iconSrc("dns.svg")}')" ${ipInputClassAttrs(dns, `s:${s._id}:dns:${i}`)}>
+                ${(s.dnsServers || []).length > 1 ? `<button class="btn icon danger-text" type="button" title="Remove DNS server" aria-label="Remove DNS server" data-vm-dns-del="${esc(s._id)}" data-vm-dns-del-i="${i}">${trashIcon()}</button>` : ""}
+              </div>`).join("")}
+            <button class="btn" type="button" data-vm-dns-add="${esc(s._id)}" style="align-self:flex-start;margin-top:4px"><img src="${iconSrc("dns.svg")}" alt=""> Add DNS server</button>
+          </div>
+        </label>`}
+      </div>
+    </div>`;
+}
+
+/* Every adapter after the first: no gateway and no DNS, so one grid says everything — see
+   applyNetworkToNic for why those two stay on the primary. */
+function renderServerNicCard(s, nic, i) {
+  const attached = findNicNetwork(nic);
+  const switches = state.defaults.availableSwitches || [];
+  const bind = `data-nic-s="${esc(s._id)}" data-nic-i="${i}"`;
+  const ipCheck = validateNicIpAddress(s, nic);
+  const range = attached ? networkUsableRange(attached) : null;
+  const defaultHint = range ? `Usable range ${range.start}–${range.end}` : "";
+  const hintText = ipCheck.invalid ? ipCheck.message : defaultHint;
+  const ip = String(nic.ipAddress || "");
+  return `
+    <div class="nic-card">
+      ${nicCardHead({
+        key: `nic:${s._id}:${i + 1}`,
+        custom: !!String(nic.name || "").trim(),
+        name: effectiveNicName(s, i + 1),
+        placeholder: nicAutoName(i + 1),
+        nameBind: `${bind} data-nic-k="name"`,
+        meta: nicMetaLine(nic.switchName, nic.vlanId, ip),
+        remove: `<button class="btn icon danger-text" type="button" title="Remove adapter" aria-label="Remove adapter" data-del-nic="${esc(s._id)}" data-del-nic-i="${i}">${trashIcon()}</button>`
+      })}
+      <div class="grid-2">
+        ${field("Network", `<select ${bind} data-nic-k="networkAttach">
+          <option value="">— none (manual) —</option>
+          ${(state.networks || []).map(n => `<option value="${esc(n.id)}" ${attached && attached.id === n.id ? "selected" : ""}>${esc(networkName(n))} — ${esc(networkCidr(n))}</option>`).join("")}
+        </select>
+        <span class="hint">${attached ? `bridge and VLAN from ${esc(networkName(attached))}` : "Pick a network to auto-fill bridge and VLAN"}</span>`)}
+        ${field("Bridge / VNet", `<select ${bind} data-nic-k="switchName" class="${inv(`nic:${s._id}:${i}:switchName`)}"${invAria(`nic:${s._id}:${i}:switchName`)} ${attached ? "disabled" : ""}>
+          ${String(nic.switchName || "").trim() ? "" : `<option value="" selected>— select a bridge —</option>`}
+          ${switches.map(sw => `<option value="${esc(sw)}" ${nic.switchName === sw ? "selected" : ""}>${esc(sw)}</option>`).join("")}
+          ${!switches.includes(nic.switchName) && nic.switchName ? `<option value="${esc(nic.switchName)}" selected>${esc(nic.switchName)}</option>` : ""}
+        </select>
+        <span class="hint">${attached ? "Set by the network above" : "The bridge or VNet this adapter plugs into"}</span>`)}
+        ${field("VLAN ID", `<input ${bind} data-nic-k="vlanId" value="${esc(nic.vlanId ?? "")}" placeholder="blank = untagged" ${attached ? "disabled" : ""}>
+        <span class="hint">${attached ? "Set by the network above" : vlanHintText(nic.vlanId)}</span>`)}
+        <label class="field">Static IP address / prefix
+          <div class="ip-prefix-row">
+            <input ${bind} data-nic-k="ipAddress" value="${esc(ip)}" placeholder="empty = DHCP" class="${ipCheck.invalid || invalidFieldKeys.has(`nic:${s._id}:${i}:ipAddress`) ? "is-invalid" : ""}" aria-invalid="${ipCheck.invalid ? "true" : "false"}">
+            ${prefixSelectHtml(`${bind} data-nic-k="prefixLength"${attached ? " disabled" : ""}`, nic.prefixLength)}
+          </div>
+          <span class="hint ${ipCheck.invalid ? "err" : ""}" data-ip-hint="1" data-default-hint="${esc(defaultHint)}" style="${hintText ? "" : "display:none"}">${esc(hintText)}</span>
+        </label>
+      </div>
+    </div>`;
+}
+
+/* The whole Network section body: one card per adapter, primary first. Hyper-V Manager and the
+   Azure portal both list a VM's NICs this way, and it is the only layout that stays readable
+   once a VM has two — the alternative puts adapter one's fields in a grid and adapter two's in
+   a box below it, so the same setting looks like two different kinds of setting. */
+function renderServerNetworkAdapters(s) {
+  const nics = s.nics || [];
+  return `
+    <div class="nic-pane">
+      <div class="nic-cmdbar">
+        <p class="hint">One card per network adapter. Only the primary carries a gateway and DNS — extra adapters get an address and nothing else, so the guest keeps a single default route.</p>
+        <button class="btn primary" type="button" data-add-nic="${esc(s._id)}"><img src="${iconSrcOnAccent("nic.svg")}"> Add network adapter</button>
+      </div>
+      <div class="nic-list">
+        ${renderPrimaryNicCard(s)}
+        ${nics.map((nic, i) => renderServerNicCard(s, nic, i)).join("")}
+      </div>
+    </div>`;
+}
+
+/* Every string the card derives from the VM's name, in one place. The card renders from
+   it and the name input recomputes it on every keystroke, so a header that updates while
+   you type cannot drift from the one a full render would draw. */
+function serverNameParts(s) {
+  const shortName = (s.name || "new server").toLowerCase().slice(0, NETBIOS_MAX);
+  const domainFqdn = namingSuffixForServer(s);
+  const nm = namingDefaults();
+  return {
+    shortName,
+    domainFqdn,
+    hyperVName: (domainFqdn && nm.vmNameIncludeFqdn) ? `${shortName}.${domainFqdn}` : shortName,
+    folderName: (domainFqdn && nm.folderIncludeFqdn) ? `${shortName}.${domainFqdn}` : shortName
+  };
+}
+
+/* Two VMs of one name collide on the VM name, the folder and the disk file. Review says
+   so at the end; this is the same question asked on the card, while the name is being
+   typed and can still be fixed in place. */
+function serverNameTaken(s) {
+  const name = String(s.name || "").trim().toLowerCase();
+  if (!name) return false;
+  return state.servers.some(o => o !== s && String(o.name || "").trim().toLowerCase() === name);
+}
+
+function renderServerCard(s) {
+  const open = !!state.expanded[s._id];
+  const img = findImage(s.imageId);
+  const isCustomImage = s.imageSource === "custom";
+  const displayImageLabel = isCustomImage
+    ? (s.imageHint ? "Custom · " + s.imageHint : "Custom gold image")
+    : img.label;
+  const displayImageIcon = isCustomImage ? "shared-gallery.svg" : img.icon;
+  const displayImageIconSrc = isCustomImage ? iconSrcBand("shared-gallery.svg", "deploy") : imageIconSrc(img);
+  const dj = s.domainJoin || {};
+  const arc = s.azureArc || {};
+  const djAccount = effectiveDomainJoinAccount(s);
+  const arcPrincipal = effectiveAzureArcPrincipal(s);
+  const isvc = Object.assign(defaultIntegrationServices(), s.integrationServices || {});
+  const pillClass = img.kind === "core" ? "core" : img.kind === "client" ? "client" : img.kind === "linux" ? "linux" : "desktop";
+  const isLinux = isLinuxImage(img);
+  const isOpen = isNestedOpen(s._id + "-is", false);
+  const templateOpen = isNestedOpen(s._id + "-template", false);
+  const appliedTemplate = VM_TEMPLATES[s.templateId] || null;
+  const idOpen = isNestedOpen(s._id + "-id", true);
+  const localOpen = isNestedOpen(s._id + "-local", true);
+  const cpuOpen = isNestedOpen(s._id + "-cpu", true);
+  const cpuAdvOpen = isNestedOpen(s._id + "-cpuadv", false);
+  const netOpen = isNestedOpen(s._id + "-net", true);
+  const autoStartOpen = isNestedOpen(s._id + "-autostart", false);
+  const disksOpen = isNestedOpen(s._id + "-disks", false);
+  const pathsOpen = isNestedOpen(s._id + "-paths", false);
+  const packagesOpen = isNestedOpen(s._id + "-packages", false);
+  const bootOpen = isNestedOpen(s._id + "-boot", false);
+  const disks = s.additionalDisks || [];
+  const isEnabledCount = ["shutdown","timeSynchronization","dataExchange","heartbeat","backup","guestServices"]
+    .filter(k => isvc[k]).length;
+  const nameParts = serverNameParts(s);
+  const shortName = nameParts.shortName;
+  const domainFqdn = nameParts.domainFqdn;
+  const nmDefaults = namingDefaults();
+  const hyperVName = nameParts.hyperVName;
+  const folderName = nameParts.folderName;
+  const nameTaken = serverNameTaken(s);
+  const isDc = isAdDomainController(s);
+  const adminOnly = isBuiltInAdminOnly(s);
+  const adminOnlyLocked = !supportsBuiltInAdminOnly(s);
+  const djBadge = djAccount ? `<span class="pill status on" title="Domain Join · ${esc(domainJoinAccountTitle(djAccount))}"><img src="${iconSrc("identity.svg")}" alt="">Domain</span>` : "";
+  const arcBadge = arcPrincipal ? `<span class="pill status on" title="Azure Arc · ${esc(azureArcPrincipalTitle(arcPrincipal))}"><img src="${iconSrc("arc.svg")}" alt="">Arc</span>` : "";
+  const clusterOn = clusterIncludesServer(s);
+  /* "HA", not "Clustered": it is what the VM gains, it is Microsoft's own wording for a
+     clustered role, and it fits the fixed badge width that "Clustered" was straining. */
+  const clusterBadge = clusterOn ? `<span class="pill status on" title="Highly available — clustered role on ${esc(state.defaults.cluster.name || "the host's own cluster")}"><img src="${iconSrc("virtual-clusters.svg")}" alt="">HA</span>` : "";
+  return `
+  <article class="card collapsible ${open ? "" : "collapsed"}" data-sid="${esc(s._id)}">
+    <div class="card-head" data-toggle="${esc(s._id)}">
+      <div class="card-lead">
+        <span class="card-chevron">${chevron()}</span>
+        <div class="card-icon"><img src="${iconSrcBand("vm.svg", serverGlyphBand(s))}"></div>
+        <div>
+          <div class="card-title" data-name-title="${esc(s._id)}">${esc(hyperVName)}</div>
+          <div class="card-meta"><span data-name-guest="${esc(s._id)}">${hyperVName !== shortName ? "guest " + esc(shortName) + " · " : ""}</span>${esc(displayImageLabel)} · ${esc(s.memoryGB)} GB / ${esc(s.cpuCount)} CPU · ${esc(s.switchName || "no switch")}${s.vlanId != null ? " · VLAN " + esc(s.vlanId) : ""}${disks.length ? " · " + disks.length + " data disk(s)" : ""}<span data-name-folder="${esc(s._id)}">${folderName !== hyperVName ? " · folder " + esc(folderName) + "\\" : ""}</span></div>
+        </div>
+      </div>
+      <div class="card-actions">
+        ${djBadge}${arcBadge}${clusterBadge}
+        <span class="pill role ${pillClass}">${esc(img.kind)}</span>
+        <span class="card-ip${String(s.ipAddress || "").trim() ? "" : " is-none"}" style="--ip-col:${ipColumnWidth(state.servers)}ch">${esc(s.ipAddress || "no IP")}</span>
+        ${psObjectButton("vm", s._id)}
+        <button class="btn icon danger-text" type="button" title="Remove VM" aria-label="Remove VM" data-del="${esc(s._id)}">${trashIcon()}</button>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="section collapsible ${templateOpen ? "" : "collapsed"}">
+        <div class="section-head" data-nested="${esc(s._id)}-template">
+          <span class="section-chevron">${chevron()}</span>
+          <img src="${iconSrc("shared-gallery.svg")}"> Template
+          <span class="section-meta">${appliedTemplate ? esc(appliedTemplate.label) : "Start from a known-good VM shape"}</span>
+        </div>
+        <div class="section-body">
+          <div class="grid-2" style="margin-top:12px">
+            ${field("Applied template", (() => {
+              const tplOpen = state.templatePickerOpen === s._id;
+              const tplTipTitle = appliedTemplate ? vmTemplateTitle(appliedTemplate, img) : "Templates";
+              const tplTipBody = appliedTemplate
+                ? (appliedTemplate.sub ? appliedTemplate.sub + " " : "") + "Anything you change afterwards stays changed — this only records where the VM started."
+                : "Sets name, image, sizing and roles in one go. Addressing, disks and credentials are left alone, so it is safe on a VM you already started configuring.";
+              return `<div class="picker-row">
+              <div class="picker ${tplOpen ? "open" : ""}">
+              <button type="button" class="picker-btn" data-template-picker-toggle="${esc(s._id)}" aria-expanded="${tplOpen ? "true" : "false"}">
+                <img src="${iconSrc(appliedTemplate ? appliedTemplate.icon : "shared-gallery.svg")}" alt="">
+                <span class="picker-label">${appliedTemplate ? esc(vmTemplateTitle(appliedTemplate, img)) : "— no template —"}</span>
+                <span class="picker-chevron">${chevron()}</span>
+              </button>
+              ${tplOpen ? `<div class="picker-list" role="listbox">
+                <div class="picker-scope">
+                  <span class="seg" role="group" aria-label="Windows release">${TEMPLATE_RELEASES.map(r => `<button type="button" class="${state.templateRelease === r ? "on" : ""}" data-template-release="${r}" aria-pressed="${state.templateRelease === r ? "true" : "false"}">${r}</button>`).join("")}</span>
+                  <span class="seg" role="group" aria-label="Windows edition">${TEMPLATE_EDITIONS.map(e => `<button type="button" class="${state.templateEdition === e ? "on" : ""}" data-template-edition="${esc(e)}" aria-pressed="${state.templateEdition === e ? "true" : "false"}">${esc(e)}</button>`).join("")}</span>
+                </div>
+                <button type="button" role="option" aria-selected="${appliedTemplate ? "false" : "true"}" class="${appliedTemplate ? "" : "selected"}" data-template-pick="${esc(s._id)}" data-template-id="">
+                  <img src="${iconSrc("vm.svg")}" alt="">
+                  <span class="opt-body">
+                    <span class="opt-label">No template</span>
+                    <span class="opt-meta">Leave this VM exactly as it is</span>
+                  </span>
+                </button>
+                ${vmTemplateGroups().map(g => `
+                <div class="opt-group" role="presentation"><img src="${iconSrc(g.icon)}" alt="">${esc(g.label)}</div>
+                ${g.items.map(it => `
+                <button type="button" role="option" aria-selected="${s.templateId === it.id ? "true" : "false"}" class="${s.templateId === it.id ? "selected" : ""} indented" data-template-pick="${esc(s._id)}" data-template-id="${esc(it.id)}" title="${esc(it.t.sub || "")}">
+                  <img src="${iconSrc(it.t.icon)}" alt="">
+                  <span class="opt-body">
+                    <span class="opt-label">${esc(it.t.short || it.t.label)}</span>
+                    <span class="opt-meta wrap">${vmTemplateSpecHtml(it.t)}</span>
+                  </span>
+                </button>`).join("")}`).join("")}
+              </div>` : ""}
+              </div>
+              ${infoTip(tplTipTitle, tplTipBody)}
+            </div>`;
+            })())}
+          </div>
+        </div>
+      </div>
+
+      <div class="section collapsible ${idOpen ? "" : "collapsed"}">
+        <div class="section-head" data-nested="${esc(s._id)}-id">
+          <span class="section-chevron">${chevron()}</span>
+          <img src="${iconSrc("vm.svg")}"> Identity
+          <span class="section-meta"><span data-name-short="${esc(s._id)}">${esc(shortName)}</span> · ${esc(displayImageLabel)}</span>
+        </div>
+        <div class="section-body">
+          <div class="grid-3" style="margin-top:12px">
+              ${field("Computer name", (() => {
+                const nameLen = String(s.name || "").length;
+                const over = nameLen > NETBIOS_MAX;
+                const bad = over || nameTaken;
+                return `<input data-s="${esc(s._id)}" data-k="name" value="${esc(s.name)}" placeholder="dc-01 / app-01 / files-01" style="text-transform:lowercase" class="${bad || invalidFieldKeys.has(`s:${s._id}:name`) ? "is-invalid" : ""}" aria-invalid="${bad ? "true" : "false"}" maxlength="63">
+                <div class="netbios-meta">
+                  <span class="hint ${bad ? "err" : ""}" data-netbios-hint="1">${over
+                    ? `Too long for NetBIOS — max ${NETBIOS_MAX} characters (currently ${nameLen})`
+                    : nameTaken
+                      ? `Another VM already uses this name — the VM, its folder and its disks would collide`
+                      : `Lowercase · max ${NETBIOS_MAX} characters (NetBIOS)`}</span>
+                  <span class="netbios-count ${over ? "over" : ""}" data-netbios-count="1">${nameLen} / ${NETBIOS_MAX}</span>
+                </div>`;
+              })())}
+              ${field("Image", (() => {
+                const pickerOpen = state.imagePickerOpen === s._id;
+                const isCustom = isCustomImage;
+                return `<div class="picker ${pickerOpen ? "open" : ""}">
+                <button type="button" class="picker-btn" data-image-picker-toggle="${esc(s._id)}" aria-expanded="${pickerOpen ? "true" : "false"}">
+                  <img src="${displayImageIconSrc}" alt="">
+                  <span class="picker-label">${esc(displayImageLabel)}</span>
+                  <span class="picker-chevron">${chevron()}</span>
+                </button>
+                ${pickerOpen ? `<div class="picker-list" role="listbox">
+                  ${imagePickerGroups().map(rel => `
+                    <div class="opt-group" role="presentation">${esc(rel.label)}</div>
+                    ${rel.groups.map(g => `
+                      ${g.label ? `<div class="opt-sub" role="presentation">${esc(g.label)}</div>` : ""}
+                      ${g.images.map(i => `
+                    <button type="button" role="option" aria-selected="${!isCustom && i.id===s.imageId?"true":"false"}" class="${!isCustom && i.id===s.imageId?"selected":""} ${g.label ? "indented" : ""}" data-image-pick="${esc(s._id)}" data-image-id="${esc(i.id)}">
+                      <img src="${imageIconSrc(i)}" alt="">
+                      <span class="opt-body">
+                        <span class="opt-label">${esc(i.label)}</span>
+                        <span class="opt-meta">${esc(i.id)}</span>
+                      </span>
+                      ${goldBadge(i.id)}
+                    </button>`).join("")}`).join("")}`).join("")}
+                  <div class="opt-group" role="presentation">Custom</div>
+                  <button type="button" role="option" aria-selected="${isCustom?"true":"false"}" class="${isCustom?"selected":""}" data-image-pick="${esc(s._id)}" data-image-id="__custom__">
+                    <img src="${iconSrcBand("shared-gallery.svg", "deploy")}" alt="">
+                    <span class="opt-body">
+                      <span class="opt-label">Custom gold image</span>
+                      <span class="opt-meta">Match by filename hint under the gold VHDX directory</span>
+                    </span>
+                  </button>
+                </div>` : ""}
+              </div>
+              <span class="hint">${isCustom ? "Enter the gold filename hint on the right" : esc(img.id)}</span>`;
+              })())}
+              ${isCustomImage
+                ? field("Custom image hint", `<input data-s="${esc(s._id)}" data-k="imageHint" value="${esc(s.imageHint||"")}" placeholder="only for custom gold names" class="${inv(`s:${s._id}:imageHint`)}"${invAria(`s:${s._id}:imageHint`)}>
+                  <span class="hint">Partial or full gold filename — used instead of catalog imageId matching</span>`)
+                : ""}
+          </div>
+        </div>
+      </div>
+
+      <div class="section collapsible ${localOpen ? "" : "collapsed"}">
+        <div class="section-head" data-nested="${esc(s._id)}-local">
+          <span class="section-chevron">${chevron()}</span>
+          <img src="${iconSrc("users.svg")}"> ${isLinux ? "Login" : "Local admin"}
+          <span class="section-meta">${isLinux ? esc(s.localUserName || "no user") : (adminOnly ? "built-in Administrator only" : esc(s.localUserName || "no user"))}</span>
+        </div>
+        <div class="section-body">
+          <div style="margin-top:12px">
+            ${isLinux ? "" : toggle(`data-s="${esc(s._id)}" data-k="builtInAdminOnly"`, "Built-in Administrator only (no second local account)", adminOnly, isDc || adminOnlyLocked, isDc
+              ? "Forced on — this VM installs AD DS. Promoting a domain controller destroys the local SAM, so any extra local admin is deleted on promotion anyway."
+              : adminOnlyLocked
+              ? `Locked off — ${esc(displayImageLabel)} is a client image. Its OOBE needs a provisioned <code>&lt;LocalAccounts&gt;</code> user; with only the built-in Administrator setup stalls on the account screen and the deployment breaks.`
+              : adminOnly
+              ? `${findImage(s.imageId).kind === "client" ? "On — an AVD session host run like a server." : "Default for Windows Server."} The answer file provisions no <code>&lt;LocalAccounts&gt;</code> — the password below lands on <code>Built-in\\Administrator</code>, which becomes the only way in.`
+              : "Off — a second local admin is provisioned next to the built-in Administrator, and both end up with the password below.")}
+            ${isLinux ? `<p class="hint">cloud-init provisions this user with passwordless sudo. The password is kept for the Proxmox VE console — an SSH key is the way in over the network.</p>` : ""}
+          </div>
+          <div class="grid-2" style="margin-top:12px">
+              ${field("Local user", (() => {
+                const userUnlocked = !!state.nameEdit[`user:${s._id}`];
+                return `<div class="edit-field">
+                <input data-s="${esc(s._id)}" data-k="localUserName" data-name-input="user:${esc(s._id)}" class="keep-border ${inv(`s:${s._id}:localUserName`)}"${invAria(`s:${s._id}:localUserName`)} value="${adminOnly ? "Administrator" : esc(s.localUserName)}" placeholder="augustus"${adminOnly ? " disabled" : userUnlocked ? "" : " readonly"}>
+                <button class="btn icon" type="button" data-gen-user="${esc(s._id)}"${adminOnly ? " disabled" : ""}
+                  title="Generate a new one" aria-label="Generate a new user name">${regenIcon()}</button>
+                <button class="btn icon" type="button" data-name-edit="user:${esc(s._id)}"${adminOnly ? " disabled" : ""}
+                  title="${userUnlocked ? "Done" : "Edit user name"}" aria-label="${userUnlocked ? "Done" : "Edit user name"}">${userUnlocked ? checkIcon() : pencilIcon()}</button>
+              </div>`;
+              })() + `
+                <span class="hint">${adminOnly
+                  ? "The built-in account — nothing is provisioned. Your own name is kept and comes back if you switch this off."
+                  : "Theme from General Settings · " + esc((USERNAME_THEMES[state.usernameTheme]||{}).label || state.usernameTheme)}</span>`)}
+              ${field(adminOnly ? "Administrator password" : "Local password", (() => {
+                /* Same reveal map as the Passwords blade, but its own key — revealing here
+                   must not silently unmask the same secret over there. Unlocking the pencil
+                   forces the clear text: nobody edits a row of dots. */
+                const pwUnlocked = !!state.nameEdit[`pw:${s._id}`];
+                const pwShown = pwUnlocked || !!passwordsVisible["card:" + s._id];
+                return `<div class="edit-field">
+                <input type="${pwShown ? "text" : "password"}" data-s="${esc(s._id)}" data-k="localUserPassword" data-name-input="pw:${esc(s._id)}" class="keep-border ${inv(`s:${s._id}:localUserPassword`)}"${invAria(`s:${s._id}:localUserPassword`)} value="${esc(s.localUserPassword)}" autocomplete="off" spellcheck="false"${pwUnlocked ? "" : " readonly"}>
+                <button class="btn icon" type="button" data-pw-toggle="card:${esc(s._id)}"${pwUnlocked ? " disabled" : ""}
+                  title="${pwUnlocked ? "Visible while editing" : pwShown ? "Hide" : "Reveal"}" aria-label="${pwShown ? "Hide" : "Reveal"} password">${pwShown ? eyeOffIcon() : eyeIcon()}</button>
+                <button class="btn icon" type="button" data-gen-pwd="${esc(s._id)}"
+                  title="Generate a new one" aria-label="Generate a new password">${regenIcon()}</button>
+                <button class="btn icon" type="button" data-name-edit="pw:${esc(s._id)}"
+                  title="${pwUnlocked ? "Done" : "Edit password"}" aria-label="${pwUnlocked ? "Done" : "Edit password"}">${pwUnlocked ? checkIcon() : pencilIcon()}</button>
+              </div>
+                <span class="hint">${passwordLength()} chars · length set in General Settings</span>`;
+              })())}
+          </div>
+          ${!isLinux ? "" : `
+          <div class="grid-1" style="margin-top:12px">
+            ${field("SSH authorized key", (() => {
+                /* Locked like the user name and the password beside it. A public key is
+                   long, generated far more often than it is typed, and a stray keystroke
+                   in it is invisible - the VM simply refuses the key later. The pencil
+                   makes editing deliberate. */
+                const keyUnlocked = !!state.nameEdit[`sshkey:${s._id}`];
+                return `<div class="edit-field">
+                <input data-s="${esc(s._id)}" data-k="sshAuthorizedKey" data-name-input="sshkey:${esc(s._id)}" class="keep-border" value="${esc(s.sshAuthorizedKey || "")}" placeholder="ssh-ed25519 AAAAC3Nza... user@host" spellcheck="false"${keyUnlocked ? "" : " readonly"}>
+                <button class="btn icon" type="button" data-gen-ssh="${esc(s._id)}"
+                  title="Generate an Ed25519 key pair" aria-label="Generate an SSH key pair">${regenIcon()}</button>
+                <button class="btn icon" type="button" data-name-edit="sshkey:${esc(s._id)}"
+                  title="${keyUnlocked ? "Done" : "Edit the key"}" aria-label="${keyUnlocked ? "Done" : "Edit the key"}">${keyUnlocked ? checkIcon() : pencilIcon()}</button>
+                <button class="btn icon" type="button" data-dl-ssh="${esc(s._id)}"${sshPrivateKeys[s._id] ? "" : " disabled"}
+                  title="${sshPrivateKeys[s._id] ? "Download the private key" : "Generate a key pair first"}" aria-label="Download the private key">${downloadIcon()}</button>
+              </div>
+              <span class="hint">Public key only, for this VM alone. Blank means the password is the only way in, at the Proxmox VE console.${sshPrivateKeys[s._id]
+                ? " <strong>The private key is held in this tab and in no save token</strong> — download it before you leave the page."
+                : ""}</span>`;
+              })())}
+          </div>`}
+        </div>
+      </div>
+
+
+      <div class="section collapsible ${cpuOpen ? "" : "collapsed"}">
+        <div class="section-head" data-nested="${esc(s._id)}-cpu">
+          <span class="section-chevron">${chevron()}</span>
+          <img src="${iconSrc("cpu.svg")}"> CPU / RAM
+          <span class="section-meta">${esc(s.memoryGB)} GB · ${esc(s.cpuCount)} CPU${s.nestedVirtualization ? " · nested virtualization" : ""}</span>
+        </div>
+        <div class="section-body">
+          <div class="grid-3" style="margin-top:12px">
+              ${field(fieldLabel("cpu.svg", "CPU count"), `<input type="number" min="1" data-s="${esc(s._id)}" data-k="cpuCount" value="${esc(s.cpuCount)}" class="${inv(`s:${s._id}:cpuCount`)}"${invAria(`s:${s._id}:cpuCount`)}>`)}
+              ${field(fieldLabel("ram.svg", "Memory (GB)"), `<input type="number" min="1" data-s="${esc(s._id)}" data-k="memoryGB" value="${esc(s.memoryGB)}" class="${inv(`s:${s._id}:memoryGB`)}"${invAria(`s:${s._id}:memoryGB`)}>`)}
+          </div>
+          <div class="section collapsible ${cpuAdvOpen ? "" : "collapsed"}">
+            <div class="section-head" data-nested="${esc(s._id)}-cpuadv">
+              <span class="section-chevron">${chevron()}</span>
+              <img src="${iconSrc("nested-virt.svg")}"> Additional processor options
+              <span class="section-meta">${s.nestedVirtualization ? "Nested virtualization on" : "Defaults"}</span>
+            </div>
+            <div class="section-body">
+              <div style="margin-top:12px">
+                ${toggle(`data-s="${esc(s._id)}" data-k="nestedVirtualization"`, `Nested virtualization${infoTip("Nested virtualization", NESTED_VIRT_INFO)}`,
+                  !!s.nestedVirtualization, nestedVirtRequired(s),
+                  nestedVirtRequired(s) ? `Required by ${esc(findImage(s.imageId).label)} — it runs its own hypervisor.` : "")}
+              </div>
+              ${s.nestedVirtualization ? `<div style="margin-top:10px">${warnBanner(NESTED_VIRT_WARN)}</div>` : ""}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section collapsible ${netOpen ? "" : "collapsed"}">
+        <div class="section-head" data-nested="${esc(s._id)}-net">
+          <span class="section-chevron">${chevron()}</span>
+          <img src="${iconSrc("vnet.svg")}"> Network
+          <span class="section-meta">
+            ${esc(s.switchName || "no switch")}${s.ipAddress ? " · " + esc(s.ipAddress) : ""}${serverNicSummary(s) ? " · " + esc(serverNicSummary(s)) : ""}
+          </span>
+        </div>
+        <div class="section-body">
+          ${renderServerNetworkAdapters(s)}
+        </div>
+      </div>
+
+      <div class="section collapsible ${disksOpen ? "" : "collapsed"}">
+        <div class="section-head" data-nested="${esc(s._id)}-disks">
+          <span class="section-chevron">${chevron()}</span>
+          <img src="${iconSrc("disk.svg")}"> Disks
+          <span class="section-meta">${1 + disks.length} attached · ${disks.length} data</span>
+        </div>
+        <div class="section-body">
+          <div class="disk-pane">
+            <div class="disk-cmdbar">
+              <p class="hint">The OS disk is the gold's (a linked clone, or a full copy); grow it here if the VM needs more. Data disks are
+                thin-provisioned on the VM's storage and ${isLinuxServer(s) ? "attached raw" : "formatted and lettered at first boot"}.</p>
+              <button class="btn primary" type="button" data-add-disk="${esc(s._id)}"><img src="${iconSrcOnAccent("disk.svg")}"> Create and attach</button>
+            </div>
+            <div class="disk-grid">
+              <div class="disk-grid-head" aria-hidden="true">
+                <span>Disk</span><span>${isLinuxServer(s) ? "Use" : "Drive"}</span><span>Size (GB)</span><span>Provisioning</span><span>Format</span><span>Volume label</span><span></span>
+              </div>
+              <div class="disk-grid-row is-os">
+                <span class="disk-name-cell"><span class="disk-badge">OS</span> <code>scsi0</code></span>
+                <span class="disk-drive">${isLinuxServer(s) ? "system" : "C:"}</span>
+                <input type="number" min="1" data-s="${esc(s._id)}" data-k="osDiskGB" value="${esc(s.osDiskGB || "")}" placeholder="gold's" aria-label="OS disk size GB"
+                       title="Blank keeps the gold's size (Linux 32-40 GB, Windows 64 GB). A disk only grows.">
+                <span class="disk-muted">${s.useDifferencingDisk === false ? "Full copy" : "Linked clone"}</span>
+                <span class="disk-muted" title="The OS volume comes formatted in the gold">—</span>
+                <span class="disk-muted" title="The OS volume comes formatted in the gold">—</span>
+                <span></span>
+              </div>
+              ${disks.length ? disks.map((d, i) => {
+                const letter = dataDiskTag(s, i, d);
+                return `
+              <div class="disk-grid-row">
+                <span class="disk-name-cell"><span class="disk-badge data">Data</span> <code>scsi${i + 1}</code></span>
+                <span class="disk-drive">${esc(letter)}:</span>
+                <input type="number" min="1" data-disk-s="${esc(s._id)}" data-disk-i="${i}" data-dk="sizeGB" value="${esc(d.sizeGB)}" aria-label="Size GB">
+                <span class="disk-muted" title="Proxmox VE storages allocate on write (LVM-thin, ZFS, Ceph, qcow2)">Thin</span>
+                <select data-disk-s="${esc(s._id)}" data-disk-i="${i}" data-dk="fileSystem" aria-label="File system"
+                        title="The guest formats and mounts this disk at first boot. Leave raw to do it by hand.">
+                  ${DATA_DISK_FILE_SYSTEMS.map(fs => `<option value="${esc(fs.id)}" ${diskFileSystem(d) === fs.id ? "selected" : ""}>${esc(fs.label)}</option>`).join("")}
+                </select>
+                <input data-disk-s="${esc(s._id)}" data-disk-i="${i}" data-dk="label" value="${esc(d.label || "")}"
+                       placeholder="${esc(defaultDataDiskLabel(d, i))}" maxlength="32" aria-label="Volume label"
+                       ${diskFileSystem(d) === "None" ? "disabled" : ""}>
+                <button class="btn icon danger-text" type="button" title="Detach data disk" aria-label="Detach data disk" data-del-disk="${esc(s._id)}" data-del-i="${i}">${trashIcon()}</button>
+              </div>`;
+              }).join("") : `
+              <div class="disk-grid-empty">
+                <strong>No data disks</strong> — use <em>Create and attach</em> to add D:, E:, …
+              </div>`}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      ${!isLinux ? "" : `
+      <div class="section collapsible ${packagesOpen ? "" : "collapsed"}">
+        <div class="section-head" data-nested="${esc(s._id)}-packages">
+          <span class="section-chevron">${chevron()}</span>
+          <img src="${iconSrc("extensions.svg")}"> Packages
+          <span class="section-meta">${(() => {
+            const count = linuxPackageList(s).length;
+            const baked = linuxBakedPackages(s).length;
+            const extra = count ? `${count} extra` : "";
+            if (!baked) return extra || "none";
+            return `${baked} in the gold${extra ? " \u00b7 " + extra : ""}`;
+          })()}</span>
+        </div>
+        <div class="section-body">
+          ${(() => {
+            const baked = linuxBakedPackages(s);
+            if (!baked.length) return "";
+            const img = findImage(s.imageId);
+            const kernel = baked.some(p => p.startsWith("linux-azure"));
+            return `
+            <p class="hint" style="margin-top:12px">Already in the gold \u2014 New-Vhdx.ps1 installed ${kernel
+              ? "the Azure-tuned kernel and its Hyper-V tools"
+              : "the Hyper-V integration daemons"} during the bake, so nothing here is fetched again when a VM is
+              built from ${esc(img.label)}. Shown because it cannot be seen from outside, and disabled because
+              there is nothing left to decide.</p>
+            <div class="dns-list" style="display:flex; flex-direction:column; gap:6px; margin-top:12px">
+              ${baked.map(pkg => `
+              <div class="list-row">
+                <input value="${esc(pkg)}" disabled style="background-image:url('${iconSrc("extensions.svg")}')">
+              </div>`).join("")}
+            </div>
+            <div class="section-head" style="margin:16px 0 0;padding:0">Extra packages</div>`;
+          })()}
+          <p class="hint" style="margin-top:12px">Installed by cloud-init on first boot, one package per row — the names go into the seed ISO exactly as typed, so they are the distribution's own. The VM needs a network path to its mirrors at first boot or the whole list is skipped.</p>
+          <div class="dns-list" style="display:flex; flex-direction:column; gap:6px; margin-top:12px">
+            ${(() => {
+              const rows = linuxPackageRows(s);
+              return (rows.length ? rows : [""]).map((pkg, i) => `
+              <div class="list-row">
+                <input data-s="${esc(s._id)}" data-pkg-i="${i}" value="${esc(pkg)}" placeholder="qemu-guest-agent" spellcheck="false" style="background-image:url('${iconSrc("extensions.svg")}')">
+                ${rows.length > 1 ? `<button class="btn icon danger-text" type="button" title="Remove package" aria-label="Remove package" data-pkg-del="${esc(s._id)}" data-pkg-del-i="${i}">${trashIcon()}</button>` : ""}
+              </div>`).join("");
+            })()}
+            <button class="btn" type="button" data-pkg-add="${esc(s._id)}" style="align-self:flex-start;margin-top:4px"><img src="${iconSrc("extensions.svg")}" alt=""> Add package</button>
+          </div>
+          ${!effectiveDomainJoinAccount(s) ? "" : `
+          <div style="margin-top:16px">
+            ${field(`<span class="field-label">Domain sudo groups ${infoTip("Domain sudo groups", "Overrides the list on the join account, for this VM only. No chips inherits it. This grants sudo; who may log in at all stays the join account's business.")}</span>`,
+              `${groupChipList({ key: `s:${s._id}`, values: s.djSudoGroups, placeholder: "Domain Admins",
+                empty: ((effectiveDomainJoinAccount(s).sudoGroups || []).length
+                  ? `Inherits ${(effectiveDomainJoinAccount(s).sudoGroups || []).join(", ")} from the join account.`
+                  : "Inherits the join account, which lists no groups."),
+                hint: "Replaces the account's list for this VM only." })}`)}
+          </div>`}
+        </div>
+      </div>`}
+
+      ${renderServerRolesSection(s)}
+      ${renderServerAppsSection(s)}
+
+      <div class="section collapsible ${pathsOpen ? "" : "collapsed"}">
+        <div class="section-head" data-nested="${esc(s._id)}-paths">
+          <span class="section-chevron">${chevron()}</span>
+          <img src="${iconSrc("storage.svg")}"> Placement
+          <span class="section-meta">${esc(`node ${s.pveNode || state.defaults.pveNode || "auto"} · storage ${s.pveStorage || state.defaults.pveStorage || "auto"}`)}</span>
+        </div>
+        <div class="section-body">
+          ${(() => {
+            const inv = typeof cluster !== "undefined" && cluster.inventory;
+            const nodes = inv ? inv.nodes.filter(n => n.status === "online").map(n => n.node) : [];
+            const storages = inv ? [...new Set(inv.storages.filter(x => (x.content || "").split(",").includes("images")).map(x => x.storage))] : [];
+            const sel = (key, list, autoLabel) => `<select data-s="${esc(s._id)}" data-k="${key}">
+                <option value="" ${!s[key] ? "selected" : ""}>${esc(autoLabel)}</option>
+                ${list.map(v => `<option value="${esc(v)}" ${s[key] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}
+              </select>`;
+            return `<div class="grid-2" style="margin-top:12px">
+              ${field(fieldLabel("servers.svg", "Node"), sel("pveNode", nodes, `General Settings (${state.defaults.pveNode || "the gold's node"})`))}
+              ${field(fieldLabel("disk.svg", "Storage for a full copy"), sel("pveStorage", storages, `General Settings (${state.defaults.pveStorage || "the gold's storage"})`))}
+            </div>
+            <p class="hint" style="margin-top:8px">A linked clone stays on the gold's storage; running on another node needs that storage shared.</p>`;
+          })()}
+        </div>
+      </div>
+
+      <div class="section collapsible ${bootOpen ? "" : "collapsed"}">
+        <div class="section-head" data-nested="${esc(s._id)}-boot">
+          <span class="section-chevron">${chevron()}</span>
+          <img src="${iconSrc("secure-boot.svg")}"> Boot / disk
+          <span class="section-meta">${s.useDifferencingDisk === false ? "Full copy" : "Linked clone"}${effectiveSecureBoot(s) ? " · Secure Boot" : ""}${!isLinux && s.enableVtpm ? " · vTPM" : ""}</span>
+        </div>
+        <div class="section-body">
+          <div class="toggle-grid" style="margin-top:12px">
+            ${toggle(`data-s="${esc(s._id)}" data-k="useDifferencingDisk"`, "Linked clone", s.useDifferencingDisk !== false, false, "seconds and almost no space; off: a full, independent copy")}
+            ${imageRefusesSecureBoot(img)
+              ? toggle(`data-s="${esc(s._id)}" data-k="enableSecureBoot"`, "Secure Boot", false, true, "not possible on this image")
+              : toggle(`data-s="${esc(s._id)}" data-k="enableSecureBoot"`, "Secure Boot", s.enableSecureBoot)}
+            ${isLinux ? "" : toggle(`data-s="${esc(s._id)}" data-k="enableVtpm"`, "vTPM (Win11)", s.enableVtpm)}
+            ${toggle(`data-s="${esc(s._id)}" data-k="startAfterCreate"`, "Start after create", s.startAfterCreate)}
+          </div>
+          ${imageRefusesSecureBoot(img) ? `<p class="hint" style="margin-top:8px">${esc(img.label)} ships no Microsoft-signed shim - its gold is baked with Secure Boot off, and so is every VM from it.</p>` : ""}
+          <p class="hint" style="margin-top:8px">Secure Boot and the EFI keys come with the gold (OVMF with Microsoft's keys enrolled). A linked clone depends on its gold: the studio never removes a gold a VM still uses.</p>
+        </div>
+      </div>
+
+      <div class="section collapsible ${autoStartOpen ? "" : "collapsed"}">
+        <div class="section-head" data-nested="${esc(s._id)}-autostart">
+          <span class="section-chevron">${chevron()}</span>
+          <img src="${iconSrc("start-action.svg")}"> Start with the node
+          <span class="section-meta">${esc(autoStartActionLabel(s))}</span>
+        </div>
+        <div class="section-body">
+          <div style="margin-top:12px">
+            ${toggle(`data-s="${esc(s._id)}" data-k="automaticStartEnabled"`, "Start this VM when its node starts", serverAutoStartAction(s) !== "Nothing", false,
+              serverAutoStartAction(s) !== "Nothing"
+                ? "Proxmox VE brings the VM up on its own after a node reboot (<code>onboot</code>)."
+                : "Off — the same as a hand-built VM. Nothing starts this VM but you.")}
+          </div>
+          ${serverAutoStartAction(s) !== "Nothing" ? `
+          <div class="grid-2" style="margin-top:12px">
+            ${field("Start delay (seconds)", `<input type="number" min="0" step="1" data-s="${esc(s._id)}" data-k="automaticStartDelay" value="${esc(serverAutoStartDelay(s))}">
+              <span class="hint">0 = start immediately. Stagger the VMs on a node so they do not all boot at once - a DC first.</span>`)}
+          </div>` : ""}
+        </div>
+      </div>
+
+      <div class="section collapsible ${isOpen ? "" : "collapsed"}">
+        <div class="section-head" data-nested="${esc(s._id)}-is">
+          <span class="section-chevron">${chevron()}</span>
+          <img src="${iconSrc("integration.svg")}"> QEMU guest agent
+          <span class="section-meta">always on - the Hyper-V integration services' counterpart</span>
+        </div>
+        <div class="section-body">
+          <p class="hint" style="margin-top:10px">Every gold carries the QEMU guest agent (Windows: from virtio-win), and every VM has it enabled:
+          clean shutdown from Proxmox VE, the VM's addresses in its summary, filesystem freeze for backups, and the studio's own view
+          into the first boot. Time comes from the guest's own NTP / domain hierarchy, as it should.</p>
+        </div>
+      </div>
+    </div>
+  </article>`;
+}
+
+/* PVE VM Studio: whether an image has a gold to build from - on the image picker and on
+   the card. `cluster` is server.js's view of the golds. */
+function goldOf(imageId) {
+  const golds = (typeof cluster !== "undefined" && cluster.golds) || [];
+  return golds.filter(g => g.status === "ready" && g.image_id === imageId)
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] || null;
+}
+function goldBadge(imageId) {
+  return goldOf(imageId)
+    ? `<span class="pill status on" title="A gold is ready - VMs build from it">gold</span>`
+    : `<span class="pill" title="No gold yet - bake one under Golds">no gold</span>`;
+}
+
+function renderServers() {
+  const empty = `
+    <div class="empty-state">
+      <div class="ue-icon"><img src="${iconSrc("vm.svg")}" alt=""></div>
+      <h3>No virtual machines yet</h3>
+      <div class="ue-actions">
+        <button class="btn" type="button" id="importServers"><img src="${iconSrc("download.svg")}"> Import JSON</button>
+        <button class="btn primary" type="button" id="addServer"><img src="${iconSrcOnAccent("vm.svg")}"> Add virtual machine</button>
+      </div>
+    </div>`;
+  return `
+    <div class="blade-toolbar">
+      <div class="page-title"><img src="${iconSrc("vm.svg")}"> Virtual machines</div>
+      ${state.servers.length ? `<div class="row">
+        <button class="btn" type="button" id="importServers"><img src="${iconSrc("download.svg")}"> Import JSON</button>
+        <button class="btn primary" type="button" id="addServer"><img src="${iconSrcOnAccent("vm.svg")}"> Add virtual machine</button>
+      </div>` : ""}
+    </div>
+    <div class="card-stack">
+      ${state.servers.map(renderServerCard).join("") || empty}
+    </div>`;
+}
+
+
+function renderDomainJoinBlade() {
+  const allOn = !!state.defaults.domainJoinAllVms;
+  const accountCount = (state.domainJoinAccounts || []).length;
+  return `
+    <div class="blade-toolbar">
+      <div class="page-title"><img src="${iconSrc("identity.svg")}"> Domain Join</div>
+      ${allOn || !accountCount ? "" : `<div class="row">
+        <button class="btn primary" type="button" id="addDomainJoinAccount"><img src="${iconSrcOnAccent("identity.svg")}"> Add join account</button>
+      </div>`}
+    </div>
+    <div class="card-stack">
+      ${(state.domainJoinAccounts || []).map((a, ai) => {
+        ensureCatalogStableId(a, "dja");
+        const open = !!state.expanded[a._id];
+        const attached = serversForDomainJoinAccount(a.id);
+        return `
+        <article class="card collapsible ${open ? "" : "collapsed"}" data-dja-card="${esc(a._id)}">
+          <div class="card-head" data-toggle="${esc(a._id)}">
+            <div class="card-lead">
+              <span class="card-chevron">${chevron()}</span>
+              <div class="card-icon"><img src="${iconSrc("identity.svg")}"></div>
+              <div>
+                <div class="card-title">${domainJoinAccountTitleHtml(a)}</div>
+                <div class="card-meta">${attached.length} VM(s) attached</div>
+              </div>
+            </div>
+            <div class="card-actions">
+              <button class="btn icon danger-text" type="button" title="Remove join account" aria-label="Remove join account" data-del-dja="${esc(a._id)}">${trashIcon()}</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="grid-2">
+              ${field("Domain", `<input data-dja="${esc(a._id)}" data-dk="domain" value="${esc(a.domain||"")}" placeholder="ad.example.invalid" class="${inv(`dja:${a._id}:domain`)}"${invAria(`dja:${a._id}:domain`)}>`)}
+              ${field("Join user", `<input data-dja="${esc(a._id)}" data-dk="joinUser" value="${esc(a.joinUser||"")}" placeholder="Administrator@ad.example.invalid" class="${inv(`dja:${a._id}:joinUser`)}"${invAria(`dja:${a._id}:joinUser`)}>`)}
+              ${field("Join password", `<input type="password" data-dja="${esc(a._id)}" data-dk="joinPassword" value="${esc(a.joinPassword||"")}" placeholder="••••••••" autocomplete="new-password" class="${inv(`dja:${a._id}:joinPassword`)}"${invAria(`dja:${a._id}:joinPassword`)}>`)}
+            </div>
+            <div class="grid-2" style="margin-top:12px">
+              ${field(`<span class="field-label">Linux sudo groups ${infoTip("Linux sudo groups", "Domain groups that get sudo on a Linux VM joined with this account, written to /etc/sudoers.d/90-domain-sudo. Each one is looked up with getent on the VM first and skipped with a message if it does not resolve, and the finished file is checked with visudo before it is installed - an invalid file there does not disable one rule, it can stop sudo working at all. A name without @ gets this domain appended, because sssd resolves fully qualified after a realm join, and a space inside a name is escaped for sudoers. Windows VMs ignore this.")}</span>`,
+                `${groupChipList({ key: `dja:${a._id}:sudoGroups`, values: a.sudoGroups, placeholder: "Domain Admins",
+                  empty: "No groups — no domain user gets sudo. Type one and press + or Enter.",
+                  hint: "Linux only: this grants sudo, not login. Spaces in a name are fine." })}`)}
+              ${field(`<span class="field-label">Linux login groups ${infoTip("Linux login groups", "Domain groups allowed to log in at all: realm deny --all, then realm permit for each name here. Leave it empty and the VM keeps what a plain realm join gives, which is that EVERY domain user may log in. Windows VMs ignore this.")}</span>`,
+                `${groupChipList({ key: `dja:${a._id}:loginGroups`, values: a.loginGroups, placeholder: "linux-users",
+                  empty: "No groups — the realm default stands and every domain user may log in.",
+                  hint: "Only these groups may log in at all. Spaces in a name are fine." })}`)}
+            </div>
+            <div class="section-head" style="margin:14px 0 6px">Attach virtual machines</div>
+            ${ai === 0 ? `<div class="toggle-grid" style="grid-template-columns:1fr;margin-bottom:10px">
+              ${toggle(`data-djall="1"`, "Use for every virtual machine", allOn, !allOn && accountCount !== 1,
+                allOn ? "Every VM in this config joins with this account, including ones you create later. Hand-picked assignments are kept and come back when this is turned off."
+                  : accountCount > 1 ? `Needs exactly one account — ${accountCount} exist. Remove the extras first, or keep picking per account.`
+                  : "Off — pick the VMs for this account below.")}
+            </div>` : ""}
+            ${allOn ? `<p class="hint" style="margin:0 0 8px">Every VM in this config is attached — the all-VMs mode owns the selection.</p>` : `
+            <button type="button" class="btn field" data-open-dj-picker="${esc(a._id)}">
+              <img src="${iconSrc("vm.svg")}"> Choose virtual machines…
+            </button>`}
+            ${attached.length ? `
+            <div class="cl-grid attach" style="margin-top:10px">
+              <div class="cl-grid-head">
+                <div>Virtual machine</div>
+                <div>OU path ${infoTip("OU path", "Where the computer object lands. Empty means the domain's default container, CN=Computers.")}</div>
+                <div>Join timing ${infoTip("Join timing", "Off: the join runs during Windows specialize, before anyone logs in. On: the unattend stays join-free and a SYSTEM task joins after first-boot provisioning has finished, so domain policy only ever meets a fully provisioned machine. The task seals the credential with DPAPI, then wipes credential, script and itself whether the join worked or not. Windows client VMs with an OU path start out on.")}</div>
+                <div></div>
+              </div>
+              ${attached.map(s => `
+              <div class="cl-row">
+                ${vmGridCell(s)}
+                <div><input data-s="${esc(s._id)}" data-k="djOu" value="${esc((s.domainJoin&&s.domainJoin.ouPath)||"")}" placeholder="OU=Servers,OU=Tier0,DC=ad,DC=example,DC=invalid"></div>
+                <div>${domainJoinTimingCell(s)}</div>
+                <div class="cl-detach">${allOn ? "" : `<button class="btn icon danger-text" type="button" title="Detach ${esc(serverDisplayName(s))}" aria-label="Detach ${esc(serverDisplayName(s))}" data-dj-detach="${esc(s._id)}">${trashIcon()}</button>`}</div>
+              </div>`).join("")}
+            </div>` : `<p class="hint" style="margin:10px 0 0">No VMs attached — this account joins nothing.</p>`}
+          </div>
+        </article>`;
+      }).join("") || `<div class="empty-state"><div class="ue-icon"><img src="${iconSrc("identity.svg")}"></div><h3>No join accounts yet</h3><p>Add credentials for each tier / OU scope, then attach VMs.</p>
+        <div class="ue-actions"><button class="btn primary" type="button" id="addDomainJoinAccount"><img src="${iconSrcOnAccent("identity.svg")}"> Add join account</button></div></div>`}
+    </div>`;
+}
+
+function renderAzureArcBlade() {
+  const allOn = !!state.defaults.azureArcAllVms;
+  const principalCount = (state.azureArcPrincipals || []).length;
+  return `
+    <div class="blade-toolbar">
+      <div class="page-title"><img src="${iconSrc("arc.svg")}"> Azure Arc</div>
+      ${allOn || !principalCount ? "" : `<div class="row">
+        <button class="btn primary" type="button" id="addAzureArcPrincipal"><img src="${iconSrcOnAccent("arc.svg")}"> Add Arc principal</button>
+      </div>`}
+    </div>
+    <div class="card-stack">
+      ${(state.azureArcPrincipals || []).map((a, ai) => {
+        ensureCatalogStableId(a, "arc");
+        const open = !!state.expanded[a._id];
+        const attached = serversForArcPrincipal(a.id);
+        const title = azureArcPrincipalTitle(a);
+        const regionQ = (state.regionPickerPrincipalId === a._id ? (state.regionFilter || "") : "").toLowerCase().trim();
+        const regionMatches = AZURE_REGIONS.filter(r =>
+          !regionQ || r.id.includes(regionQ) || r.label.toLowerCase().includes(regionQ)
+        ).slice(0, 12);
+        const regionLabel = (AZURE_REGIONS.find(r => r.id === a.location) || {}).label || a.location;
+        const pickerOpen = state.regionPickerOpen && state.regionPickerPrincipalId === a._id;
+        return `
+        <article class="card collapsible ${open ? "" : "collapsed"}">
+          <div class="card-head" data-toggle="${esc(a._id)}">
+            <div class="card-lead">
+              <span class="card-chevron">${chevron()}</span>
+              <div class="card-icon"><img src="${iconSrc("arc.svg")}"></div>
+              <div>
+                <div class="card-title">${esc(title)}</div>
+                <div class="card-meta">${esc(a.location || "no region")} · ${attached.length} VM(s)</div>
+              </div>
+            </div>
+            <div class="card-actions">
+              <button class="btn icon danger-text" type="button" title="Remove Arc principal" aria-label="Remove Arc principal" data-del-arc="${esc(a._id)}">${trashIcon()}</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="grid-2">
+              ${field("Subscription ID", `<input data-arcp="${esc(a._id)}" data-ak="subscriptionId" value="${esc(a.subscriptionId||"")}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="${inv(`arc:${a._id}:subscriptionId`)}"${invAria(`arc:${a._id}:subscriptionId`)}>`)}
+              ${field("Tenant ID", `<input data-arcp="${esc(a._id)}" data-ak="tenantId" value="${esc(a.tenantId||"")}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="${inv(`arc:${a._id}:tenantId`)}"${invAria(`arc:${a._id}:tenantId`)}>`)}
+              ${field("Resource group", `<input data-arcp="${esc(a._id)}" data-ak="resourceGroup" value="${esc(a.resourceGroup||"")}" placeholder="rg-arc-servers" class="${inv(`arc:${a._id}:resourceGroup`)}"${invAria(`arc:${a._id}:resourceGroup`)}>`)}
+              ${field("Region", `
+                <div class="region-picker${pickerOpen ? " is-open" : ""}">
+                  <input data-arc-region-filter="${esc(a._id)}" value="${esc(pickerOpen ? state.regionFilter : (regionLabel || ""))}" placeholder="Search region…" autocomplete="off">
+                  ${pickerOpen ? `<div class="region-list">${regionMatches.map(r => `
+                    <button type="button" data-arc-region="${esc(r.id)}" data-arc-region-for="${esc(a._id)}"><span>${esc(r.label)}</span><span class="r-id">${esc(r.id)}</span></button>`).join("") || `<button type="button" disabled>No matches</button>`}</div>` : ""}
+                </div>`)}
+              ${field("Auth mode", `<select data-arcp="${esc(a._id)}" data-ak="authMode">
+                <option value="servicePrincipal" ${a.authMode!=="hostContext"?"selected":""}>Service principal</option>
+                <option value="hostContext" ${a.authMode==="hostContext"?"selected":""}>Host Azure context</option>
+              </select>`)}
+              ${a.authMode !== "hostContext" ? `
+                ${field("Service principal App ID", `<input data-arcp="${esc(a._id)}" data-ak="servicePrincipalAppId" value="${esc(a.servicePrincipalAppId||"")}" placeholder="Application (client) ID" autocomplete="off" class="${inv(`arc:${a._id}:servicePrincipalAppId`)}"${invAria(`arc:${a._id}:servicePrincipalAppId`)}>`)}
+                ${field("Service principal secret", `<input type="password" data-arcp="${esc(a._id)}" data-ak="servicePrincipalSecret" value="${esc(a.servicePrincipalSecret||"")}" placeholder="Client secret" autocomplete="new-password" class="${inv(`arc:${a._id}:servicePrincipalSecret`)}"${invAria(`arc:${a._id}:servicePrincipalSecret`)}>
+                  <span class="hint">Optional in export — can also pass <code>-ArcServicePrincipalPath</code> at build time</span>`)}
+              ` : `<p class="hint" style="align-self:end;padding-bottom:8px">Host must be signed in (<code>Connect-AzAccount</code>) when Build-Vms runs.</p>`}
+            </div>
+            <div class="section-head" style="margin:14px 0 6px">Attach virtual machines</div>
+            ${ai === 0 ? `<div class="toggle-grid" style="grid-template-columns:1fr;margin-bottom:10px">
+              ${toggle(`data-arcall="1"`, "Use for every virtual machine", allOn, !allOn && principalCount !== 1,
+                allOn ? "Every VM in this config onboards through this principal, including ones you create later. Hand-picked assignments are kept and come back when this is turned off."
+                  : principalCount > 1 ? `Needs exactly one principal — ${principalCount} exist. Remove the extras first, or keep picking per principal.`
+                  : "Off — pick the VMs for this principal below.")}
+            </div>` : ""}
+            ${allOn ? `<p class="hint" style="margin:0 0 8px">Every VM in this config is attached — the all-VMs mode owns the selection.</p>` : `
+            <button type="button" class="btn field" data-open-arc-picker="${esc(a._id)}">
+              <img src="${iconSrc("vm.svg")}"> Choose virtual machines…
+            </button>`}
+            ${attached.length ? `
+            <div class="cl-grid attach" style="margin-top:10px">
+              <div class="cl-grid-head">
+                <div>Virtual machine</div>
+                <div>Onboards into</div>
+                <div></div>
+              </div>
+              ${attached.map(s => `
+              <div class="cl-row">
+                ${vmGridCell(s)}
+                <div class="cl-note">${esc(a.resourceGroup || "no resource group")} · ${esc(regionLabel || a.location || "no region")}</div>
+                <div class="cl-detach">${allOn ? "" : `<button class="btn icon danger-text" type="button" title="Detach ${esc(serverDisplayName(s))}" aria-label="Detach ${esc(serverDisplayName(s))}" data-arc-detach="${esc(s._id)}">${trashIcon()}</button>`}</div>
+              </div>`).join("")}
+            </div>` : `<p class="hint" style="margin:10px 0 0">No VMs attached — this principal onboards nothing.</p>`}
+          </div>
+        </article>`;
+      }).join("") || `<div class="empty-state"><div class="ue-icon"><img src="${iconSrc("arc.svg")}"></div><h3>No Arc principals yet</h3><p>Add a landing zone / SP per resource group, then attach VMs.</p>
+        <div class="ue-actions"><button class="btn primary" type="button" id="addAzureArcPrincipal"><img src="${iconSrcOnAccent("arc.svg")}"> Add Arc principal</button></div></div>`}
+    </div>`;
+}
+
+/* Offline-checkable facts about one clustered VM. Whether the storage really is on CSV
+   can only be answered on the host — everything here is about what the config implies. */
+/* The virtual-machine cell every attached-VM table shares: the name jumps to its card. */
+/* Wherever a named machine appears - an attach table, the review cards, the password
+   list, its own card head - it wears its own band: Host blue for a client, Deploy orange
+   for a custom gold, Workloads green for the rest. Plain green vm.svg is left to stand for
+   the idea of a virtual machine rather than one of them: the nav entry, the add and picker
+   buttons, empty states. */
+function vmGridCell(s) {
+  return `<button type="button" class="cl-vm" data-goto-vm="${esc(s._id)}">
+    <img src="${iconSrcBand("vm.svg", serverGlyphBand(s))}" alt="">
+    <span class="sam">${esc(serverDisplayName(s))}</span>
+  </button>`;
+}
+
+/* A clustered VM's storage line. Amber when the studio cannot vouch for the path from
+   here — it never reaches the host, so nothing in this table is a hard blocker. */
+function clusterNoteCell(facts) {
+  return `<div class="cl-note ${facts.level === "warn" ? "warn" : ""}">${
+    facts.level === "warn" ? warnIconSvg() : ""}<span>${facts.notes.map(esc).join(" · ")}</span></div>`;
+}
+
+function clusterNodeFacts(s) {
+  const notes = [];
+  let level = "ok";
+  const ownPath = !!(String(s.vmPath || "").trim() || String(s.vhdPath || "").trim());
+  if (ownPath) {
+    notes.push("Own VM/VHD path — verify it is cluster-accessible");
+    level = "warn";
+  } else if (storagePlacementActive()) {
+    notes.push("Automatic storage placement — lands on the placement volume with the most usable space");
+  } else {
+    notes.push("Host-wide VM/VHD path");
+  }
+  if (s.useDifferencingDisk) {
+    notes.push("Differencing child — the gold parent must be on cluster storage too");
+    level = "warn";
+  }
+  const sets = vhdSetsForServer(s);
+  if (sets.length) {
+    notes.push(`${sets.length} VHD Set${sets.length === 1 ? "" : "s"}: ${sets.map(v => v.name || "unnamed").join(", ")}`);
+  }
+  return { notes, level };
+}
+
+
+function renderClusterBlade() {
+  const c = clusterSettings();
+  const attached = serversForCluster();
+  const nameIssue = clusterNameProblem(c.name);
+  const clusterNameUnlocked = !!state.nameEdit["cluster:name"];
+  const all = !!c.addAllVms;
+
+  const hostCardBody = `
+    <div class="toggle-grid" style="grid-template-columns:1fr">
+      ${toggle(`data-cl="enabled"`, "The Hyper-V host is a failover cluster", c.enabled, false,
+        c.enabled ? "Cluster checks run in <em>Review and validate</em>." : "Off — every VM is created as a standalone Hyper-V VM.")}
+    </div>
+    ${c.enabled ? `
+    <div class="grid-2" style="margin-top:12px">
+      ${field(`<span class="field-label">Cluster name ${infoTip("Cluster name",
+          "Leave it blank and Build-Vms.ps1 targets the cluster this host already belongs to — Add-ClusterVirtualMachineRole runs without -Cluster. Name a cluster only to add the VMs somewhere other than the local one.")}</span>`, `
+        <div class="edit-field">
+          <input data-cl="name" data-name-input="cluster:name" value="${esc(c.name || "")}" spellcheck="false"
+                 placeholder="${clusterNameUnlocked ? "NetBIOS name, max 15 characters" : "the cluster this host belongs to"}"
+                 ${clusterNameUnlocked ? "" : "readonly"} class="keep-border ${inv("d:clusterName")}"${invAria("d:clusterName")}>
+          <button class="btn icon" type="button" data-name-edit="cluster:name"
+                  title="${clusterNameUnlocked ? "Done" : "Name a different cluster"}"
+                  aria-label="${clusterNameUnlocked ? "Done" : "Name a different cluster"}">${clusterNameUnlocked ? checkIcon() : pencilIcon()}</button>
+        </div>
+        ${nameIssue ? `<span class="hint">${esc(nameIssue)}</span>` : ""}`)}
+    </div>` : ""}`;
+
+  const placementBody = `
+    ${toggle(`data-sp="auto"`, "Automatic placement across storage volumes", storagePlacementActive(), false,
+      storagePlacementActive()
+        ? "Build-Vms.ps1 places each VM on the volume with the most usable space at its turn — Azure Local style. Per-VM custom paths still win."
+        : "Off — every VM uses the global VM/VHD path pair from General Settings.")}
+    ${storagePlacementActive() ? `
+    <p class="hint" style="margin:10px 0">One row per Cluster Shared Volume (e.g. <code>C:\\ClusterStorage\\Volume1\\VMs</code> + <code>…\\VHDs</code>). Both paths are required on every volume. Every path must be reachable from all cluster nodes, and the gold VHDX directory too when differencing disks are used.</p>
+    ${storagePlacement().volumes.map((v, i) => `
+    <div class="sp-vol">
+      <div class="sp-vol-head">
+        <img src="${iconSrc("storage.svg")}" alt="">
+        <span class="sp-vol-title">Volume ${i + 1}</span>
+        <button class="btn icon danger-text" type="button" title="Remove volume" aria-label="Remove volume" data-del-spvol="${i}">${trashIcon()}</button>
+      </div>
+      <div class="sp-vol-body">
+      <div class="grid-2">
+        ${field(fieldLabel("vm.svg", "VM path"), `<input data-spv="${i}" data-spk="vmPath" value="${esc(v.vmPath || "")}" placeholder="C:\\ClusterStorage\\Volume${i + 1}\\VMs" class="${inv(`d:spVol${i}`)}"${invAria(`d:spVol${i}`)}>`)}
+        ${field(fieldLabel("disk.svg", "VHD path"), `<input data-spv="${i}" data-spk="vhdPath" value="${esc(v.vhdPath || "")}" placeholder="C:\\ClusterStorage\\Volume${i + 1}\\VHDs" class="${inv(`d:spVolVhd${i}`)}"${invAria(`d:spVolVhd${i}`)}>`)}
+      </div>
+      </div>
+    </div>`).join("")}
+    <button type="button" class="btn field" data-add-spvol="1"><img src="${iconSrc("storage.svg")}" alt=""> Add volume</button>` : ""}`;
+
+  const membersBody = `
+    <div class="toggle-grid" style="grid-template-columns:1fr;margin-bottom:10px">
+      ${toggle(`data-cl="addAllVms"`, "Add every virtual machine to the cluster", all, false,
+        all ? "Every VM in this config is added, including ones you create later." : "Off — pick the VMs individually below.")}
+    </div>
+    ${all ? "" : `
+    <p class="hint" style="margin-bottom:10px">Only the VMs picked here are added to the cluster. Everything else stays a standalone VM on whichever node built it.</p>
+    <button type="button" class="btn field" data-open-cluster-picker="1">
+      <img src="${iconSrc("vm.svg")}"> Choose virtual machines…
+    </button>
+    `}
+    ${attached.length ? `
+    <div class="cl-grid ${all ? "" : "attach"}" style="margin-top:10px">
+      <div class="cl-grid-head">
+        <div>Virtual machine</div>
+        <div>Storage as configured</div>
+        ${all ? "" : "<div></div>"}
+      </div>
+      ${attached.map(s => {
+        const facts = clusterNodeFacts(s);
+        return `
+        <div class="cl-row">
+          ${vmGridCell(s)}
+          ${clusterNoteCell(facts)}
+          ${all ? "" : `<div class="cl-detach"><button class="btn icon danger-text" type="button" title="Remove ${esc(serverDisplayName(s))} from the cluster" aria-label="Remove ${esc(serverDisplayName(s))} from the cluster" data-cluster-detach="${esc(s._id)}">${trashIcon()}</button></div>`}
+        </div>`;
+      }).join("")}
+    </div>` : `<p class="hint" style="margin:10px 0 0">No VMs attached — nothing is added to the cluster.</p>`}`;
+
+  return `
+    <div class="blade-toolbar">
+      <div class="page-title"><img src="${iconSrc("virtual-clusters.svg")}"> Failover Cluster</div>
+    </div>
+
+    ${gsCard("cl-host", "virtual-clusters.svg", `Host cluster ${infoTip("Host cluster", "Turn this on when the Hyper-V host is a failover cluster member and the VM / VHD paths live on CSV or other cluster-accessible storage. Build-Vms.ps1 then adds each VM you pick below to the cluster with Add-ClusterVirtualMachineRole, once that VM exists.")}`, c.enabled ? esc(c.name || "local cluster") : "off", hostCardBody, "", true)}
+
+    ${c.enabled
+      ? gsCard("cl-storage", "storage.svg", "Storage placement", storagePlacementActive() ? `Automatic (${storagePlacementVolumesInUse().length} volume${storagePlacementVolumesInUse().length === 1 ? "" : "s"})` : "Global VM/VHD paths", placementBody, "", true) +
+        gsCard("cl-members", "vm.svg", "Clustered virtual machines", `${attached.length} of ${state.servers.length} VM(s)`, membersBody, "", true)
+      : `<div class="empty-state"><div class="ue-icon"><img src="${iconSrc("virtual-clusters.svg")}"></div><h3>Cluster is off</h3><p>Turn the toggle on to pick which VMs are added to the cluster. With it off, every VM is created as a standalone Hyper-V VM.</p></div>`}`;
+}
+
+function renderVhdSets() {
+  const serverNames = state.servers.map(s => s.name).filter(Boolean);
+  return `
+    <div class="blade-toolbar">
+      <div class="page-title"><img src="${iconSrc("disk-pool.svg")}"> VHD Sets</div>
+      ${state.vhdSets.length ? `<div class="row">
+        <button class="btn primary" type="button" id="addVhdSet"><img src="${iconSrcOnAccent("disk-pool.svg")}"> Add VHD Set</button>
+      </div>` : ""}
+    </div>
+    <div class="card-stack">
+      ${state.vhdSets.map((v, idx) => {
+        const open = !!state.expanded[v._id];
+        const attachTo = v.attachTo || [];
+        const autoFile = vhdSetAutoFileName(v, idx);
+        const file = effectiveVhdSetFileName(v, autoFile);
+        return `
+        <article class="card collapsible ${open ? "" : "collapsed"}">
+          <div class="card-head" data-toggle="${esc(v._id)}">
+            <div class="card-lead">
+              <span class="card-chevron">${chevron()}</span>
+              <div class="card-icon"><img src="${iconSrc("disk-pool.svg")}"></div>
+              <div>
+                <div class="card-title">${esc(file.replace(/\.vhds$/i, ""))}</div>
+                <div class="card-meta">${esc(v.sizeGB)} GB · ${esc(v.type)} · ${attachTo.length} VM(s)</div>
+              </div>
+            </div>
+            <div class="card-actions">
+              ${psObjectButton("vhdset", v._id)}
+              <button class="btn icon danger-text" type="button" title="Remove VHD Set" aria-label="Remove VHD Set" data-del-vs="${esc(v._id)}">${trashIcon()}</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="disk-grid is-shared" style="margin-bottom:12px">
+              <div class="disk-grid-head" aria-hidden="true">
+                <span>File name</span><span></span><span>Size (GB)</span><span>Type</span><span></span>
+              </div>
+              <div class="disk-grid-row">
+                ${diskNameCell({
+                  key: "vs:" + v._id,
+                  icon: "disk-pool.svg",
+                  value: file,
+                  custom: hasCustomVhdSetName(v, autoFile),
+                  badge: `<span class="disk-badge data">Shared</span>`,
+                  bind: `data-vs="${esc(v._id)}" data-vk="name"`
+                })}
+                <span></span>
+                <input type="number" min="1" data-vs="${esc(v._id)}" data-vk="sizeGB" value="${esc(v.sizeGB)}" aria-label="Size GB" class="${inv(`vs:${v._id}:sizeGB`)}"${invAria(`vs:${v._id}:sizeGB`)}>
+                <select data-vs="${esc(v._id)}" data-vk="type" aria-label="Disk type">
+                  <option value="Fixed" ${v.type!=="Dynamic"?"selected":""}>Fixed</option>
+                  <option value="Dynamic" ${v.type==="Dynamic"?"selected":""}>Dynamic</option>
+                </select>
+                <span></span>
+              </div>
+            </div>
+            ${(() => {
+              const pathKey = `vs:${v._id}:path`;
+              const unlocked = !!state.nameEdit[pathKey];
+              return field(`<span class="field-label">Custom path (CSV / SMB 3) ${infoTip("Custom path",
+                  `Generated file name: ${autoFile}. Leave this blank and the set is written to {vhdPath}/vhds/${file}. Either way the location has to be a Cluster Shared Volume or an SMB 3 share — preflight fails if it is not, because the other nodes cannot reach it.`)}</span>`, `
+                <div class="edit-field">
+                  <input data-vs="${esc(v._id)}" data-vk="path" data-name-input="${esc(pathKey)}" spellcheck="false"
+                         class="keep-border ${inv(`vs:${v._id}:path`)}"${invAria(`vs:${v._id}:path`)}
+                         value="${esc(v.path || "")}" placeholder="e.g. C:\\ClusterStorage\\Volume1\\vhds\\${esc(file)}"
+                         ${unlocked ? "" : "readonly"}>
+                  <button class="btn icon" type="button" data-name-edit="${esc(pathKey)}"
+                          title="${unlocked ? "Done" : "Set a custom path"}" aria-label="${unlocked ? "Done" : "Set a custom path"}">${unlocked ? checkIcon() : pencilIcon()}</button>
+                </div>`);
+            })()}
+            <div class="section-head" style="margin:16px 0 6px">Attach to guest cluster nodes</div>
+            <button type="button" class="btn field${inv(`vs:${v._id}:attachTo`)}" data-open-vm-picker="${esc(v._id)}">
+              <img src="${iconSrc("vm.svg")}"> Choose virtual machines…
+            </button>
+            ${attachTo.length ? `
+            <div class="cl-grid attach" style="margin-top:10px">
+              <div class="cl-grid-head">
+                <div>Virtual machine</div>
+                <div>Shared disk</div>
+                <div></div>
+              </div>
+              ${attachTo.map(n => {
+                const hit = state.servers.find(x => String(x.name || "").toLowerCase() === String(n).toLowerCase());
+                const cell = hit
+                  ? vmGridCell(hit)
+                  : `<span class="cl-vm is-missing"><img src="${iconSrc("vm.svg")}" alt=""><span class="sam">${esc(n)}</span></span>`;
+                return `
+              <div class="cl-row">
+                ${cell}
+                <div class="cl-note ${hit ? "" : "warn"}">${hit ? "Attached as a shared .vhds" : "No VM by this name"}</div>
+                <div class="cl-detach"><button class="btn icon danger-text" type="button" title="Detach ${esc(n)}" aria-label="Detach ${esc(n)}" data-vs-detach="${esc(v._id)}" data-vs-member="${esc(n)}">${trashIcon()}</button></div>
+              </div>`;
+              }).join("")}
+            </div>` : '<p class="hint" style="margin:10px 0 0">No VMs attached — this set will not be built.</p>'}
+          </div>
+        </article>`;
+      }).join("") || `<div class="empty-state"><div class="ue-icon"><img src="${iconSrc("disk-pool.svg")}"></div><h3>No VHD Sets yet</h3><p>Shared disks for guest clusters (SQL / file server).</p>
+        <div class="ue-actions"><button class="btn primary" type="button" id="addVhdSet"><img src="${iconSrcOnAccent("disk-pool.svg")}"> Add VHD Set</button></div></div>`}
+    </div>`;
+}
+
+/* ---------------------------[ Folder layout tree ]---------------------------
+   Mirrors what Build-Vms.ps1 actually writes: New-VM -Path <vmRoot> puts the VM
+   configuration in <vmRoot>\<folder>\Virtual Machines\, the child OS disk and every data
+   disk land in <vhdRoot>\<folder>\, and VHD Sets in <vhdRoot>\vhds\. */
+
+/* Roots resolve to "" when nothing is configured. Build-Vms.ps1 then falls back to the
+   Hyper-V host's own default folders, which this page has no way of knowing - so those
+   VMs are left out of the tree entirely rather than shown under an invented path. */
+
+/* One folder glyph for the whole studio - the green one from the icon table. */
+function folderIcon() {
+  return `<img class="tree-icon" src="${iconSrc("files.svg")}" alt="">`;
+}
+
+/** Leaf folder under the VM / VHD roots — short name unless folder FQDN naming is on. */
+function serverFolderName(s) {
+  const short = String(s.name || "vm").toLowerCase().slice(0, NETBIOS_MAX) || "vm";
+  const domain = namingSuffixForServer(s);
+  return (domain && namingDefaults().folderIncludeFqdn) ? `${short}.${domain}` : short;
+}
+/** "" when neither a per-VM override nor a General Settings default is set. */
+function serverVmRootPath(s) {
+  if (serverUsesCustomPaths(s) && String(s.vmPath || "").trim()) return String(s.vmPath).trim();
+  return String(state.defaults.vmPath || "").trim();
+}
+function serverVhdRootPath(s) {
+  if (serverUsesCustomPaths(s)) {
+    const own = String(s.vhdPath || "").trim() || String(s.vmPath || "").trim();
+    if (own) return own;
+  }
+  return String(state.defaults.vhdPath || "").trim() || String(state.defaults.vmPath || "").trim();
+}
+
+
+/** Keep the Storage paths section header in step with the fields below it. */
+function patchServerPathsMeta(s) {
+  if (!s) return;
+  const head = document.querySelector(`[data-nested="${CSS.escape(s._id + "-paths")}"]`);
+  const meta = head && head.querySelector(".section-meta");
+  if (!meta) return;
+  meta.textContent = serverUsesCustomPaths(s)
+    ? `VM ${String(s.vmPath || "").trim() || "host default"} · VHD ${String(s.vhdPath || "").trim() || "follows VM path"}`
+    : "Host defaults from General Settings";
+}
+
+/** Refresh the generated disk file names after a rename. Renamed files are left alone. */
+function patchServerDiskNames(s) {
+  if (!s) return;
+  const osInput = document.querySelector(`input[data-name-input="os:${CSS.escape(s._id)}"]`);
+  if (osInput && !hasCustomOsDiskName(s)) {
+    osInput.value = effectiveOsDiskFileName(s);
+    osInput.title = osInput.value;
+  }
+  (s.additionalDisks || []).forEach((d, i) => {
+    const el = document.querySelector(`input[data-name-input="dd:${CSS.escape(s._id)}:${i}"]`);
+    if (el && !hasCustomDataDiskName(s, d, i)) {
+      el.value = effectiveDataDiskFileName(s, d, i);
+      el.title = el.value;
+    }
+  });
+}
+
+/* Image defaults is parked, not removed. The card and its per-image profiles still work
+   in full — profileFor() keeps feeding every new VM its defaults — the card is simply not
+   rendered. Flip this to true to bring the UI back. */
+const SHOW_IMAGE_DEFAULTS = false;
+
+/* Locale / keyboard is parked the same way. Every gold's .vhdx.json sidecar resolves the
+   locale per VM at deploy time, so the global selector only offered ways to mismatch it —
+   while hidden, the default is also enforced on load/import. Flip to true to bring it back. */
+const SHOW_LOCALE_CARD = false;
+
+const NO_PATHS_NOTE = `<div class="name-tree"><div class="name-tree-note" style="margin:0">
+  No <strong>VM path</strong> or <strong>VHD path</strong> set anywhere. Build-Vms.ps1 reads the host's
+  own defaults with <code>Get-VMHost</code> and builds there — this page cannot know what they are.
+  Set the paths in General Settings, or a per-VM path under <em>Storage paths</em>, to see the layout here.
+</div></div>`;
+
+/* One machine's placement, as a flat read-only summary rather than the expandable
+   explorer. The explorer answers "what is on disk across the whole lab"; this answers
+   "where does THIS VM go", so they are different shapes on purpose. */
+function vmPlacementSummary(s) {
+  const vmRoot = String(serverVmRootPath(s) || "").replace(/[\\/]+$/, "");
+  const vhdRoot = String(serverVhdRootPath(s) || "").replace(/[\\/]+$/, "");
+  if (!vmRoot && !vhdRoot) return NO_PATHS_NOTE;
+
+  const folder = serverFolderName(s);
+  const disk = String(s.osDiskFileName || "").trim() || osDiskFileName(s.name, isLinuxServer(s));
+  const sameRoot = vmRoot && vhdRoot && vmRoot.toLowerCase() === vhdRoot.toLowerCase();
+  const custom = serverUsesCustomPaths(s) && (String(s.vmPath || "").trim() || String(s.vhdPath || "").trim());
+
+  const root = (path, tag) => `
+    <div class="name-tree-row"><img src="${iconSrc("storage.svg")}" alt="">${esc(path || "not set")}\\
+      ${tag ? `<span class="pl-tag">${esc(tag)}</span>` : ""}</div>`;
+  const leaf = (icon, text, note) => `
+    <div class="name-tree-row"><span class="nt-branch">└──</span>${icon}<span class="nt-leaf">${esc(text)}</span>
+      ${note ? `<span class="pl-note">${esc(note)}</span>` : ""}</div>`;
+
+  return `
+    <div class="name-tree">
+      ${root(vmRoot, custom ? "per-VM path" : "")}
+      ${leaf(folderIcon(), folder + "\\", "Hyper-V VM configuration")}
+      ${sameRoot ? "" : root(vhdRoot, "")}
+      ${leaf(`<img src="${iconSrc("disk.svg")}" alt="">`, disk, s.useDifferencingDisk ? "differencing child" : "full copy of the gold")}
+      ${(s.additionalDisks || []).length ? `<div class="name-tree-note">+ ${(s.additionalDisks || []).length} data disk(s) beside it</div>` : ""}
+    </div>`;
+}
+
+/* The whole lab's on-disk layout, told machine by machine in the same flat language as
+   the VM overview cards. Shared VHD Sets get their own block, because they belong to
+   several machines and would otherwise be printed under each of them. */
+function renderLabelledPlacement(servers) {
+  if (!servers.length) return `<p class="hint">No virtual machines yet.</p>`;
+
+  const blocks = servers.map(s => `
+    <div class="pl-block">
+      <div class="pl-block-head"><img src="${iconSrcBand("vm.svg", serverGlyphBand(s))}" alt=""><span class="sam">${esc(serverDisplayName(s))}</span></div>
+      ${vmPlacementSummary(s)}
+    </div>`).join("");
+
+  const sets = state.vhdSets.map((v, idx) => {
+    const file = effectiveVhdSetFileName(v, vhdSetAutoFileName(v, idx));
+    const members = (v.attachTo || []).filter(Boolean);
+    if (!members.length) return "";
+    const own = String(v.path || "").trim().replace(/[\\/]+$/, "");
+    const owner = servers.find(x => members.some(n => String(n).toLowerCase() === String(x.name || "").toLowerCase()));
+    const root = own || `${String(serverVhdRootPath(owner) || "").replace(/[\\/]+$/, "")}\\vhds`;
+    const meta = `${Number(v.sizeGB) || 0} GB ${v.type === "Dynamic" ? "Dynamic" : "Fixed"} · ${members.join(", ")}`;
+    return `
+      <div class="name-tree-row"><img src="${iconSrc("storage.svg")}" alt="">${esc(root || "not set")}\\</div>
+      <div class="name-tree-row"><span class="nt-branch">└──</span><img src="${iconSrc("disk-pool.svg")}" alt="">
+        <span class="nt-leaf">${esc(file)}</span><span class="pl-note">${esc(meta)}</span></div>`;
+  }).filter(Boolean).join("");
+
+  return blocks + (sets ? `
+    <div class="pl-block">
+      <div class="pl-block-head"><img src="${iconSrc("disk-pool.svg")}" alt=""><span>Shared disks</span></div>
+      <div class="name-tree">${sets}</div>
+    </div>` : "");
+}
+
+
+/* ---------------------------[ Blade: Review and validate ]---------------------------
+   Read-only summary of the lab-wide settings the studio will write into config.json, plus
+   every consistency check that can run without touching the Hyper-V host. The per-VM
+   summary lives on the VM overview blade. Nothing here mutates
+   state — it mirrors Build-Vms.ps1 expectations so problems surface before the export. */
+
+const SVG_ALERT = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8l6.4 11.4H1.6L8 1.8z"/><path d="M8 6.4v3.2M8 11.4v.1"/></svg>';
+const SVG_INFO  = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.4"/><path d="M8 7.2v4M8 4.9v.1"/></svg>';
+
+function kvRow(label, value, muted) {
+  const empty = (value === "" || value === null || value === undefined);
+  const shown = empty ? "not set" : value;
+  const cls = (empty || muted) ? "kv-val muted" : "kv-val";
+  return `<div>${esc(label)}</div><div class="${cls}">${esc(shown)}</div>`;
+}
+function kvGrid(rows) { return `<div class="kv-grid">${rows}</div>`; }
+function yesNo(v) { return v ? "Yes" : "No"; }
+
+/** Label for a Windows feature id — covers standalone features and role children. */
+function windowsFeatureLabel(id) {
+  const flat = FEATURE_CATALOG.find(f => f.id === id);
+  if (flat) return flat.label;
+  for (const role of [...ROLE_CATALOG, ...SERVER_RSAT_CATALOG]) {
+    if (role.id === id) return role.label;
+    const child = (role.children || []).find(c => c.id === id);
+    if (child) return `${role.label} · ${child.label}`;
+  }
+  return id;
+}
+/* Glyph for a feature id, mirroring windowsFeatureLabel. Children inherit their role's
+   icon — they are that role's sub-services, and the catalog only ices the parent. */
+function windowsFeatureGlyph(id) {
+  const flat = FEATURE_CATALOG.find(f => f.id === id);
+  if (flat && flat.icon) return flat.icon;
+  for (const role of [...ROLE_CATALOG, ...SERVER_RSAT_CATALOG]) {
+    if (role.id === id) return role.icon || "extensions.svg";
+    if ((role.children || []).some(c => c.id === id)) return role.icon || "extensions.svg";
+  }
+  return "extensions.svg";
+}
+function rsatCapabilityGlyph(id) {
+  const hit = RSAT_CATALOG.find(r => r.id === id);
+  return (hit && hit.icon) || "rsat-tools.svg";
+}
+
+function rsatCapabilityLabel(id) {
+  const hit = RSAT_CATALOG.find(r => r.id === id);
+  return hit ? hit.label : String(id).split("~")[0];
+}
+function clientFeatureLabel(id) {
+  const hit = CLIENT_FEATURE_CATALOG.find(f => f.id === id);
+  return hit ? hit.label : String(id);
+}
+function clientFeatureGlyph(id) {
+  const hit = CLIENT_FEATURE_CATALOG.find(f => f.id === id);
+  return hit ? hit.icon : "settings.svg";
+}
+function azureRegionLabel(id) {
+  const hit = AZURE_REGIONS.find(r => r.id === id);
+  return hit ? hit.label : (id || "");
+}
+function serverDisplayName(s) {
+  return String(s.name || "").trim() || "unnamed VM";
+}
+
+/* ---------------------------[ Validation ]--------------------------- */
+
+/** Every check that can run offline. Returns [{ level: "error"|"warn"|"info", text, where }].
+    error blocks the export, warn says something might bite, info is a heads-up about
+    something the build will do on purpose. */
+function validate() {
+  const issues = [];
+  const err = (text, where, field) => issues.push({ level: "error", text, where, field });
+  const warn = (text, where) => issues.push({ level: "warn", text, where });
+  const info = (text, where) => issues.push({ level: "info", text, where });
+
+  const d = state.defaults || {};
+  const switches = (d.availableSwitches || []).filter(Boolean);
+
+  /* Path syntax, everywhere a host path can be typed. Blank is never flagged here -
+     each field documents what blank means for it. */
+  const lintPath = (value, label, where, field) => {
+    const problem = hostPathProblem(value);
+    if (problem) err(`${label}: ${problem}`, where, field);
+  };
+
+  /* --- Host paths and global defaults --- */
+  if (!switches.length) {
+    err("The cluster has no bridge or VNet — every VM needs one to attach to.", "Networks › Bridges and VNets", "switches");
+  }
+  if (!String(d.locale || "").trim()) {
+    warn("No locale set — guests fall back to the image default.", "General Settings › Regional");
+  }
+  const nmValidate = namingDefaults();
+  if (nmValidate.fqdnOverrideEnabled) {
+    const fixed = nmValidate.fqdn.replace(/\.+$/, "");
+    if (!fixed) {
+      err("Fixed FQDN is on but empty — either type the domain or turn the toggle off.", "General Settings › Naming", "d:namingFqdn");
+    } else if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i.test(fixed)) {
+      err(`Fixed FQDN "${fixed}" is not a DNS name — labels are letters, digits and hyphens, separated by dots.`, "General Settings › Naming", "d:namingFqdn");
+    } else if (fixed.indexOf(".") === -1) {
+      warn(`Fixed FQDN "${fixed}" is a single label — Hyper-V names and folders get "${fixed}" appended with no dotted suffix.`, "General Settings › Naming");
+    }
+  }
+  if (storagePlacementActive()) {
+    const spWhere = "Failover Cluster › Storage placement";
+    const spRows = storagePlacement().volumes;
+    if (!spRows.length) {
+      err("Automatic storage placement is on but there are no volumes — add one or turn it off.", spWhere, "d:spVol0");
+    }
+    /* Judged per field, per row: every volume carries its own VM path and its own VHD
+       path, so filling one box never clears another one's border. */
+    const spSeen = new Map();
+    spRows.forEach((v, i) => {
+      const vm = String(v.vmPath || "").trim();
+      const vhd = String(v.vhdPath || "").trim();
+      if (!vm) {
+        err(`Placement volume ${i + 1} has no VM path — every volume needs its own.`, spWhere, `d:spVol${i}`);
+      }
+      if (!vhd) {
+        err(`Placement volume ${i + 1} has no VHD path — every volume needs its own.`, spWhere, `d:spVolVhd${i}`);
+      }
+      if (vm) {
+        const key = vm.toLowerCase().replace(/[\\/]+$/, "");
+        if (spSeen.has(key)) {
+          err(`Placement volumes ${spSeen.get(key) + 1} and ${i + 1} point at the same VM path — placement cannot spread across one location twice.`, spWhere, `d:spVol${i}`);
+        } else {
+          spSeen.set(key, i);
+        }
+      }
+    });
+    if (spRows.length === 1) {
+      warn("Automatic storage placement has only one volume — placement has nothing to choose between.", spWhere);
+    }
+    if (!(state.defaults.cluster && state.defaults.cluster.enabled)) {
+      warn("Automatic storage placement is on but the failover cluster toggle is off — the volume catalog is hidden until the cluster blade is enabled, yet it still applies to the build.", spWhere);
+    }
+  }
+
+  /* --- Failover cluster (host side) --- */
+  const cluster = d.cluster || {};
+  const clusterMembers = serversForCluster();
+  if (cluster.enabled) {
+    // Blank name is valid — Build-Vms.ps1 then calls Add-ClusterVirtualMachineRole without -Cluster,
+    // which targets the cluster the host itself belongs to. A bad name is not.
+    const nameIssue = clusterNameProblem(cluster.name);
+    if (nameIssue) {
+      err(nameIssue, "Failover Cluster › Host cluster", "d:clusterName");
+    }
+    if (!clusterMembers.length) {
+      warn("Cluster is on but no VM is attached — nothing is added to the cluster.", "Failover Cluster › Clustered virtual machines");
+    }
+    clusterMembers.forEach(s => {
+      const label = serverDisplayName(s);
+      if (String(s.vmPath || "").trim() || String(s.vhdPath || "").trim()) {
+        warn(`${label} is clustered but overrides the VM/VHD path — that path has to be cluster-accessible (CSV) on every node.`, `Failover Cluster › ${label}`);
+      }
+      if (s.useDifferencingDisk) {
+        warn(`${label} is clustered and uses a differencing disk — the gold parent VHDX must sit on cluster storage too, or the VM cannot fail over.`, `Failover Cluster › ${label}`);
+      }
+    });
+    // A VM sharing a VHD Set with a clustered peer but left out of the cluster fails over into nothing.
+    state.vhdSets.forEach(v => {
+      const members = (v.attachTo || [])
+        .map(n => state.servers.find(s => String(s.name || "").toLowerCase() === String(n).toLowerCase()))
+        .filter(Boolean);
+      const inCluster = members.filter(s => s.cluster && s.cluster.enabled);
+      if (inCluster.length && inCluster.length !== members.length) {
+        const missing = members.filter(s => !(s.cluster && s.cluster.enabled)).map(serverDisplayName).join(", ");
+        warn(`VHD Set '${v.name || "unnamed"}' is shared by clustered and non-clustered VMs — ${missing} stays standalone.`, "Failover Cluster › Clustered virtual machines");
+      }
+    });
+  } else {
+    const stale = serversMarkedForCluster();
+    if (stale.length) {
+      warn(`${stale.length} VM(s) are still marked as clustered while the cluster toggle is off — the selection is ignored on export.`, "Failover Cluster › Host cluster");
+    }
+  }
+
+  /* --- Guest clustering (the Failover-Clustering feature inside the VMs) --- */
+  const guestNodes = state.servers.filter(s => (s.windowsFeatures || []).indexOf("Failover-Clustering") !== -1);
+  if (guestNodes.length === 1) {
+    warn("Only one VM installs the Failover Clustering feature — a guest cluster needs at least two nodes.", "Virtual machines › Roles and features");
+  }
+
+  /* --- Networks --- */
+  const netKeys = new Set();
+  (state.networks || []).forEach(n => {
+    const label = `${networkName(n)} (${networkCidr(n)})`;
+    if (!isValidIPv4(String(n.subnet || "").trim())) {
+      err(`Network ${label} has no valid network ID.`, "Networks", `net:${n._id}:subnet`);
+    } else {
+      const subnetIssue = subnetAddressProblem(n.subnet, n.prefixLength);
+      if (subnetIssue) err(`Network ${label}: ${subnetIssue}`, "Networks", `net:${n._id}:subnet`);
+    }
+    if (!String(n.switchName || "").trim()) {
+      warn(`Network ${label} has no bridge — VMs attached to it keep their own.`, "Networks");
+    } else if (switches.length && !switches.some(x => String(x).toLowerCase() === String(n.switchName).toLowerCase())) {
+      err(`Network ${label} points at bridge "${n.switchName}", which the cluster does not have.`, "Networks");
+    }
+    const gw = String(n.gateway || "").trim();
+    if (!gw) {
+      err(`Network ${label} has no gateway — every VM on it would come up without a default route.`, "Networks", `net:${n._id}:gateway`);
+    } else if (!isValidIPv4(gw)) {
+      err(`Network ${label} has an invalid gateway "${gw}".`, "Networks", `net:${n._id}:gateway`);
+    } else {
+      const gwIssue = reservedAddressProblem(gw, n.subnet, n.prefixLength);
+      if (gwIssue) err(`Network ${label} gateway: ${gwIssue}.`, "Networks", `net:${n._id}:gateway`);
+    }
+    const netDns = (n.dnsServers || []).filter(x => String(x || "").trim() !== "");
+    if (!netDns.length) {
+      err(`Network ${label} has no DNS server — a VM on it resolves nothing.`, "Networks", `net:${n._id}:dns:0`);
+    }
+    (n.dnsServers || []).forEach((x, i) => {
+      const dnsAddr = String(x || "").trim();
+      if (!dnsAddr) return;
+      if (!isValidIPv4(dnsAddr)) {
+        err(`Network ${label} has an invalid DNS server "${x}".`, "Networks", `net:${n._id}:dns:${i}`);
+        return;
+      }
+      const dnsIssue = reservedAddressProblem(dnsAddr, n.subnet, n.prefixLength);
+      if (dnsIssue) err(`Network ${label} DNS server: ${dnsIssue}.`, "Networks", `net:${n._id}:dns:${i}`);
+    });
+    const key = `${String(n.subnet || "").trim()}/${Number(n.prefixLength) || 24}|${n.vlanId ?? ""}`;
+    if (netKeys.has(key)) warn(`Two networks share the same subnet and VLAN (${label}).`, "Networks");
+    netKeys.add(key);
+  });
+
+  /* --- Domain Join catalog --- */
+  if (state.defaults.domainJoinAllVms) {
+    const djCount = (state.domainJoinAccounts || []).length;
+    if (djCount === 0) err("Domain Join applies to every VM but no join account exists — add one or turn the mode off.", "Domain Join");
+    else if (djCount > 1) err(`Domain Join applies to every VM but ${djCount} accounts exist — the mode needs exactly one. Remove the extras or turn it off.`, "Domain Join");
+  }
+  (state.domainJoinAccounts || []).forEach(a => {
+    const label = a.domain || "unnamed account";
+    if (!String(a.domain || "").trim()) err("A Domain Join account has no domain.", "Domain Join", `dja:${a._id}:domain`);
+    if (!String(a.joinUser || "").trim()) err(`Domain Join account ${label} has no join user.`, "Domain Join", `dja:${a._id}:joinUser`);
+    if (!String(a.joinPassword || "").trim()) err(`Domain Join account ${label} has no password.`, "Domain Join", `dja:${a._id}:joinPassword`);
+  });
+
+  /* --- Azure Arc catalog --- */
+  if (state.defaults.azureArcAllVms) {
+    const arcCount = (state.azureArcPrincipals || []).length;
+    if (arcCount === 0) err("Azure Arc applies to every VM but no principal exists — add one or turn the mode off.", "Azure Arc");
+    else if (arcCount > 1) err(`Azure Arc applies to every VM but ${arcCount} principals exist — the mode needs exactly one. Remove the extras or turn it off.`, "Azure Arc");
+  }
+  (state.azureArcPrincipals || []).forEach(p => {
+    const label = p.resourceGroup || p.subscriptionId || "unnamed principal";
+    if (!String(p.subscriptionId || "").trim()) err(`Arc principal ${label} has no subscription ID.`, "Azure Arc", `arc:${p._id}:subscriptionId`);
+    if (!String(p.tenantId || "").trim()) err(`Arc principal ${label} has no tenant ID.`, "Azure Arc", `arc:${p._id}:tenantId`);
+    if (!String(p.resourceGroup || "").trim()) err(`Arc principal ${label} has no resource group.`, "Azure Arc", `arc:${p._id}:resourceGroup`);
+    if (p.authMode !== "hostContext") {
+      if (!String(p.servicePrincipalAppId || "").trim()) err(`Arc principal ${label} uses a service principal but has no application ID.`, "Azure Arc", `arc:${p._id}:servicePrincipalAppId`);
+      if (!String(p.servicePrincipalSecret || "").trim()) err(`Arc principal ${label} uses a service principal but has no secret.`, "Azure Arc", `arc:${p._id}:servicePrincipalSecret`);
+    }
+    /* Host context means "sign in with the host's own Az PowerShell session and call
+       Connect-AzConnectedMachine over PowerShell Direct" — a Windows mechanism with no
+       Linux counterpart. Build-Vms.ps1 warns and skips such a VM rather than onboarding
+       it half way, so say it here where it can still be changed. */
+    if (p.authMode === "hostContext") {
+      const linux = serversForArcPrincipal(p.id || p._id).filter(isLinuxServer);
+      if (linux.length) {
+        warn(`Arc principal ${label} uses host context, which only works for Windows — ${linux.map(s => s.name).join(", ")} will be skipped. Switch it to a service principal to onboard them.`, "Azure Arc");
+      }
+    }
+    /* Attached, and never going to arrive. Microsoft ships no Connected Machine agent
+       for these distributions - the installer refuses them by name - so the tick is
+       the one thing here that looks like it worked and did not. */
+    const unsupported = serversForArcPrincipal(p.id || p._id)
+      .filter(x => imageRefusesAzureArc(findImage(x.imageId)));
+    if (unsupported.length) {
+      warn(`Arc principal ${label} is attached to ${unsupported.map(x => x.name).join(", ")}, which Azure Arc does not support — those VMs are exported without an Arc block and will not onboard.`, "Azure Arc");
+    }
+  });
+
+  /* --- Virtual machines --- */
+  /* PVE VM Studio: two things that worked differently on Hyper-V. */
+  (state.azureArcPrincipals || []).forEach(p => {
+    if (p.authMode === "hostContext") {
+      warn(`Arc principal ${p.id || ""} uses host context — that was PowerShell Direct from the Hyper-V host. On Proxmox VE only service principals onboard; VMs attached to it skip Arc.`, "Azure Arc");
+    }
+  });
+  if (state.servers.some(s => !isLinuxServer(s) && effectiveDomainJoinAccount(s))) {
+    info("Windows VMs join their domain deferred: GuestProvision registers the join at first boot, it runs five minutes later and restarts the VM. A specialize-time join needs the answer file before specialize, which a cloned gold does not read.", "Domain Join");
+  }
+  if (!state.servers.length) {
+    err("No virtual machines defined — there is nothing to deploy.", "Virtual machines");
+  }
+
+  const nameSeen = new Map();
+  const ipSeen = new Map();
+  state.servers.forEach(s => {
+    const name = String(s.name || "").trim().toLowerCase();
+    const label = serverDisplayName(s);
+    const img = findImage(s.imageId);
+
+    if (!name) {
+      err("A VM has no name.", "Virtual machines", `s:${s._id}:name`);
+    } else {
+      if (name.length > NETBIOS_MAX) err(`VM name "${name}" is longer than ${NETBIOS_MAX} characters (NetBIOS limit).`, `Virtual machines › ${label}`, `s:${s._id}:name`);
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(name) || name.endsWith("-")) {
+        err(`VM name "${name}" contains characters Windows will not accept — use letters, digits and hyphens.`, `Virtual machines › ${label}`, `s:${s._id}:name`);
+      }
+      if (nameSeen.has(name)) err(`Duplicate VM name "${name}" — VM and disk file names would collide.`, `Virtual machines › ${label}`, `s:${s._id}:name`);
+      nameSeen.set(name, true);
+    }
+
+    if (!String(s.switchName || "").trim()) {
+      err(`${label} has no bridge.`, `Virtual machines › ${label}`, `s:${s._id}:switchName`);
+    } else if (switches.length && !switches.some(x => String(x).toLowerCase() === String(s.switchName).toLowerCase())) {
+      err(`${label} uses bridge "${s.switchName}", which the cluster does not have.`, `Virtual machines › ${label}`);
+    }
+
+    if (!(Number(s.memoryGB) > 0)) err(`${label} has no memory assigned.`, `Virtual machines › ${label}`, `s:${s._id}:memoryGB`);
+    if (!(Number(s.cpuCount) > 0)) err(`${label} has no vCPU assigned.`, `Virtual machines › ${label}`, `s:${s._id}:cpuCount`);
+
+    if (s.network && s.network.enabled && !findNetwork(s.network.networkId)) {
+      err(`${label} references a network that no longer exists.`, `Virtual machines › ${label}`, `s:${s._id}:networkAttach`);
+    }
+
+    const ip = String(s.ipAddress || "").trim();
+    if (!ip) {
+      if (effectiveDomainJoinAccount(s)) {
+        err(`${label} joins a domain but has no static IP — a domain member needs a fixed address.`, `Virtual machines › ${label}`, `s:${s._id}:ipAddress`);
+      } else {
+        warn(`${label} has no static IP — the guest falls back to DHCP.`, `Virtual machines › ${label}`);
+      }
+    } else {
+      const ipCheck = validateServerIpAddress(s);
+      if (ipCheck.invalid) err(`${label}: ${ipCheck.message} (${ip}).`, `Virtual machines › ${label}`, `s:${s._id}:ipAddress`);
+      if (ipSeen.has(ip)) err(`IP ${ip} is used by both ${ipSeen.get(ip)} and ${label}.`, `Virtual machines › ${label}`, `s:${s._id}:ipAddress`);
+      ipSeen.set(ip, label);
+      const gw = String(s.defaultGateway || "").trim();
+      if (!gw) warn(`${label} has a static IP but no default gateway.`, `Virtual machines › ${label}`);
+      else {
+        const gwCheck = validateServerGateway(s);
+        if (gwCheck.invalid) err(`${label} default gateway ${gw}: ${gwCheck.message}.`, `Virtual machines › ${label}`, `s:${s._id}:defaultGateway`);
+      }
+    }
+
+    const dns = (s.dnsServers || []).filter(x => String(x || "").trim());
+    const dnsBase = serverSubnetBase(s);
+    (s.dnsServers || []).forEach((x, i) => {
+      const dnsAddr = String(x || "").trim();
+      if (!dnsAddr) return;
+      if (!isValidIPv4(dnsAddr)) {
+        err(`${label} has an invalid DNS server "${x}".`, `Virtual machines › ${label}`, `s:${s._id}:dns:${i}`);
+        return;
+      }
+      const dnsIssue = reservedAddressProblem(dnsAddr, dnsBase.address, dnsBase.prefixLength);
+      if (dnsIssue) err(`${label} DNS server: ${dnsIssue}.`, `Virtual machines › ${label}`, `s:${s._id}:dns:${i}`);
+    });
+    if (!dns.length && effectiveDomainJoinAccount(s)) {
+      warn(`${label} joins a domain but has no DNS server — domain join needs a DNS server that resolves the domain.`, `Virtual machines › ${label}`);
+    }
+
+    /* Extra network adapters. Names have to be unique inside the VM — Hyper-V rejects a
+       second adapter with a name that is already taken. */
+    const nicNames = new Map([[effectiveNicName(s, 0).toLowerCase(), "the primary adapter"]]);
+    (s.nics || []).forEach((nic, i) => {
+      const nicLabel = effectiveNicName(s, i + 1);
+      const key = nicLabel.toLowerCase();
+      if (nicNames.has(key)) {
+        err(`${label} has two adapters named "${nicLabel}" (${nicNames.get(key)}).`, `Virtual machines › ${label}`, `nic:${s._id}:${i}:name`);
+      }
+      nicNames.set(key, `adapter ${i + 2}`);
+      if (!String(nic.switchName || "").trim()) {
+        err(`${label} adapter ${nicLabel} has no bridge.`, `Virtual machines › ${label}`, `nic:${s._id}:${i}:switchName`);
+      } else if (switches.length && !switches.some(x => String(x).toLowerCase() === String(nic.switchName).toLowerCase())) {
+        err(`${label} adapter ${nicLabel} uses bridge "${nic.switchName}", which the cluster does not have.`, `Virtual machines › ${label}`);
+      }
+      if (nic.network && nic.network.enabled && !findNetwork(nic.network.networkId)) {
+        err(`${label} adapter ${nicLabel} references a network that no longer exists.`, `Virtual machines › ${label}`, `nic:${s._id}:${i}:switchName`);
+      }
+      const nicIp = String(nic.ipAddress || "").trim();
+      if (nicIp) {
+        const check = validateNicIpAddress(s, nic);
+        if (check.invalid) err(`${label} adapter ${nicLabel}: ${check.message} (${nicIp}).`, `Virtual machines › ${label}`, `nic:${s._id}:${i}:ipAddress`);
+        if (ipSeen.has(nicIp)) err(`IP ${nicIp} is used by both ${ipSeen.get(nicIp)} and ${label} adapter ${nicLabel}.`, `Virtual machines › ${label}`, `nic:${s._id}:${i}:ipAddress`);
+        ipSeen.set(nicIp, `${label} adapter ${nicLabel}`);
+      }
+    });
+
+    if (!isBuiltInAdminOnly(s) && !String(s.localUserName || "").trim()) {
+      err(`${label} has no local user name.`, `Virtual machines › ${label}`, `s:${s._id}:localUserName`);
+    }
+    if (!String(s.localUserPassword || "").trim()) {
+      err(`${label} has no local password — unattend setup will stall.`, `Virtual machines › ${label}`, `s:${s._id}:localUserPassword`);
+    } else if (String(s.localUserPassword).length < 8) {
+      warn(`${label} has a password shorter than 8 characters — Windows complexity policy may reject it.`, `Virtual machines › ${label}`);
+    }
+
+    // Per-VM assignment integrity is meaningless while the all-VMs mode is on -
+    // hand-picks are preserved but overridden, and the mode has its own checks above.
+    if (!state.defaults.domainJoinAllVms && s.domainJoin && s.domainJoin.enabled) {
+      if (!s.domainJoin.accountId) {
+        err(`${label} has domain join enabled but no account selected.`, `Virtual machines › ${label}`, `s:${s._id}:djAccount`);
+      } else if (!findDomainJoinAccount(s.domainJoin.accountId)) {
+        err(`${label} references a Domain Join account that no longer exists.`, `Virtual machines › ${label}`, `s:${s._id}:djAccount`);
+      }
+    }
+    if (!state.defaults.azureArcAllVms && s.azureArc && s.azureArc.enabled) {
+      if (!s.azureArc.principalId) {
+        err(`${label} has Azure Arc enabled but no principal selected.`, `Virtual machines › ${label}`, `s:${s._id}:arcPrincipal`);
+      } else if (!findAzureArcPrincipal(s.azureArc.principalId)) {
+        err(`${label} references an Arc principal that no longer exists.`, `Virtual machines › ${label}`, `s:${s._id}:arcPrincipal`);
+      }
+    }
+
+    const features = (s.windowsFeatures || []).filter(Boolean);
+    if (features.indexOf("NET-Framework-Core") !== -1 && !String(d.sxsSourcePath || "").trim()) {
+      warn(`${label} installs .NET Framework 3.5 but no SxS source path is set — the payload is not in the image.`, "General Settings › Paths");
+    }
+    if (features.length && img.kind === "client") {
+      warn(`${label} is a client image — server roles and features are ignored.`, `Virtual machines › ${label}`);
+    }
+    if (features.length && img.noServerRoles) {
+      info(`${label} runs ${img.label}, which has a fixed role set — the selected roles and features are not exported.`, `Virtual machines › ${label}`);
+    }
+    if (s.appCompatFod) {
+      info(`${label} installs the Server Core App Compatibility FOD — Build-Vms.ps1 asks for the Windows Server Languages and Optional Features ISO, or the guest installs it online at first boot.`, `Virtual machines › ${label}`);
+    }
+    if ((s.rsatCapabilities || []).length) {
+      // Same standing as the App Compat FOD note above it: the ISO saves the download,
+      // its absence costs time at first boot and nothing else.
+      info(`${label} installs ${(s.rsatCapabilities || []).length} RSAT capability(ies) — Build-Vms.ps1 asks for the Windows 11 Languages and Optional Features ISO. Without it each one is a separate Windows Update download at first boot.`, `Virtual machines › ${label}`);
+    }
+    if ((s.clientFeatures || []).length) {
+      // Deliberately not the FOD note above: this payload is in the image, so there is no
+      // ISO to ask for and nothing to download - the only cost is a longer first boot
+      // while the staged feature finishes installing.
+      info(`${label} enables ${(s.clientFeatures || []).length} Windows feature(s) offline from the image itself — no Features on Demand ISO needed.`, `Virtual machines › ${label}`);
+    }
+    if (isAdDomainController(s)) {
+      info(`${label} installs AD DS binaries only — promote it in the guest afterwards with Install-ADDSForest.`, `Virtual machines › ${label}`);
+    }
+    // Guest clustering, not the host cluster — a guest cluster node with no shared disk.
+    if (features.indexOf("Failover-Clustering") !== -1 && !(s.vhdSetIds || []).length && !state.vhdSets.some(v => (v.attachTo || []).some(n => String(n).toLowerCase() === name))) {
+      info(`${label} installs Failover Clustering but has no shared storage — add a VHD Set if the guest cluster needs one.`, `Virtual machines › ${label}`);
+    }
+
+    (s.additionalDisks || []).forEach((disk, i) => {
+      const dl = dataDiskTag(s, i, disk);
+      if (!(Number(disk.sizeGB) > 0)) err(`${label} data disk ${dl}: has no size.`, `Virtual machines › ${label}`, `s:${s._id}:disksize:${i}`);
+      const fs = diskFileSystem(disk);
+      // ReFS formatting needs a Windows edition that can create ReFS volumes. Every
+      // Server SKU can; of the client images only Enterprise can.
+      /* ReFS creation is an Enterprise capability on the client: Enterprise N and
+         multi-session are Enterprise underneath and can, Pro and Pro N cannot. */
+      if (fs === "ReFS" && img.kind === "client" && !/^w1[01]-enterprise/.test(String(s.imageId || ""))) {
+        err(`${label} data disk ${dl}: is set to ReFS, which ${img.label} cannot create. Use NTFS.`, `Virtual machines › ${label}`);
+      }
+      if (fs !== "None" && String(disk.label || "").trim().length > 32) {
+        err(`${label} data disk ${dl}: volume label is longer than 32 characters.`, `Virtual machines › ${label}`);
+      }
+    });
+
+    /* Per-VM paths and renamed disk files */
+    if (serverUsesCustomPaths(s) && !String(s.vmPath || "").trim() && !String(s.vhdPath || "").trim()) {
+      info(`${label} has custom paths switched on but both fields are empty — it falls back to the General Settings paths.`, `Virtual machines › ${label}`);
+    }
+    if (s.imageSource !== "custom" && typeof cluster !== "undefined" && cluster.golds && !goldOf(s.imageId)) {
+      warn(`${label} builds from ${findImage(s.imageId).label}, which has no gold yet — bake one under Golds before deploying.`,
+        `Golds`);
+    }
+    lintPath(s.vmPath, `${label} VM path`, `Virtual machines › ${label}`, `s:${s._id}:vmPath`);
+    lintPath(s.vhdPath, `${label} VHD path`, `Virtual machines › ${label}`, `s:${s._id}:vhdPath`);
+    [s.vmPath, s.vhdPath].forEach((p, idx) => {
+      const raw = String(p || "").trim();
+      if (serverUsesCustomPaths(s) && raw && /\.vhdx?$/i.test(raw)) {
+        err(`${label} ${idx ? "VHD" : "VM"} path points at a file — it has to be a folder.`, `Virtual machines › ${label}`, `s:${s._id}:${idx ? "vhdPath" : "vmPath"}`);
+      }
+    });
+    const diskFiles = new Map();
+    const osFile = effectiveOsDiskFileName(s).toLowerCase();
+    diskFiles.set(osFile, "OS disk");
+    (s.additionalDisks || []).forEach((disk, i) => {
+      const f = effectiveDataDiskFileName(s, disk, i).toLowerCase();
+      if (diskFiles.has(f)) {
+        err(`${label} would write two disks to the same file "${f}" (${diskFiles.get(f)} and data disk ${dataDiskTag(s, i, disk)}).`, `Virtual machines › ${label}`);
+      }
+      diskFiles.set(f, `data disk ${dataDiskTag(s, i, disk)}`);
+    });
+  });
+
+  /* --- VHD Sets --- */
+  const vhdSetFiles = new Map();
+  (state.vhdSets || []).forEach((v, idx) => {
+    const attach = (v.attachTo || []).map(n => String(n).toLowerCase()).filter(Boolean);
+    const label = effectiveVhdSetFileName(v, vhdSetAutoFileName(v, idx));
+    const fileKey = label.toLowerCase();
+    if (vhdSetFiles.has(fileKey) && !String(v.path || "").trim()) {
+      err(`Two VHD Sets would be written to the same file "${label}".`, "VHD Sets", `vs:${v._id}:name`);
+    }
+    vhdSetFiles.set(fileKey, true);
+    lintPath(v.path, `VHD Set ${label} custom path`, "VHD Sets", `vs:${v._id}:path`);
+    if (!attach.length) {
+      warn(`VHD Set ${label} is not attached to any VM — it will not be built.`, "VHD Sets");
+    } else if (attach.length < 2) {
+      warn(`VHD Set ${label} is attached to a single VM — a VHD Set is meant for shared storage.`, "VHD Sets");
+    }
+    attach.forEach(n => {
+      if (!nameSeen.has(n)) err(`VHD Set ${label} is attached to "${n}", which is not a defined VM.`, "VHD Sets", `vs:${v._id}:attachTo`);
+    });
+    if (!(Number(v.sizeGB) > 0)) err(`VHD Set ${label} has no size.`, "VHD Sets", `vs:${v._id}:sizeGB`);
+  });
+
+  return issues;
+}
+
+/* ---------------------------[ Review rendering ]--------------------------- */
+
+function reviewGeneralRows() {
+  const d = state.defaults;
+  const nm = namingDefaults();
+  return kvGrid(
+    kvRow("Node", d.pveNode || "Auto — the gold's node") +
+    kvRow("Storage for full copies", d.pveStorage || "Auto — the gold's storage") +
+    kvRow("Bridges and VNets", (d.availableSwitches || []).filter(Boolean).join(", ") || "none in the cluster") +
+    kvRow("Username theme", (USERNAME_THEMES[state.usernameTheme] || {}).label || state.usernameTheme) +
+    kvRow("Password length", passwordLength() + " characters") +
+    kvRow("VM name includes FQDN", yesNo(nm.vmNameIncludeFqdn)) +
+    kvRow("Fixed FQDN", namingFqdnOverride() || "Off — each VM uses its own Domain Join domain")
+  );
+}
+
+function reviewClusterRows() {
+  const c = state.defaults.cluster || {};
+  const members = serversForCluster();
+  if (!c.enabled) {
+    return `<p class="hint">Cluster is off — every VM is created as a standalone Hyper-V VM.</p>`;
+  }
+  return kvGrid(
+    kvRow("Cluster", c.name || "the cluster this host belongs to") +
+    kvRow("Added after create", yesNo(c.addAfterCreate !== false)) +
+    kvRow("Membership", c.addAllVms ? "Every VM in this config" : "Individually picked") +
+    kvRow("Clustered VMs", members.length ? members.map(serverDisplayName).join(", ") : "none — nothing will be registered") +
+    kvRow("Standalone VMs", state.servers.filter(s => !(s.cluster && s.cluster.enabled)).map(serverDisplayName).join(", ") || "none")
+  ) + (members.length ? `
+    <div class="cl-grid">
+      <div class="cl-grid-head">
+        <div>Virtual machine</div>
+        <div>Storage as configured</div>
+      </div>
+      ${members.map(s => {
+        const facts = clusterNodeFacts(s);
+        return `
+        <div class="cl-row">
+          ${vmGridCell(s)}
+          ${clusterNoteCell(facts)}
+        </div>`;
+      }).join("")}
+    </div>` : "");
+}
+
+function renderReview() {
+  const issues = validate();
+  const errors = issues.filter(i => i.level === "error");
+  const warnings = issues.filter(i => i.level === "warn");
+  const notes = issues.filter(i => i.level === "info");
+  const cfg = buildConfig();
+
+  const totalCpu = state.servers.reduce((n, s) => n + (Number(s.cpuCount) || 0), 0);
+  const totalMem = state.servers.reduce((n, s) => n + (Number(s.memoryGB) || 0), 0);
+  const dataGb = state.servers.reduce((n, s) => n + (s.additionalDisks || []).reduce((m, d) => m + (Number(d.sizeGB) || 0), 0), 0);
+  const setGb = state.vhdSets.reduce((n, v) => n + (Number(v.sizeGB) || 0), 0);
+
+  return `
+    <div class="blade-toolbar">
+      <div class="page-title"><img src="${iconSrc("search.svg")}"> Review and validate</div>
+      <div class="row">
+        <button class="btn primary" type="button" data-goto="export"><img src="${iconSrcOnAccent("export.svg")}"> Go to Export</button>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="pill status ${errors.length ? "off" : "on"}">${errors.length} error(s)</span>
+      <span class="pill status ${warnings.length ? "warn" : "on"}">${warnings.length} warning(s)</span>
+      ${notes.length ? `<span class="pill">${notes.length} note(s)</span>` : ""}
+      <span class="pill">Virtual machines: ${state.servers.length}</span>
+      <span class="pill">Total vCPU: ${totalCpu}</span>
+      <span class="pill">Total memory: ${totalMem} GB</span>
+      <span class="pill">Data disks: ${dataGb} GB</span>
+      <span class="pill">VHD Sets: ${setGb} GB</span>
+    </div>
+
+    ${gsCard("rev-issues", "search.svg", "Validation", issues.length ? `${issues.length} finding(s)` : "No findings", `
+      ${issues.length
+        ? `<div class="issue-list">${issues.map(i => `
+            <div class="issue ${i.level}">${i.level === "error" ? SVG_ALERT : SVG_INFO}
+              <div class="issue-text">${esc(i.text)}<span class="issue-where">${esc(i.where)}</span></div>
+            </div>`).join("")}</div>`
+        : `<p class="hint">Nothing to flag. The configuration is internally consistent — Deploy still checks the cluster itself (golds, names, storages) before it builds anything.</p>`}
+    `, "", true)}
+
+    ${state.servers.length ? `
+      <div class="card ov-pointer">
+        <img src="${iconSrc("vm-overview.svg")}" alt="">
+        <div><strong>${state.servers.length} virtual machine(s)</strong>
+          <div class="hint">Each VM's address, FQDN, sign-in, hardware, storage and identity is on the VM overview blade.</div></div>
+        <button class="btn" type="button" data-goto="vmoverview"><img src="${iconSrc("vm-overview.svg")}" alt=""> Open VM overview</button>
+      </div>` : ""}
+
+    ${gsCard("rev-files", "storage.svg", "Placement", "Where each VM goes on the cluster", `
+      <div class="table-wrap"><table class="data"><thead><tr><th>VM</th><th>Image</th><th>Disk</th><th>Node</th><th>Storage</th></tr></thead><tbody>
+      ${state.servers.map(s => `<tr><td><b>${esc(s.name || "(no name)")}</b></td><td>${esc(findImage(s.imageId).label)}</td>
+        <td>${s.useDifferencingDisk === false ? "Full copy" : "Linked clone"}${s.osDiskGB ? " · " + esc(s.osDiskGB) + " GB" : ""}</td>
+        <td class="mono">${esc(s.pveNode || state.defaults.pveNode || "the gold's")}</td>
+        <td class="mono">${esc(s.useDifferencingDisk === false ? (s.pveStorage || state.defaults.pveStorage || "the gold's") : "the gold's")}</td></tr>`).join("")}
+      </tbody></table></div>
+    `, "", false)}
+
+    ${gsCard("rev-general", "settings.svg", "General Settings", "Placement, naming, accounts", reviewGeneralRows(), "", false)}
+
+    ${gsCard("rev-networks", "vnet.svg", "Networks", `${state.networks.length} defined`,
+      state.networks.length
+        ? state.networks.map(n => kvGrid(
+            kvRow("Network", `${networkName(n)} · ${networkCidr(n)}`) +
+            kvRow("Bridge", n.switchName) +
+            kvRow("VLAN", (n.vlanId === "" || n.vlanId == null) ? "Untagged" : String(n.vlanId)) +
+            kvRow("Gateway", n.gateway) +
+            kvRow("DNS servers", (n.dnsServers || []).filter(x => String(x || "").trim()).join(", ")) +
+            kvRow("Attached VMs", serversForNetwork(n.id).map(serverDisplayName).join(", "))
+          )).join("")
+        : `<p class="hint">No networks defined — VMs carry their own IP settings.</p>`, "", false)}
+
+    ${gsCard("rev-identity", "identity.svg", "Domain Join", `${state.domainJoinAccounts.length} account(s)`,
+      state.domainJoinAccounts.length
+        ? state.domainJoinAccounts.map(a => kvGrid(
+            kvRow("Domain", a.domain) +
+            kvRow("Join user", a.joinUser) +
+            kvRow("Password", a.joinPassword ? "Set" : "") +
+            kvRow("Used by", (domainJoinAllVmsAccount() ? "Every VM in this config" : serversForDomainJoinAccount(a.id).map(serverDisplayName).join(", ")))
+          )).join("")
+        : `<p class="hint">No Domain Join accounts — every VM stays in a workgroup.</p>`, "", false)}
+
+    ${gsCard("rev-arc", "arc.svg", "Azure Arc", `${state.azureArcPrincipals.length} principal(s)`,
+      state.azureArcPrincipals.length
+        ? state.azureArcPrincipals.map(p => kvGrid(
+            kvRow("Subscription", p.subscriptionId) +
+            kvRow("Tenant", p.tenantId) +
+            kvRow("Resource group", p.resourceGroup) +
+            kvRow("Region", azureRegionLabel(p.location)) +
+            kvRow("Authentication", p.authMode === "hostContext" ? "Host context (az login on the host)" : "Service principal") +
+            (p.authMode === "hostContext" ? "" : kvRow("Application ID", p.servicePrincipalAppId) + kvRow("Secret", p.servicePrincipalSecret ? "Set" : "")) +
+            kvRow("Used by", (azureArcAllVmsPrincipal() ? "Every VM in this config" : serversForArcPrincipal(p.id).map(serverDisplayName).join(", ")))
+          )).join("")
+        : `<p class="hint">No Arc principals — nothing gets onboarded to Azure Arc.</p>`, "", false)}
+
+    ${gsCard("rev-vhdsets", "disk-pool.svg", "VHD Sets", `${state.vhdSets.length} shared disk(s)`,
+      (cfg.vhdSets || []).length
+        ? (cfg.vhdSets || []).map(v => kvGrid(
+            kvRow("File", v.name + ".vhds") +
+            kvRow("Size / type", `${v.sizeGB} GB ${v.type}`) +
+            kvRow("Attached to", (v.attachTo || []).join(", ")) +
+            kvRow("Path override", v.path)
+          )).join("")
+        : `<p class="hint">No VHD Sets defined.</p>`, "", false)}`;
+}
+
+/* ---------------------------[ Blade: Passwords ]---------------------------
+   Only the local account passwords this studio generates itself. Domain Join and Arc
+   credentials are supplied from outside and stay in the blades that own them — there is
+   nothing to reveal or regenerate about a secret we never made up. Rows are read-only;
+   Copy reads the input value directly, so it works while a row is masked and the secret
+   never has to reach the screen. */
+
+/* Per-row reveal state, keyed by VM id. Deliberately not persisted or exported —
+   a reload, or a restored state token, comes back fully masked. */
+const passwordsVisible = Object.create(null);
+
+function credentialRows() {
+  return state.servers.map(s => {
+    const adminOnly = isBuiltInAdminOnly(s);
+    return {
+      id: s._id,
+      icon: iconSrcBand("vm.svg", serverGlyphBand(s)),
+      owner: serverDisplayName(s),
+      user: adminOnly ? "Administrator" : (String(s.localUserName || "").trim() || ""),
+      value: s.localUserPassword || ""
+    };
+  });
+}
+
+function renderPasswordRow(r) {
+  const shown = !!passwordsVisible[r.id];
+  return `
+    <div class="pw-row" data-pw-row="${esc(r.id)}">
+      <div class="pw-ico"><img src="${String(r.icon).startsWith("data:") ? r.icon : iconSrc(r.icon)}" alt=""></div>
+      <div class="pw-identity">
+        <div class="pw-owner" title="${esc(r.owner)}">${esc(r.owner)}</div>
+      </div>
+      <div class="pw-usercell">
+        <input class="pw-field pw-user${r.user ? "" : " is-missing"}" id="pwuser-${esc(r.id)}" type="text" value="${esc(r.user)}"
+               placeholder="not set" readonly tabindex="-1" spellcheck="false" autocomplete="off"
+               aria-label="Local account on ${esc(r.owner)}">
+        <button class="btn icon" type="button" data-user-copy="${esc(r.id)}"${r.user ? "" : " disabled"}
+          title="Copy" aria-label="Copy user name for ${esc(r.owner)}">${copyIcon()}</button>
+      </div>
+      <input class="pw-field${r.value ? "" : " is-missing"}" id="pw-${esc(r.id)}"
+             type="${shown ? "text" : "password"}" value="${esc(r.value)}" placeholder="not set"
+             readonly tabindex="-1" spellcheck="false" autocomplete="off"
+             aria-label="Password for ${esc(r.owner)}">
+      <div class="pw-actions">
+        <button class="btn icon" type="button" data-pw-toggle="${esc(r.id)}"${r.value ? "" : " disabled"}
+          title="${shown ? "Hide" : "Reveal"}" aria-label="${shown ? "Hide" : "Reveal"} password for ${esc(r.owner)}">${shown ? eyeOffIcon() : eyeIcon()}</button>
+        <button class="btn icon" type="button" data-pw-copy="${esc(r.id)}"${r.value ? "" : " disabled"}
+          title="Copy" aria-label="Copy password for ${esc(r.owner)}">${copyIcon()}</button>
+        <button class="btn icon" type="button" data-gen-pwd="${esc(r.id)}"
+          title="Generate a new one" aria-label="Generate a new password for ${esc(r.owner)}">${regenIcon()}</button>
+      </div>
+    </div>`;
+}
+
+/* One row per Linux VM. Keys are per VM only, so a row is a VM and its key and nothing
+   is shared between rows. The private half is only ever in sshPrivateKeys - this tab -
+   so the state pill reads as a to-do: a generated key not yet downloaded is the one
+   thing on this card a reload can take away. */
+function sshKeyRows() {
+  return state.servers.filter(isLinuxServer).map(s => ({
+    id: s._id,
+    icon: iconSrcBand("vm.svg", serverGlyphBand(s)),
+    owner: serverDisplayName(s),
+    file: sshKeyFileName(s),
+    pub: String(s.sshAuthorizedKey || "").trim(),
+    priv: !!sshPrivateKeys[s._id],
+    saved: !!sshKeysDownloaded[s._id]
+  }));
+}
+
+function renderSshKeyRow(r) {
+  const stateBit = r.priv && !r.saved
+    ? `<span class="pill status warn" title="The private key is only in this tab - download it before you leave the page">Not downloaded</span>`
+    : r.priv
+      ? `<span class="pill status on" title="Saved as ${esc(r.file)} - download it again any time while this tab is open">Downloaded</span>`
+    : r.pub
+      ? `<span class="pill" title="Pasted in, or generated before the page was reloaded - the private half is not in this tab">Public key only</span>`
+      : `<span class="pill" title="No key - the password at the Proxmox VE console is the only way in">No key</span>`;
+  return `
+    <div class="pw-row">
+      <div class="pw-ico"><img src="${String(r.icon).startsWith("data:") ? r.icon : iconSrc(r.icon)}" alt=""></div>
+      <div class="pw-identity">
+        <div class="pw-owner" title="${esc(r.owner)}">${esc(r.owner)}</div>
+      </div>
+      <div class="pw-usercell">${stateBit}</div>
+      <input class="pw-field pw-pubkey" id="sshpub-${esc(r.id)}" type="text" value="${esc(r.pub)}"
+             placeholder="none - password only" readonly tabindex="-1" spellcheck="false" autocomplete="off"
+             title="${esc(r.pub)}" aria-label="SSH public key for ${esc(r.owner)}">
+      <div class="pw-actions">
+        <button class="btn icon" type="button" data-sshpub-copy="${esc(r.id)}"${r.pub ? "" : " disabled"}
+          title="Copy public key" aria-label="Copy SSH public key for ${esc(r.owner)}">${copyIcon()}</button>
+        <button class="btn icon" type="button" data-gen-ssh="${esc(r.id)}"
+          title="Generate a new key pair" aria-label="Generate a new SSH key pair for ${esc(r.owner)}">${regenIcon()}</button>
+        <button class="btn icon" type="button" data-dl-ssh="${esc(r.id)}"${r.priv ? "" : " disabled"}
+          title="${r.priv ? "Download the private key" : "No private key in this tab - generate a new pair first"}"
+          aria-label="Download the SSH private key for ${esc(r.owner)}">${downloadIcon()}</button>
+      </div>
+    </div>`;
+}
+
+function renderPasswords() {
+  const rows = credentialRows();
+  const missing = rows.filter(r => !r.value).length;
+  const anyHidden = rows.some(r => r.value && !passwordsVisible[r.id]);
+  const sshRows = sshKeyRows();
+  const sshPending = sshRows.filter(r => r.priv && !r.saved).length;
+
+  return `
+    <div class="blade-toolbar">
+      <div class="page-title"><img src="${iconSrc("key.svg")}"> Passwords</div>
+      <div class="row">
+        <button class="btn" type="button" id="sshDownloadAll"${sshRows.some(r => r.priv) ? "" : " disabled"}
+          title="${sshRows.some(r => r.priv) ? "Every private key this tab holds, in one ssh-keys.zip" : "No private key in this tab - generate a pair first"}">${downloadIcon()} Download SSH keys</button>
+        <button class="btn" type="button" id="pwToggleAll"${rows.length ? "" : " disabled"}>${anyHidden ? eyeIcon() + " Reveal all" : eyeOffIcon() + " Hide all"}</button>
+        <button class="btn primary" type="button" data-goto="export"><img src="${iconSrcOnAccent("export.svg")}"> Go to Export</button>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="pill">${rows.length} account(s)</span>
+      <span class="pill status ${missing ? "off" : "on"}">${missing} without a password</span>
+      ${sshRows.length ? `<span class="pill">${sshRows.filter(r => r.pub).length} of ${sshRows.length} Linux VM(s) with an SSH key</span>` : ""}
+    </div>
+
+    <div class="warn-box">These are the real passwords. They are part of the lab in the studio's database, and each VM's
+    seed carries its own only until its first boot is done - then the seed is deleted. Copy works while a row is masked —
+    a secret never has to be on screen to reach the clipboard.</div>
+
+    ${rows.length
+      ? `<div class="card"><div class="pw-list">${rows.map(renderPasswordRow).join("")}</div></div>
+         <p class="hint" style="margin-top:14px">Generated passwords are ${passwordLength()} characters (set in General Settings) with
+         upper case, lower case, a number and a special character, and no ambiguous <code>I/l/1</code> or <code>O/0</code>. Editing a
+         name or password is still done on the Virtual machines blade — this page only reads them back.</p>`
+      : `<div class="card"><p class="hint" style="margin:0">No virtual machines yet. Add one and its local account appears here with a generated password.</p></div>`}
+
+    ${sshRows.length ? `
+      <div class="pw-section"><img src="${iconSrc("keys.svg")}" alt=""> SSH keys</div>
+      ${sshPending ? `<div class="warn-box">${sshPending} private key(s) not downloaded yet. They are held in this tab and nowhere else — not in
+      the lab, not on the server — so after a reload only the public halves remain.</div>` : ""}
+      <div class="card"><div class="pw-list">${sshRows.map(renderSshKeyRow).join("")}</div></div>
+      <p class="hint" style="margin-top:14px">Ed25519, one pair per VM. Only the public key goes into the lab and the VM.
+      Generating a new pair replaces the VM's key; the downloaded file is <code>&lt;vm&gt;_id_ed25519</code> — <code>chmod 600</code> it.</p>` : ""}`;
+}
+
+/* ---------------------------[ Blade: VM overview ]---------------------------
+   Everything about a VM you go looking for once it is built - its name on the network,
+   its address, how to sign in, how to connect - in one card per machine, with the rest
+   of what the Review blade used to list per VM folded underneath. Read-only: every value
+   copies on click, and editing stays on the Virtual machines blade. */
+
+/* View state only - not in state, not in the save token, gone on reload. Cards start
+   folded to header and reach strip; this holds the ones opened since. */
+const ovExpanded = Object.create(null);
+let ovCompact = false;
+let ovFilter = "";
+
+/* The name the VM registers in DNS: the domain it joins. The fixed FQDN in General
+   Settings only names Hyper-V objects and folders (Get-ServerNamingSuffix), so it is
+   used only for a domain controller that builds its domain rather than joining one. */
+function ovFqdn(s) {
+  const joined = effectiveDomainJoinAccount(s);
+  const suffix = joined
+    ? String(joined.domain || "").trim().replace(/\.+$/, "").toLowerCase()
+    : namingSuffixForServer(s);
+  const name = String(s.name || "").trim() || "vm";
+  return suffix ? name + "." + suffix : name;
+}
+/* In a domain's DNS: joined to one, or the controller that serves it. Only then does the
+   FQDN resolve - a fixed FQDN on a workgroup VM is a name nobody registered. */
+function ovInDomain(s) {
+  return !!effectiveDomainJoinAccount(s) || (isAdDomainController(s) && !!namingSuffixForServer(s));
+}
+/* What a connect command should aim at: the FQDN when the VM is in a domain's DNS, else
+   its static address, else the bare name. */
+function ovHost(s) {
+  if (ovInDomain(s)) return ovFqdn(s);
+  return String(s.ipAddress || "").trim() || String(s.name || "").trim() || "vm";
+}
+function ovSignInUser(s) {
+  return isBuiltInAdminOnly(s) ? "Administrator" : (String(s.localUserName || "").trim() || "");
+}
+/* Only asked for a workgroup VM (see ovInDomain): the local account the studio created,
+   qualified with the machine so it cannot be read as a domain user. */
+function ovCredential(s) {
+  const user = ovSignInUser(s) || "Administrator";
+  return (String(s.name || "").trim() || "vm") + "\\" + user;
+}
+function ovConnectCommands(s) {
+  const host = ovHost(s);
+  if (isLinuxServer(s)) {
+    const key = String(s.sshAuthorizedKey || "").trim() ? ` -i ~/.ssh/${sshKeyFileName(s)}` : "";
+    return [{ primary: true, icon: "ssh.svg", label: "SSH", cmd: `ssh${key} ${ovSignInUser(s) || "root"}@${host}` }];
+  }
+  const cmds = [{ primary: true, icon: "rdp.svg", label: "RDP", rdp: true }];
+  /* No PowerShell on Windows client images: WinRM is off there by default and nothing
+     in the build turns it on, so the command could only fail. */
+  if (findImage(s.imageId).kind === "client") return cmds;
+  /* Always with -Credential. Without it WinRM signs in as whoever runs the command,
+     which only works from a PC joined to the lab's domain - elsewhere it fails on
+     Kerberos instead of asking for a password. A workgroup VM is reached by IP, and
+     WinRM only authenticates to an address it trusts, so the TrustedHosts entry comes
+     first (once per admin PC; -Concatenate keeps the entries already there). */
+  const ps = ovInDomain(s)
+    ? `Enter-PSSession -ComputerName ${host} -Credential ${ovDomainCredential(s)}`
+    : `Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value ${host} -Concatenate -Force; Enter-PSSession -ComputerName ${host} -Credential ${ovCredential(s)}`;
+  cmds.push({ icon: "powershell.svg", label: "PowerShell", cmd: ps });
+  return cmds;
+}
+/* A domain account to sign in with: the join account's user when the studio knows one,
+   in its own domain's UPN form so it cannot be read as a local user. */
+function ovDomainCredential(s) {
+  const acc = effectiveDomainJoinAccount(s);
+  const dom = acc ? String(acc.domain || "").trim() : namingSuffixForServer(s);
+  const raw = acc ? String(acc.joinUser || "").trim() : "";
+  const user = raw.replace(/^.*\\/, "").replace(/@.*$/, "") || "Administrator";
+  return dom ? user + "@" + dom : user;
+}
+/* A .rdp file rather than an mstsc command line: it opens on double-click, carries the
+   user name so only the password is asked for, and can be kept next to the lab's notes.
+   CRLF because mstsc is the one reading it. */
+/* Named after the FQDN when the VM is in a domain, so a folder of .rdp files from two
+   labs never has two "files-01.rdp" in it; a workgroup VM keeps its short name, and the
+   file inside points at its IP. */
+function ovRdpFileName(s) {
+  return (ovInDomain(s) ? ovFqdn(s) : (String(s.name || "").trim() || "vm")) + ".rdp";
+}
+/* The user name is only filled in for a workgroup VM, where the local account is the
+   only way in. In a domain you sign in as yourself, and a pre-filled local account is
+   one more thing to overwrite at the prompt. */
+function ovRdpFile(s) {
+  return [
+    `full address:s:${ovHost(s)}`,
+    ...(ovInDomain(s) ? [] : [`username:s:${ovCredential(s)}`]),
+    "prompt for credentials:i:1",
+    "screen mode id:i:1",
+    "dynamic resolution:i:1",
+    "smart sizing:i:1",
+    "authentication level:i:2"
+  ].join("\r\n") + "\r\n";
+}
+function ovCopy(value, shown) {
+  const v = String(value == null ? "" : value);
+  return `<span class="ov-cv" data-ov-copy="${esc(v)}" title="Copy ${esc(v)}"><span>${shown != null ? shown : esc(v)}</span>${copyIcon()}</span>`;
+}
+function ovOff(text) { return `<span class="ov-off">${esc(text)}</span>`; }
+function ovTick(on, label) { return `<span class="${on ? "on" : ""}">${esc(label)}</span>`; }
+function ovVlan(v) { return (v === "" || v == null) ? ovOff("untagged") : esc(String(v)); }
+
+function ovStatusPills(s) {
+  const out = [];
+  const dj = effectiveDomainJoinAccount(s);
+  if (isAdDomainController(s)) out.push(`<span class="pill status info"><img src="${iconSrc("domain-controller.svg")}" alt="">Domain controller</span>`);
+  if (dj) out.push(`<span class="pill status on" title="${esc(dj.domain)} as ${esc(dj.joinUser)}"><img src="${iconSrc("identity.svg")}" alt="">Domain joined</span>`);
+  // Workgroup is a Windows notion; a Linux VM that joins nothing just says nothing.
+  else if (!isAdDomainController(s) && !isLinuxServer(s)) out.push(`<span class="pill">Workgroup</span>`);
+  if (effectiveAzureArcPrincipal(s)) out.push(`<span class="pill status on"><img src="${iconSrc("arc.svg")}" alt="">Azure Arc</span>`);
+  if (clusterIncludesServer(s)) out.push(`<span class="pill status on"><img src="${iconSrc("virtual-clusters.svg")}" alt="">HA</span>`);
+  if (isLinuxServer(s)) {
+    if (!String(s.sshAuthorizedKey || "").trim()) out.push(`<span class="pill status warn">No SSH key</span>`);
+    else if (sshPrivateKeys[s._id] && !sshKeysDownloaded[s._id]) out.push(`<span class="pill status warn">Key not downloaded</span>`);
+  }
+  return out.join("");
+}
+
+function ovNicRows(name, sw, net, vlan) {
+  return `
+    <dt>Adapter</dt><dd>${esc(name)}</dd>
+    <dt>Bridge</dt><dd>${sw ? esc(sw) : ovOff("none")}</dd>
+    <dt>Network</dt><dd class="txt">${net ? `${esc(networkName(net))} <span class="ov-muted">${esc(networkCidr(net))}</span>` : ovOff("not bound")}</dd>
+    <dt>VLAN</dt><dd>${ovVlan(vlan)}</dd>`;
+}
+
+function ovFeaturePills(s) {
+  if (isLinuxServer(s)) {
+    const pkgs = linuxPackageList(s);
+    return { label: "Packages", html: pkgs.length
+      ? pkgs.map(p => `<span class="pill"><img src="${iconSrc("extensions.svg")}" alt="">${esc(p)}</span>`).join("")
+      : `<span class="hint">No extra packages</span>` };
+  }
+  const img = findImage(s.imageId);
+  const items = img.kind === "client"
+    ? [
+        ...(s.clientFeatures || []).filter(Boolean).map(id => ({ label: clientFeatureLabel(id), icon: clientFeatureGlyph(id) })),
+        ...(s.rsatCapabilities || []).filter(Boolean).map(id => ({ label: rsatCapabilityLabel(id), icon: rsatCapabilityGlyph(id) }))
+      ]
+    : (s.windowsFeatures || []).filter(Boolean).map(id => ({ label: windowsFeatureLabel(id), icon: windowsFeatureGlyph(id) }));
+  return { label: img.kind === "client" ? "Features &amp; RSAT" : "Roles &amp; features", html: items.length
+    ? items.map(x => `<span class="pill"><img src="${iconSrc(x.icon)}" alt="">${esc(x.label)}</span>`).join("")
+    : `<span class="hint">None selected</span>` };
+}
+
+function ovSearchText(s) {
+  const img = findImage(s.imageId);
+  return [s.name, ovFqdn(s), s.ipAddress, img.label, s.switchName, ovSignInUser(s),
+    ...(s.nics || []).map(n => n.ipAddress)].filter(Boolean).join(" ").toLowerCase();
+}
+
+function renderOverviewCard(s) {
+  const img = findImage(s.imageId);
+  const band = serverGlyphBand(s);
+  const linux = isLinuxServer(s);
+  const net = findServerNetwork(s);
+  const dj = effectiveDomainJoinAccount(s);
+  const arc = effectiveAzureArcPrincipal(s);
+  const nm = namingDefaults();
+  const domain = namingSuffixForServer(s);
+  const hyperVName = (nm.vmNameIncludeFqdn && domain) ? `${s.name}.${domain}` : s.name;
+  const ip = String(s.ipAddress || "").trim();
+  const prefix = Number(s.prefixLength) || 24;
+  const gw = String(s.defaultGateway || "").trim();
+  const dns = (s.dnsServers || []).map(x => String(x || "").trim()).filter(Boolean);
+  const user = ovSignInUser(s);
+  const disks = s.additionalDisks || [];
+  const sets = state.vhdSets.filter(v => (v.attachTo || []).some(n => String(n).toLowerCase() === String(s.name || "").toLowerCase()));
+  const integ = Object.assign(defaultIntegrationServices(), s.integrationServices || {});
+  const integOn = Object.keys(integ).filter(k => integ[k]);
+  const pillClass = img.kind === "core" ? "core" : img.kind === "client" ? "client" : img.kind === "linux" ? "linux" : "desktop";
+  const features = ovFeaturePills(s);
+  const cmds = ovConnectCommands(s);
+  const collapsed = !ovExpanded[s._id];
+  const hidden = ovFilter && !ovSearchText(s).includes(ovFilter);
+
+  return `
+  <article class="ov-vm${collapsed ? " collapsed" : ""}" data-ov-vm="${esc(s._id)}" style="--tone:${MEMBER_PICKER_BAND_VAR[band] || "var(--role-server)"}"${hidden ? " hidden" : ""}>
+    <header class="ov-head"${ovCompact ? "" : ` data-ov-collapse="${esc(s._id)}" title="${collapsed ? "Show details" : "Hide details"}"`}>
+      <span class="card-chevron ov-chev">${chevron()}</span>
+      <div class="ov-badge"><img src="${iconSrcBand("vm.svg", band)}" alt=""></div>
+      <div class="ov-id">
+        <div class="ov-title"><span class="ov-name">${esc(serverDisplayName(s))}</span><span class="pill role ${pillClass}">${esc(img.kind)}</span>${ovStatusPills(s)}</div>
+        <div class="ov-os"><img src="${imageIconSrc(img)}" alt="">${esc(img.label)}<span class="ov-sep">·</span>${Number(s.cpuCount) || 0} vCPU · ${Number(s.memoryGB) || 0} GB</div>
+      </div>
+      <div class="ov-connect">
+        ${cmds.map(c => `<button class="btn${c.primary ? " primary" : ""}" type="button" ${c.rdp
+          ? `data-ov-rdp="${esc(s._id)}" title="Download ${esc(ovRdpFileName(s))}"`
+          : `data-ov-copy="${esc(c.cmd)}" title="Copy: ${esc(c.cmd)}"`}>
+          <img src="${c.primary ? iconSrcKnockout(c.icon) : iconSrc(c.icon)}" alt=""> ${c.label}</button>`).join("")}
+      </div>
+    </header>
+
+    <section class="ov-reach">
+      <div><div class="ov-label"><img src="${iconSrc("dns.svg")}" alt="">FQDN</div>
+        <div class="ov-val">${ovCopy(ovFqdn(s))}</div>
+        <div class="ov-sub">${domain ? (isAdDomainController(s) ? "domain controller for " + esc(domain) : dj ? "registered in DNS on domain join" : "fixed FQDN from General Settings") : isAdDomainController(s) ? "no suffix · set a fixed FQDN in General Settings" : "no domain · name resolves locally only"}</div></div>
+      <div><div class="ov-label"><img src="${iconSrc("static-ip.svg")}" alt="">IPv4</div>
+        ${ip
+          ? `<div class="ov-val ov-ip">${ovCopy(ip, `${esc(ip)}<span class="ov-pre">/${prefix}</span>`)}</div>
+             <div class="ov-sub">${esc(effectiveNicName(s, 0))} · ${net ? "from " + esc(networkName(net)) : "static"}</div>`
+          : `<div class="ov-val ov-dhcp">DHCP</div><div class="ov-sub">see Deploy after the first boot</div>`}</div>
+      <div><div class="ov-label"><img src="${iconSrc("gateway.svg")}" alt="">Gateway · DNS</div>
+        <div class="ov-val">${gw ? ovCopy(gw) : ovOff(ip ? "none" : "from DHCP")}</div>
+        <div class="ov-sub">dns ${dns.length ? esc(dns.join(", ")) : (ip ? "none" : "from DHCP")}</div></div>
+      <div><div class="ov-label"><img src="${iconSrc("users.svg")}" alt="">Sign in</div>
+        <div class="ov-val">${user ? ovCopy(user) : ovOff("not set")}</div>
+        <button class="btn ov-pw" type="button" data-ov-pw="${esc(s._id)}" title="Reveal or copy it on the Passwords blade">Password <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8h10.5M9 4l4 4-4 4"/></svg></button></div>
+    </section>
+
+    <section class="ov-details">
+      <div class="ov-sec"><div class="ov-sec-h"><img src="${iconSrc("vnet.svg")}" alt="">Network</div>
+        <dl class="ov-kv">${ovNicRows(effectiveNicName(s, 0), s.switchName, net, s.vlanId)}</dl>
+        ${(s.nics || []).map((nic, i) => {
+          const nicIp = String(nic.ipAddress || "").trim();
+          return `<dl class="ov-kv ov-nic2">
+            <dt>IPv4</dt><dd>${nicIp ? ovCopy(nicIp + "/" + (Number(nic.prefixLength) || 24)) : ovOff("DHCP")}</dd>
+            ${ovNicRows(effectiveNicName(s, i + 1), nic.switchName, findNicNetwork(nic), nic.vlanId)}</dl>`;
+        }).join("")}
+      </div>
+      <div class="ov-sec"><div class="ov-sec-h"><img src="${iconSrc("cpu.svg")}" alt="">Compute</div>
+        <dl class="ov-kv">
+          <dt>vCPU</dt><dd>${Number(s.cpuCount) || 0}</dd>
+          <dt>RAM</dt><dd>${Number(s.memoryGB) || 0} GB</dd>
+          <dt>Security</dt><dd><span class="ov-ticks">${ovTick(effectiveSecureBoot(s), "Secure Boot")}${ovTick(s.enableVtpm, "vTPM")}${ovTick(s.nestedVirtualization, "Nested")}</span></dd>
+          <dt>Host start</dt><dd class="txt">${esc(autoStartActionLabel(s))}</dd>
+          <dt>After create</dt><dd class="txt">${s.startAfterCreate ? `<span class="ov-yes">Starts</span>` : ovOff("stays off")}</dd>
+          <dt>Integration</dt><dd class="txt">${integOn.length ? esc(integOn.join(", ")) : ovOff("all disabled")}</dd>
+        </dl></div>
+      <div class="ov-sec"><div class="ov-sec-h"><img src="${iconSrc("storage.svg")}" alt="">Storage</div>
+        <dl class="ov-kv">
+          <dt>OS disk</dt><dd><div class="ov-disk">${ovCopy(effectiveOsDiskFileName(s))}<span class="ov-muted">${s.useDifferencingDisk ? "differencing on the gold" : "full copy"}${hasCustomOsDiskName(s) ? " · renamed" : ""}</span></div></dd>
+          <dt>Data disks</dt><dd>${disks.length ? disks.map((disk, i) => {
+            const fs = diskFileSystem(disk);
+            return `<div class="ov-disk"><span>${esc(dataDiskTag(s, i, disk))} ${Number(disk.sizeGB) || 0} GB ${disk.type === "Dynamic" ? "dynamic" : "fixed"}</span>
+              <span class="ov-muted">${fs === "None" ? "raw, not formatted" : `${esc(fs)} "${esc(effectiveDataDiskLabel(disk, i))}"`}</span></div>`;
+          }).join("") : ovOff("none")}</dd>
+          <dt>VHD Sets</dt><dd class="txt">${sets.length ? sets.map(v => `${Number(v.sizeGB) || 0} GB shared with ${esc((v.attachTo || []).filter(n => String(n).toLowerCase() !== String(s.name || "").toLowerCase()).join(", ") || "nobody")}`).join("<br>") : ovOff("none")}</dd>
+          <dt>VM path</dt><dd>${esc(serverUsesCustomPaths(s) && String(s.vmPath || "").trim() ? String(s.vmPath).trim() : (state.defaults.vmPath || "host default"))}</dd>
+          <dt>VHD path</dt><dd>${esc(serverUsesCustomPaths(s) && String(s.vhdPath || "").trim() ? String(s.vhdPath).trim() : (state.defaults.vhdPath || state.defaults.vmPath || "host default"))}</dd>
+        </dl></div>
+      <div class="ov-sec"><div class="ov-sec-h"><img src="${iconSrc("identity.svg")}" alt="">Identity &amp; management</div>
+        <dl class="ov-kv">
+          ${hyperVName !== s.name ? `<dt>PVE name</dt><dd>${ovCopy(hyperVName)}</dd>` : ""}
+          <dt>Domain</dt><dd class="txt">${dj ? `<code>${esc(dj.domain)}</code> <span class="ov-muted">as ${esc(dj.joinUser)}</span>` : (isAdDomainController(s) ? "Domain controller" : ovOff(linux ? "not joined" : "workgroup"))}</dd>
+          ${dj && s.domainJoin && s.domainJoin.ouPath ? `<dt>Target OU</dt><dd>${ovCopy(s.domainJoin.ouPath)}</dd>` : ""}
+          ${dj ? `<dt>Join timing</dt><dd class="txt">${linux ? "cloud-init at first boot" : effectiveDomainJoinMode(s) === "deferred" ? "After first boot (scheduled task)" : "During specialize (unattend)"}</dd>` : ""}
+          <dt>Azure Arc</dt><dd class="txt">${arc ? `${esc(arc.resourceGroup)} <span class="ov-muted">· ${esc(azureRegionLabel(arc.location))} · ${arc.authMode === "hostContext" ? "host context" : "service principal"}</span>` : ovOff("off")}</dd>
+          <dt>Cluster</dt><dd class="txt">${(state.defaults.cluster && state.defaults.cluster.enabled)
+            ? (clusterIncludesServer(s) ? "Added to " + esc(state.defaults.cluster.name || "the host's cluster") : ovOff("standalone"))
+            : ovOff("off")}</dd>
+          ${supportsAppCompatFod(s) ? `<dt>App Compat FOD</dt><dd class="txt">${s.appCompatFod ? "Yes" : ovOff("no")}</dd>` : ""}
+          ${supportsAppRemoval(s.imageId) ? `<dt>Built-in apps</dt><dd class="txt">${!s.removeBuiltInApps ? ovOff("kept")
+            : appRemovalCount(s) === APP_REMOVAL_CATALOG.length ? "All " + APP_REMOVAL_CATALOG.length + " removed" : appRemovalCount(s) + " of " + APP_REMOVAL_CATALOG.length + " removed"}</dd>` : ""}
+          ${s.imageSource === "custom" && s.imageHint ? `<dt>Image file</dt><dd>${esc(s.imageHint)}</dd>` : ""}
+        </dl></div>
+    </section>
+
+    <section class="ov-features"><span class="ov-flabel">${features.label}</span>${features.html}</section>
+  </article>`;
+}
+
+function renderVmOverview() {
+  const servers = state.servers;
+  const linux = servers.filter(isLinuxServer).length;
+  const statics = servers.filter(s => String(s.ipAddress || "").trim()).length;
+  const cpu = servers.reduce((n, s) => n + (Number(s.cpuCount) || 0), 0);
+  const mem = servers.reduce((n, s) => n + (Number(s.memoryGB) || 0), 0);
+  const domains = [...new Set(servers.map(namingSuffixForServer).filter(Boolean))];
+
+  return `
+    <div class="blade-toolbar">
+      <div class="page-title"><img src="${iconSrc("vm-overview.svg")}"> VM overview</div>
+      <div class="row">
+        <input class="ov-search" id="ovFilter" type="search" value="${esc(ovFilter)}" placeholder="Filter by name, IP, OS…"
+               spellcheck="false" autocomplete="off" aria-label="Filter virtual machines" style="background-image:url('${iconSrc("search.svg")}')">
+        <div class="ov-seg" role="group" aria-label="Card density">
+          <button class="btn${ovCompact ? "" : " on"}" type="button" data-ov-mode="full">Detailed</button><button class="btn${ovCompact ? " on" : ""}" type="button" data-ov-mode="compact">Compact</button>
+        </div>
+        <button class="btn primary" type="button" data-goto="export"><img src="${iconSrcOnAccent("export.svg")}"> Go to Export</button>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="pill">${servers.length} VM(s)</span>
+      ${servers.length - linux ? `<span class="pill"><img src="${iconSrcBand("vm.svg", "work")}" alt="">${servers.length - linux} Windows</span>` : ""}
+      ${linux ? `<span class="pill"><img src="${iconSrcBand("vm.svg", "linux")}" alt="">${linux} Linux</span>` : ""}
+      <span class="pill"><img src="${iconSrc("static-ip.svg")}" alt="">${statics} static · ${servers.length - statics} DHCP</span>
+      ${domains.map(d => `<span class="pill"><img src="${iconSrc("active-directory.svg")}" alt=""><code>${esc(d)}</code></span>`).join("")}
+      <span class="pill"><img src="${iconSrc("cpu.svg")}" alt="">${cpu} vCPU · ${mem} GB</span>
+    </div>
+    ${servers.length
+      ? `<div class="ov-list${ovCompact ? " compact" : ""}">${servers.map(renderOverviewCard).join("")}</div>
+         <p class="hint ov-nomatch" style="margin-top:14px"${servers.some(s => !ovFilter || ovSearchText(s).includes(ovFilter)) ? " hidden" : ""}>No VM matches the filter.</p>`
+      : `<div class="card"><p class="hint" style="margin:0">No virtual machines yet. Add one on the Virtual machines blade and it shows up here.</p></div>`}`;
+}
+
+/* Minimal JSON tokeniser for the export preview. Quotes must survive escaping for the
+   regex to find strings, so only &, < and > are escaped here. */
+function highlightJson(json) {
+  const safe = String(json).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return safe.replace(
+    /("(?:\\.|[^\\"])*"\s*:?)|\b(true|false)\b|\b(null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
+    (m, str, bool, nul, num) => {
+      if (str) return `<span class="${/:\s*$/.test(str) ? "jkey" : "jstr"}">${str}</span>`;
+      if (bool) return `<span class="jbool">${m}</span>`;
+      if (nul) return `<span class="jnull">${m}</span>`;
+      return `<span class="jnum">${m}</span>`;
+    });
+}
+
+function renderExport() {
+  const json = JSON.stringify(buildConfig(), null, 2);
+  return `
+    <div class="blade-toolbar">
+      <div class="page-title"><img src="${iconSrc("export.svg")}"> Export</div>
+      <div class="row">
+        <button class="btn" type="button" id="copyJson"><img src="${iconSrc("code.svg")}" alt=""> Copy JSON</button>
+        <button class="btn primary" type="button" onclick="downloadConfig()"><img src="${iconSrcOnAccent("export.svg")}"> Download config.json</button>
+      </div>
+    </div>
+    <div class="warn-box">Passwords sit in this file as plain JSON. Protect it, and delete it once the build has run.</div>
+    <div class="card json-card"><pre id="jsonPreview" tabindex="0">${highlightJson(json)}</pre></div>`;
+}
+
+/* Tabbing out of an edited field runs this sequence in Chrome:
+     1. blur      - activeElement becomes <body>
+     2. change    - our handlers run, still with activeElement == <body>
+     3. focus     - the browser moves focus to the next element
+   Re-rendering during step 2 destroys the element step 3 was about to focus, so focus is
+   left on <body> and the next Tab restarts from the top of the page. scheduleRender()
+   therefore defers the rebuild to the next task, after focus has landed; captureFocus()
+   then finds the real target and puts the caret back on its replacement. */
+
+let pendingRenderHandle = null;
+function scheduleRender() {
+  if (pendingRenderHandle !== null) return;
+  pendingRenderHandle = setTimeout(() => {
+    pendingRenderHandle = null;
+    render();
+  }, 0);
+}
+
+function focusSelectorFor(el) {
+  if (!el || !(el.tagName === "INPUT" || el.tagName === "SELECT" || el.tagName === "TEXTAREA")) return "";
+  if (el.id) return "#" + CSS.escape(el.id);
+  const parts = [el.tagName.toLowerCase()];
+  for (const attr of el.attributes) {
+    if (attr.name.startsWith("data-")) parts.push(`[${attr.name}="${CSS.escape(attr.value)}"]`);
+  }
+  return parts.length > 1 ? parts.join("") : "";
+}
+
+function captureFocus() {
+  const el = document.activeElement;
+  const selector = focusSelectorFor(el);
+  if (!selector) return null;
+  const snap = { selector };
+  try {
+    snap.start = el.selectionStart;
+    snap.end = el.selectionEnd;
+  } catch (err) { /* selection is not available on every input type */ }
+  return snap;
+}
+
+function restoreFocus(snap) {
+  if (!snap) return;
+  const el = document.querySelector(snap.selector);
+  if (!el) return;
+  el.focus();
+  if (snap.start != null) {
+    try { el.setSelectionRange(snap.start, snap.end); } catch (err) { /* not a text input */ }
+  }
+}
+
+function render() {
+  const focusSnapshot = captureFocus();
+  hideFloatingTip();
+  refreshValidation();
+  renderNav();
+  renderBlade();
+  restoreFocus(focusSnapshot);
+  /* PVE VM Studio: every render may follow a change - server.js saves the lab if so. */
+  if (typeof studioChanged === "function") studioChanged();
+}
+
+function renderBlade() {
+  const main = document.getElementById("main");
+  /* The blades that read the cluster render asynchronously (server.js). */
+  const blade = BLADES.find(b => b.id === state.blade);
+  if (blade && blade.server) { renderServerBlade(state.blade, main); return; }
+  if (state.blade === "overview") main.innerHTML = renderOverview();
+  else if (state.blade === "general") main.innerHTML = renderGeneral();
+  else if (state.blade === "networks") main.innerHTML = renderNetworksBlade();
+  else if (state.blade === "cluster") main.innerHTML = renderClusterBlade();
+  else if (state.blade === "domainjoin") main.innerHTML = renderDomainJoinBlade();
+  else if (state.blade === "azurearc") main.innerHTML = renderAzureArcBlade();
+  else if (state.blade === "servers") main.innerHTML = renderServers();
+  else if (state.blade === "vhdsets") main.innerHTML = renderVhdSets();
+  else if (state.blade === "review") main.innerHTML = renderReview();
+  else if (state.blade === "passwords") main.innerHTML = renderPasswords();
+  else if (state.blade === "vmoverview") main.innerHTML = renderVmOverview();
+  else main.innerHTML = renderOverview();
+}
+
+function addAvailableSwitchFromInput() {
+  const input = document.getElementById("newSwitchName");
+  const name = String((input && input.value) || "").trim();
+  if (!name) {
+    toast("Enter a vSwitch name", true);
+    if (input) input.focus();
+    return false;
+  }
+  const list = state.defaults.availableSwitches || (state.defaults.availableSwitches = []);
+  if (list.some(s => String(s).toLowerCase() === name.toLowerCase())) {
+    toast("vSwitch already in the list", true);
+    if (input) { input.focus(); input.select(); }
+    return false;
+  }
+  list.push(name);
+  // A VM or network created before any switch existed holds "" — the <select> then shows the
+  // first option without it ever being chosen. Adopt the new switch so state matches the UI.
+  let adopted = 0;
+  state.servers.forEach(srv => {
+    if (!String(srv.switchName || "").trim()) { srv.switchName = name; adopted++; }
+  });
+  (state.networks || []).forEach(n => {
+    if (!String(n.switchName || "").trim()) { n.switchName = name; adopted++; }
+  });
+  render();
+  toast(`vSwitch added · ${name}${adopted ? ` · assigned to ${adopted} item(s) that had none` : ""}`);
+  return true;
+}
+
+document.getElementById("nav").addEventListener("click", e => {
+  const btn = e.target.closest("[data-blade]");
+  if (!btn) return;
+  state.blade = btn.getAttribute("data-blade");
+  render();
+});
+
+document.addEventListener("mouseover", e => {
+  const tip = e.target.closest(".tip-warn, .tip-info");
+  if (!tip) return;
+  if (e.relatedTarget && tip.contains(e.relatedTarget)) return;
+  showFloatingTip(tip);
+});
+document.addEventListener("mouseout", e => {
+  const tip = e.target.closest(".tip-warn, .tip-info");
+  if (!tip) return;
+  if (e.relatedTarget && tip.contains(e.relatedTarget)) return;
+  hideFloatingTip();
+});
+document.addEventListener("focusin", e => {
+  const tip = e.target.closest(".tip-warn, .tip-info");
+  if (tip) showFloatingTip(tip);
+});
+document.addEventListener("focusout", e => {
+  const tip = e.target.closest(".tip-warn, .tip-info");
+  if (tip) hideFloatingTip();
+});
+document.getElementById("main").addEventListener("scroll", hideFloatingTip);
+window.addEventListener("resize", hideFloatingTip);
+
+/* Pressing the checkmark while its input still has focus used to need two presses: the
+   mousedown blurred the input, the change handler's scheduleRender() rebuilt the DOM
+   before the click event fired, and the click landed on a button that no longer existed.
+   Keeping focus in the input means no blur, no premature rebuild — the click goes through
+   and the toggle's own render() takes over. Values are safe because every input paired
+   with a pencil commits on the input event, not on change. */
+document.getElementById("main").addEventListener("mousedown", e => {
+  if (e.target.closest("[data-name-edit], [data-name-reset]")) e.preventDefault();
+});
+
+document.getElementById("main").addEventListener("click", e => {
+  const goto = e.target.closest("[data-goto]");
+  if (goto) {
+    state.blade = goto.getAttribute("data-goto");
+    document.getElementById("main").scrollTop = 0;
+    render();
+    return;
+  }
+
+  // Group chips: the + button takes what is in the box beside it, the x drops one.
+  const grpAdd = e.target.closest("[data-grp-add]");
+  if (grpAdd) {
+    const key = grpAdd.getAttribute("data-grp-add");
+    const input = document.querySelector(`[data-grp-input="${CSS.escape(key)}"]`);
+    if (input) {
+      const added = addGroupChip(key, input.value);
+      // Cleared either way: a duplicate is not an error worth leaving the box dirty for.
+      input.value = "";
+      if (added) { render(); }
+      const back = document.querySelector(`[data-grp-input="${CSS.escape(key)}"]`);
+      if (back) back.focus();
+    }
+    return;
+  }
+  const grpDel = e.target.closest("[data-grp-del]");
+  if (grpDel) {
+    const target = groupChipTarget(grpDel.getAttribute("data-grp-del"));
+    const index = Number(grpDel.getAttribute("data-grp-i"));
+    if (target) {
+      const list = Array.isArray(target.owner[target.field]) ? target.owner[target.field].slice() : [];
+      if (index >= 0 && index < list.length) { list.splice(index, 1); target.owner[target.field] = list; render(); }
+    }
+    return;
+  }
+
+  // Disk file-name cell: pencil unlocks the input, revert drops the custom name.
+  const nameEdit = e.target.closest("[data-name-edit]");
+  if (nameEdit) {
+    const key = nameEdit.getAttribute("data-name-edit");
+    state.nameEdit[key] = !state.nameEdit[key];
+    render();
+    if (state.nameEdit[key]) {
+      const input = document.querySelector(`[data-name-input="${CSS.escape(key)}"]`);
+      if (input) { input.focus(); input.select(); }
+    }
+    return;
+  }
+  const nameReset = e.target.closest("[data-name-reset]");
+  if (nameReset) {
+    const key = nameReset.getAttribute("data-name-reset");
+    const parts = key.split(":");
+    if (parts[0] === "os") {
+      const s = state.servers.find(x => x._id === parts[1]);
+      if (s) s.osDiskFileName = "";
+    } else if (parts[0] === "dd") {
+      const s = state.servers.find(x => x._id === parts[1]);
+      const d = s && (s.additionalDisks || [])[Number(parts[2])];
+      if (d) d.fileName = "";
+    } else if (parts[0] === "vs") {
+      const v = state.vhdSets.find(x => x._id === parts[1]);
+      if (v) v.name = "";
+    } else if (parts[0] === "nic") {
+      const s = state.servers.find(x => x._id === parts[1]);
+      const idx = Number(parts[2]);
+      if (s && idx === 0) s.nicName = "";
+      else if (s && (s.nics || [])[idx - 1]) s.nics[idx - 1].name = "";
+    }
+    delete state.nameEdit[key];
+    render();
+    toast(parts[0] === "nic" ? "Adapter name back to the default" : "File name back to the generated one");
+    return;
+  }
+  if (e.target.id === "addServer" || e.target.closest("#addServer")) {
+    const s = createServer("");
+    state.servers.push(s);
+    state.expanded[s._id] = true;
+    render();
+    toast(`VM added · local password generated (${passwordLength()} chars)`);
+    return;
+  }
+  if (e.target.id === "importServers" || e.target.closest("#importServers")) {
+    openVmImportModal();
+    return;
+  }
+  const genPwd = e.target.closest("[data-gen-pwd]");
+  if (genPwd) {
+    e.stopPropagation();
+    const sid = genPwd.getAttribute("data-gen-pwd");
+    const s = state.servers.find(x => x._id === sid);
+    if (s) {
+      s.localUserPassword = generateLocalPassword(passwordLength());
+      render();
+      toast(`Password generated (${passwordLength()} chars)`);
+    }
+    return;
+  }
+  const pkgAdd = e.target.closest("[data-pkg-add]");
+  if (pkgAdd) {
+    e.stopPropagation();
+    const s = state.servers.find(x => x._id === pkgAdd.getAttribute("data-pkg-add"));
+    if (s) {
+      s.linuxPackages = linuxPackageRows(s);
+      s.linuxPackages.push("");
+      render();
+    }
+    return;
+  }
+  const pkgDel = e.target.closest("[data-pkg-del]");
+  if (pkgDel) {
+    e.stopPropagation();
+    const s = state.servers.find(x => x._id === pkgDel.getAttribute("data-pkg-del"));
+    if (s) {
+      const idx = Number(pkgDel.getAttribute("data-pkg-del-i"));
+      s.linuxPackages = linuxPackageRows(s).filter((_, i) => i !== idx);
+      if (!s.linuxPackages.length) s.linuxPackages = [""];
+      render();
+    }
+    return;
+  }
+  /* Generation is asynchronous - WebCrypto is - so this hands the work off and the
+     click returns. Nothing else on the card changes while it runs. */
+  const genSsh = e.target.closest("[data-gen-ssh]");
+  if (genSsh) {
+    e.stopPropagation();
+    const scope = genSsh.getAttribute("data-gen-ssh");
+    const target = state.servers.find(x => x._id === scope);
+    if (!target) return;
+    generateSshKeyPair(sshKeyComment(target)).then(pair => {
+      sshPrivateKeys[scope] = pair.privateKey;
+      delete sshKeysDownloaded[scope];
+      target.sshAuthorizedKey = pair.publicKey;
+      render();
+      toast("Ed25519 key pair generated - download the private key");
+    }).catch(err => toast(err.message || "Key generation failed", true));
+    return;
+  }
+  const dlSsh = e.target.closest("[data-dl-ssh]");
+  if (dlSsh) {
+    e.stopPropagation();
+    const scope = dlSsh.getAttribute("data-dl-ssh");
+    const key = sshPrivateKeys[scope];
+    if (!key) { toast("Generate a key pair first", true); return; }
+    const target = state.servers.find(x => x._id === scope);
+    if (!target) return;
+    const name = sshKeyFileName(target);
+    // octet-stream, not text/plain: the name has no extension, and a browser
+    // handed text/plain saves it as <name>.txt - a key file ssh -i then cannot find.
+    downloadTextFile(name, key, "application/octet-stream");
+    sshKeysDownloaded[scope] = true;
+    render();
+    toast(name + " downloaded - chmod 600 it");
+    return;
+  }
+  const genUser = e.target.closest("[data-gen-user]");
+  if (genUser) {
+    e.stopPropagation();
+    const sid = genUser.getAttribute("data-gen-user");
+    const s = state.servers.find(x => x._id === sid);
+    if (s) {
+      s.localUserName = generateLocalUsername(state.usernameTheme);
+      render();
+      toast("Username generated · " + (USERNAME_THEMES[state.usernameTheme] || {}).label);
+    }
+    return;
+  }
+  const psBtn = e.target.closest("[data-ps-kind]");
+  if (psBtn) {
+    e.stopPropagation();
+    openObjectPsModal(psBtn.getAttribute("data-ps-kind"), psBtn.getAttribute("data-ps-ref"));
+    return;
+  }
+  const openPicker = e.target.closest("[data-open-vm-picker]");
+  if (openPicker) {
+    e.stopPropagation();
+    openMemberPicker("vhdSet", openPicker.getAttribute("data-open-vm-picker"));
+    return;
+  }
+  const openClusterPicker = e.target.closest("[data-open-cluster-picker]");
+  if (openClusterPicker) {
+    e.stopPropagation();
+    openMemberPicker("cluster", "cluster");
+    return;
+  }
+  const openDjPicker = e.target.closest("[data-open-dj-picker]");
+  if (openDjPicker) {
+    e.stopPropagation();
+    openMemberPicker("domainJoin", openDjPicker.getAttribute("data-open-dj-picker"));
+    return;
+  }
+  const openArcPicker = e.target.closest("[data-open-arc-picker]");
+  if (openArcPicker) {
+    e.stopPropagation();
+    openMemberPicker("azureArc", openArcPicker.getAttribute("data-open-arc-picker"));
+    return;
+  }
+  const openNetPicker = e.target.closest("[data-open-net-picker]");
+  if (openNetPicker) {
+    e.stopPropagation();
+    openMemberPicker("network", openNetPicker.getAttribute("data-open-net-picker"));
+    return;
+  }
+  const clusterDetach = e.target.closest("[data-cluster-detach]");
+  if (clusterDetach) {
+    const s = state.servers.find(x => x._id === clusterDetach.getAttribute("data-cluster-detach"));
+    if (s) {
+      s.cluster = { enabled: false };
+      render();
+      toast(`${serverDisplayName(s)} removed from the cluster`);
+    }
+    return;
+  }
+  const djDetach = e.target.closest("[data-dj-detach]");
+  if (djDetach) {
+    const s = state.servers.find(x => x._id === djDetach.getAttribute("data-dj-detach"));
+    if (s) {
+      s.domainJoin = { enabled: false, accountId: "", ouPath: "", mode: null };
+      render();
+      toast(`${serverDisplayName(s)} detached`);
+    }
+    return;
+  }
+  const netDetach = e.target.closest("[data-net-detach]");
+  if (netDetach) {
+    const s = state.servers.find(x => x._id === netDetach.getAttribute("data-net-detach"));
+    if (s) {
+      detachNetworkFromServer(s);
+      render();
+      toast(`${serverDisplayName(s)} detached`);
+    }
+    return;
+  }
+  const vsDetach = e.target.closest("[data-vs-detach]");
+  if (vsDetach) {
+    const set = state.vhdSets.find(x => x._id === vsDetach.getAttribute("data-vs-detach"));
+    const member = vsDetach.getAttribute("data-vs-member");
+    if (set) {
+      set.attachTo = (set.attachTo || []).filter(n => String(n).toLowerCase() !== String(member).toLowerCase());
+      render();
+      toast(`${member} detached`);
+    }
+    return;
+  }
+  const regionField = e.target.closest("[data-arc-region-filter]");
+  if (regionField) {
+    const pid = regionField.getAttribute("data-arc-region-filter");
+    if (!(state.regionPickerOpen && state.regionPickerPrincipalId === pid)) {
+      state.regionPickerOpen = true;
+      state.regionPickerPrincipalId = pid;
+      state.regionFilter = "";
+      render();
+      const el = document.querySelector(`[data-arc-region-filter="${pid}"]`);
+      if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+    }
+    return;
+  }
+  const arcDetach = e.target.closest("[data-arc-detach]");
+  if (arcDetach) {
+    const s = state.servers.find(x => x._id === arcDetach.getAttribute("data-arc-detach"));
+    if (s) {
+      s.azureArc = { enabled: false, principalId: "" };
+      render();
+      toast(`${serverDisplayName(s)} detached`);
+    }
+    return;
+  }
+  const gotoVm = e.target.closest("[data-goto-vm]");
+  if (gotoVm) {
+    e.preventDefault();
+    e.stopPropagation();
+    const sid = gotoVm.getAttribute("data-goto-vm");
+    state.blade = "servers";
+    state.expanded[sid] = true;
+    render();
+    setTimeout(() => {
+      const el = document.querySelector(`[data-sid="${sid}"]`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 30);
+    return;
+  }
+  const imagePickerToggle = e.target.closest("[data-image-picker-toggle]");
+  if (imagePickerToggle) {
+    e.preventDefault();
+    e.stopPropagation();
+    const sid = imagePickerToggle.getAttribute("data-image-picker-toggle");
+    state.imagePickerOpen = state.imagePickerOpen === sid ? null : sid;
+    render();
+    return;
+  }
+  const templatePickerToggle = e.target.closest("[data-template-picker-toggle]");
+  if (templatePickerToggle) {
+    e.preventDefault();
+    e.stopPropagation();
+    const sid = templatePickerToggle.getAttribute("data-template-picker-toggle");
+    state.templatePickerOpen = state.templatePickerOpen === sid ? null : sid;
+    state.imagePickerOpen = null;
+    render();
+    return;
+  }
+  const templateRelease = e.target.closest("[data-template-release]");
+  if (templateRelease) {
+    e.preventDefault();
+    e.stopPropagation();
+    state.templateRelease = Number(templateRelease.getAttribute("data-template-release"));
+    render();
+    return;
+  }
+  const templateEdition = e.target.closest("[data-template-edition]");
+  if (templateEdition) {
+    e.preventDefault();
+    e.stopPropagation();
+    state.templateEdition = templateEdition.getAttribute("data-template-edition");
+    render();
+    return;
+  }
+  const templatePick = e.target.closest("[data-template-pick]");
+  if (templatePick) {
+    e.preventDefault();
+    e.stopPropagation();
+    const sid = templatePick.getAttribute("data-template-pick");
+    const tid = templatePick.getAttribute("data-template-id") || "";
+    const s = state.servers.find(x => x._id === sid);
+    state.templatePickerOpen = null;
+    if (!s) { render(); return; }
+    if (!tid) {
+      // Clearing the pick only forgets where the VM started; nothing it applied is undone.
+      s.templateId = "";
+      render();
+      return;
+    }
+    if (applyVmTemplate(s, tid)) {
+      state.imagePickerOpen = null;
+      render();
+      toast(`${VM_TEMPLATES[tid].label} applied to ${s.name || "the VM"}`);
+    } else {
+      render();
+    }
+    return;
+  }
+  const imagePick = e.target.closest("[data-image-pick]");
+  if (imagePick) {
+    e.preventDefault();
+    e.stopPropagation();
+    const sid = imagePick.getAttribute("data-image-pick");
+    const imageId = imagePick.getAttribute("data-image-id");
+    const s = state.servers.find(x => x._id === sid);
+    if (s && imageId) {
+      if (imageId === "__custom__") {
+        s.imageSource = "custom";
+        s.imageHint = s.imageHint || "";
+      } else {
+        s.imageSource = "catalog";
+        s.imageHint = "";
+        applyImageProfile(s, imageId);
+        sanitizeServerFeaturesForImage(s);
+      }
+      state.imagePickerOpen = null;
+      render();
+    }
+    return;
+  }
+  if (e.target.id === "addSwitch" || e.target.closest("#addSwitch")) {
+    addAvailableSwitchFromInput();
+    return;
+  }
+  if (e.target.id === "addVhdSet" || e.target.closest("#addVhdSet")) {
+    const v = createVhdSet();
+    state.vhdSets.push(v);
+    state.expanded[v._id] = true;
+    render();
+    return;
+  }
+  if (e.target.id === "addDomainJoinAccount" || e.target.closest("#addDomainJoinAccount")) {
+    const a = createDomainJoinAccount({});
+    ensureCatalogStableId(a, "dja");
+    state.domainJoinAccounts.push(a);
+    state.expanded[a._id] = true;
+    render();
+    return;
+  }
+  if (e.target.id === "addAzureArcPrincipal" || e.target.closest("#addAzureArcPrincipal")) {
+    const a = createAzureArcPrincipal({});
+    ensureCatalogStableId(a, "arc");
+    state.azureArcPrincipals.push(a);
+    state.expanded[a._id] = true;
+    render();
+    return;
+  }
+  if (e.target.id === "addNetwork" || e.target.closest("#addNetwork")) {
+    const n = createNetwork({ switchName: state.defaults.availableSwitches[0] || "" });
+    ensureCatalogStableId(n, "net");
+    state.networks.push(n);
+    state.expanded[n._id] = true;
+    render();
+    return;
+  }
+  const swDel = e.target.closest("[data-sw-del]");
+  if (swDel) {
+    e.preventDefault();
+    e.stopPropagation();
+    const i = Number(swDel.getAttribute("data-sw-del"));
+    const list = state.defaults.availableSwitches || [];
+    const removed = list[i];
+    list.splice(i, 1);
+    const fallback = list[0] || "";
+    state.servers.forEach(s => {
+      if (s.switchName === removed) s.switchName = fallback;
+    });
+    state.networks.forEach(n => {
+      if (n.switchName === removed) {
+        n.switchName = fallback;
+        syncNetworkToAttachedServers(n);
+      }
+    });
+    render();
+    toast(removed ? ("vSwitch removed · " + removed) : "vSwitch removed");
+    return;
+  }
+  const del = e.target.closest("button[data-del]");
+  if (del) {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = del.getAttribute("data-del");
+    state.servers = state.servers.filter(s => s._id !== id);
+    delete state.expanded[id];
+    render();
+    toast("Virtual machine removed");
+    return;
+  }
+  const delVs = e.target.closest("[data-del-vs]");
+  if (delVs) {
+    e.stopPropagation();
+    state.vhdSets = state.vhdSets.filter(v => v._id !== delVs.getAttribute("data-del-vs"));
+    render();
+    return;
+  }
+  const addSpvol = e.target.closest("[data-add-spvol]");
+  if (addSpvol) {
+    e.stopPropagation();
+    storagePlacement().volumes.push({ vmPath: "", vhdPath: "" });
+    render();
+    return;
+  }
+  const delSpvol = e.target.closest("[data-del-spvol]");
+  if (delSpvol) {
+    e.stopPropagation();
+    storagePlacement().volumes.splice(Number(delSpvol.getAttribute("data-del-spvol")), 1);
+    render();
+    return;
+  }
+  const delDja = e.target.closest("[data-del-dja]");
+  if (delDja) {
+    e.stopPropagation();
+    const id = delDja.getAttribute("data-del-dja");
+    const acc = state.domainJoinAccounts.find(a => a._id === id);
+    state.domainJoinAccounts = state.domainJoinAccounts.filter(a => a._id !== id);
+    if (acc) {
+      state.servers.forEach(s => {
+        if (s.domainJoin && s.domainJoin.accountId === acc.id) {
+          s.domainJoin = { enabled: false, accountId: "", ouPath: "", mode: null };
+        }
+      });
+    }
+    render();
+    return;
+  }
+  const delArc = e.target.closest("[data-del-arc]");
+  if (delArc) {
+    e.stopPropagation();
+    const id = delArc.getAttribute("data-del-arc");
+    const acc = state.azureArcPrincipals.find(a => a._id === id);
+    state.azureArcPrincipals = state.azureArcPrincipals.filter(a => a._id !== id);
+    if (acc) {
+      state.servers.forEach(s => {
+        if (s.azureArc && s.azureArc.principalId === acc.id) {
+          s.azureArc = { enabled: false, principalId: "" };
+        }
+      });
+    }
+    render();
+    return;
+  }
+  const delNet = e.target.closest("[data-del-net]");
+  if (delNet) {
+    e.stopPropagation();
+    const id = delNet.getAttribute("data-del-net");
+    const net = state.networks.find(n => n._id === id);
+    state.networks = state.networks.filter(n => n._id !== id);
+    if (net) {
+      state.servers.forEach(s => {
+        if (s.network && s.network.networkId === net.id) detachNetworkFromServer(s);
+      });
+    }
+    render();
+    toast("Network removed");
+    return;
+  }
+  const dnsAdd = e.target.closest("[data-dns-add]");
+  if (dnsAdd) {
+    const n = state.networks.find(x => x._id === dnsAdd.getAttribute("data-dns-add"));
+    if (n) {
+      n.dnsServers = n.dnsServers || [];
+      n.dnsServers.push("");
+      render();
+    }
+    return;
+  }
+  const dnsDel = e.target.closest("[data-dns-del]");
+  if (dnsDel) {
+    const n = state.networks.find(x => x._id === dnsDel.getAttribute("data-dns-del"));
+    if (n) {
+      const idx = Number(dnsDel.getAttribute("data-dns-del-i"));
+      n.dnsServers = (n.dnsServers || []).filter((_, i) => i !== idx);
+      if (!n.dnsServers.length) n.dnsServers = [""];
+      syncNetworkToAttachedServers(n);
+      render();
+    }
+    return;
+  }
+  const vmDnsAdd = e.target.closest("[data-vm-dns-add]");
+  if (vmDnsAdd) {
+    const s = state.servers.find(x => x._id === vmDnsAdd.getAttribute("data-vm-dns-add"));
+    if (s) {
+      s.dnsServers = s.dnsServers || [];
+      s.dnsServers.push("");
+      render();
+    }
+    return;
+  }
+  const vmDnsDel = e.target.closest("[data-vm-dns-del]");
+  if (vmDnsDel) {
+    const s = state.servers.find(x => x._id === vmDnsDel.getAttribute("data-vm-dns-del"));
+    if (s) {
+      const idx = Number(vmDnsDel.getAttribute("data-vm-dns-del-i"));
+      s.dnsServers = (s.dnsServers || []).filter((_, i) => i !== idx);
+      if (!s.dnsServers.length) s.dnsServers = [""];
+      render();
+    }
+    return;
+  }
+  const addNic = e.target.closest("[data-add-nic]");
+  if (addNic) {
+    const s = state.servers.find(x => x._id === addNic.getAttribute("data-add-nic"));
+    if (s) {
+      s.nics = s.nics || [];
+      s.nics.push(createServerNic(s));
+      state.nestedOpen[s._id + "-nics"] = true;
+      render();
+    }
+    return;
+  }
+  const delNic = e.target.closest("[data-del-nic]");
+  if (delNic) {
+    const s = state.servers.find(x => x._id === delNic.getAttribute("data-del-nic"));
+    if (s) {
+      const idx = Number(delNic.getAttribute("data-del-nic-i"));
+      s.nics = (s.nics || []).filter((_, i) => i !== idx);
+      render();
+    }
+    return;
+  }
+  const addDisk = e.target.closest("[data-add-disk]");
+  if (addDisk) {
+    const s = state.servers.find(x => x._id === addDisk.getAttribute("data-add-disk"));
+    if (s) {
+      s.additionalDisks = s.additionalDisks || [];
+      const n = s.additionalDisks.length;
+      const letter = dataDiskLetter(n);
+      s.additionalDisks.push({ letter, name: letter, sizeGB: 100, type: "Fixed", fileSystem: "NTFS", label: "", path: "" });
+      render();
+    }
+    return;
+  }
+
+  const arcRegion = e.target.closest("[data-arc-region]");
+  if (arcRegion) {
+    const pid = arcRegion.getAttribute("data-arc-region-for");
+    const p = state.azureArcPrincipals.find(x => x._id === pid);
+    if (p) p.location = arcRegion.getAttribute("data-arc-region");
+    state.regionPickerOpen = false;
+    state.regionPickerPrincipalId = null;
+    state.regionFilter = "";
+    render();
+    return;
+  }
+
+  const roleToggle = e.target.closest("[data-role-toggle]");
+  if (roleToggle && !e.target.closest(".role-child") && !e.target.closest(".tip-warn") && !e.target.closest(".tip-info") && !e.target.closest(".warn-banner") && !e.target.closest(".role-preset")) {
+    e.stopPropagation();
+    const s = state.servers.find(x => x._id === roleToggle.getAttribute("data-role-toggle"));
+    const roleId = roleToggle.getAttribute("data-role");
+    const role = findRoleTreeDef(roleId);
+    if (s && role) {
+      s.windowsFeatures = s.windowsFeatures || [];
+      const on = !roleParentSelected(s.windowsFeatures, role);
+      // Only offer role services this image ships — Core lacks a good number of them.
+      const kids = availableRoleChildren(role, findImage(s.imageId));
+      if (kids.length) {
+        if (on) {
+          // Server Manager parity: ticking a role installs that role with its default
+          // role services, and that is exactly what the role's own feature id does.
+          //
+          // Most groups here are empty containers whose whole payload sits in the
+          // children, so the group id is dropped and the default children carry the
+          // install. A `selfPayload` group is the exception - its own id installs
+          // something the children do not: Web-Server brings the default IIS role
+          // services, RSAT-RDS-Tools carries the RemoteDesktop PowerShell module while
+          // its three children are only consoles. Those groups keep their id, listed
+          // first, because the features are installed in order and a group that arrives
+          // as a dependency of a child arrives stripped down.
+          const defaults = kids.filter(c => c.defaultOn);
+          if (role.selfPayload) {
+            s.windowsFeatures = toggleFeatureId(s.windowsFeatures, role.id, true);
+            defaults.forEach(c => { s.windowsFeatures = toggleFeatureId(s.windowsFeatures, c.id, true); });
+          } else if (defaults.length) {
+            defaults.forEach(c => { s.windowsFeatures = toggleFeatureId(s.windowsFeatures, c.id, true); });
+            s.windowsFeatures = toggleFeatureId(s.windowsFeatures, role.id, false);
+          } else {
+            // Nothing is default on this image - Remote Access ships no default role
+            // service at all, and Server Core hides the ones that are default elsewhere.
+            // Server Manager installs the bare role in that case, so emit the role id
+            // rather than guessing at a role service nobody ticked.
+            s.windowsFeatures = toggleFeatureId(s.windowsFeatures, role.id, true);
+          }
+        } else {
+          role.children.forEach(c => { s.windowsFeatures = toggleFeatureId(s.windowsFeatures, c.id, false); });
+          s.windowsFeatures = toggleFeatureId(s.windowsFeatures, role.id, false);
+        }
+      } else {
+        s.windowsFeatures = toggleFeatureId(s.windowsFeatures, role.id, on);
+      }
+      render();
+    }
+    return;
+  }
+
+  const appCompatToggle = e.target.closest("[data-appcompat-toggle]");
+  if (appCompatToggle && !e.target.closest(".tip-warn") && !e.target.closest(".tip-info") && !e.target.closest(".warn-banner")) {
+    e.stopPropagation();
+    const s = state.servers.find(x => x._id === appCompatToggle.getAttribute("data-appcompat-toggle"));
+    if (s && supportsAppCompatFod(s)) {
+      s.appCompatFod = !s.appCompatFod;
+      render();
+    }
+    return;
+  }
+
+  const rsatToggle = e.target.closest("[data-rsat-toggle]");
+  if (rsatToggle && !e.target.closest(".tip-warn") && !e.target.closest(".tip-info") && !e.target.closest(".warn-banner")) {
+    const s = state.servers.find(x => x._id === rsatToggle.getAttribute("data-rsat-toggle"));
+    const cap = rsatToggle.getAttribute("data-cap");
+    if (s && cap) {
+      s.rsatCapabilities = s.rsatCapabilities || [];
+      const on = !hasFeature(s.rsatCapabilities, cap);
+      s.rsatCapabilities = toggleFeatureId(s.rsatCapabilities, cap, on);
+      render();
+    }
+    return;
+  }
+
+
+  const clientFeatToggle = e.target.closest("[data-clientfeat-toggle]");
+  if (clientFeatToggle && !e.target.closest(".tip-warn") && !e.target.closest(".tip-info") && !e.target.closest(".warn-banner")) {
+    const s = state.servers.find(x => x._id === clientFeatToggle.getAttribute("data-clientfeat-toggle"));
+    const feat = clientFeatToggle.getAttribute("data-clientfeat");
+    if (s && feat) {
+      s.clientFeatures = s.clientFeatures || [];
+      const on = !hasFeature(s.clientFeatures, feat);
+      s.clientFeatures = toggleFeatureId(s.clientFeatures, feat, on);
+      render();
+    }
+    return;
+  }
+
+  const featChip = e.target.closest(".role-row[data-feat-toggle], .role-child[data-feat-toggle]");
+  if (featChip && !e.target.closest(".toggle") && !e.target.closest(".tip-warn") && !e.target.closest(".tip-info") && !e.target.closest(".warn-banner")) {
+    e.stopPropagation();
+    const s = state.servers.find(x => x._id === featChip.getAttribute("data-feat-toggle"));
+    const feat = featChip.getAttribute("data-feat");
+    if (s && feat) {
+      s.windowsFeatures = s.windowsFeatures || [];
+      const on = !hasFeature(s.windowsFeatures, feat);
+      s.windowsFeatures = toggleFeatureId(s.windowsFeatures, feat, on);
+      // Ticking a role service of a selfPayload group has to bring the group with it,
+      // ahead of the child: install ASP.NET on its own and IIS turns up as its
+      // dependency, without the static file handler this endpoint is there to serve.
+      if (on) {
+        const owner = findSelfPayloadParent(feat);
+        if (owner && !hasFeature(s.windowsFeatures, owner.id)) {
+          s.windowsFeatures = [owner.id, ...s.windowsFeatures];
+        }
+      }
+      render();
+    }
+    return;
+  }
+
+  const rolePreset = e.target.closest("[data-role-preset]");
+  if (rolePreset) {
+    const s = state.servers.find(x => x._id === rolePreset.getAttribute("data-role-preset"));
+    const preset = ROLE_PRESETS[rolePreset.getAttribute("data-preset")];
+    if (s && preset) {
+      const img = findImage(s.imageId);
+      const blocked = rolePresetBlockReason(preset, img);
+      if (blocked) { toast(blocked); return; }
+      s.windowsFeatures = s.windowsFeatures || [];
+      const usable = preset.features.filter(id => featureIdAvailableOnImage(id, img));
+      // An inline preset is a toggle, so turning it off takes back exactly what it put on -
+      // including the parts this image could not install, which are absent either way.
+      if (preset.inline && rolePresetApplied(preset, s.windowsFeatures, img)) {
+        preset.features.forEach(id => { s.windowsFeatures = toggleFeatureId(s.windowsFeatures, id, false); });
+        render();
+        toast(`Removed: ${preset.label}`);
+        return;
+      }
+      const dropped = preset.features.length - usable.length;
+      s.windowsFeatures = [...new Set([...s.windowsFeatures, ...usable])];
+      render();
+      toast(`Preset applied: ${preset.label}${dropped ? ` (${dropped} not on Server Core)` : ""}`);
+    }
+    return;
+  }
+  const rsatPreset = e.target.closest("[data-rsat-preset]");
+  if (rsatPreset) {
+    const s = state.servers.find(x => x._id === rsatPreset.getAttribute("data-rsat-preset"));
+    const preset = RSAT_PRESETS[rsatPreset.getAttribute("data-preset")];
+    if (s && preset) {
+      s.rsatCapabilities = [...new Set([...(s.rsatCapabilities || []), ...preset.capabilities])];
+      s.clientFeatures = [...new Set([...(s.clientFeatures || []), ...(preset.clientFeatures || [])])];
+      render();
+      toast("Preset applied: " + preset.label);
+    }
+    return;
+  }
+  const rsatClear = e.target.closest("[data-rsat-clear]");
+  if (rsatClear) {
+    const s = state.servers.find(x => x._id === rsatClear.getAttribute("data-rsat-clear"));
+    if (s) { s.rsatCapabilities = []; s.clientFeatures = []; render(); }
+    return;
+  }
+  const delDisk = e.target.closest("[data-del-disk]");
+  if (delDisk) {
+    const s = state.servers.find(x => x._id === delDisk.getAttribute("data-del-disk"));
+    const i = Number(delDisk.getAttribute("data-del-i"));
+    if (s && s.additionalDisks) {
+      s.additionalDisks.splice(i, 1);
+      render();
+    }
+    return;
+  }
+  const toggle = e.target.closest("[data-toggle]");
+  if (toggle && !e.target.closest("[data-del]") && !e.target.closest("[data-del-vs]")) {
+    const id = toggle.getAttribute("data-toggle");
+    // Flip what is actually on screen, not state.expanded[id] — a card that opens by
+    // default has no entry yet, and !undefined would re-open it on the first click.
+    const cardEl = toggle.closest(".card.collapsible");
+    const currentlyOpen = cardEl ? !cardEl.classList.contains("collapsed") : !!state.expanded[id];
+    state.expanded[id] = !currentlyOpen;
+    render();
+    return;
+  }
+  const nested = e.target.closest("[data-nested]");
+  if (nested) {
+    const key = nested.getAttribute("data-nested");
+    const sectionEl = nested.closest(".section.collapsible");
+    const currentlyOpen = sectionEl ? !sectionEl.classList.contains("collapsed") : isNestedOpen(key, false);
+    state.nestedOpen[key] = !currentlyOpen;
+    state.imagePickerOpen = null;
+    state.templatePickerOpen = null;
+    render();
+    return;
+  }
+  const pwToggle = e.target.closest("[data-pw-toggle]");
+  if (pwToggle) {
+    const key = pwToggle.getAttribute("data-pw-toggle");
+    passwordsVisible[key] = !passwordsVisible[key];
+    render();
+    return;
+  }
+  const userCopy = e.target.closest("[data-user-copy]");
+  if (userCopy) {
+    const input = document.getElementById("pwuser-" + userCopy.getAttribute("data-user-copy"));
+    if (input && input.value) navigator.clipboard.writeText(input.value).then(() => toast("User name copied"));
+    return;
+  }
+  const sshPubCopy = e.target.closest("[data-sshpub-copy]");
+  if (sshPubCopy) {
+    const input = document.getElementById("sshpub-" + sshPubCopy.getAttribute("data-sshpub-copy"));
+    if (input && input.value) navigator.clipboard.writeText(input.value).then(() => toast("Public key copied"));
+    return;
+  }
+  const pwCopy = e.target.closest("[data-pw-copy]");
+  if (pwCopy) {
+    // Straight off the input, so a masked row copies just as well as a revealed one.
+    const input = document.getElementById("pw-" + pwCopy.getAttribute("data-pw-copy"));
+    if (input && input.value) navigator.clipboard.writeText(input.value).then(() => toast("Password copied"));
+    return;
+  }
+  const ovCopyEl = e.target.closest("[data-ov-copy]");
+  if (ovCopyEl) {
+    const text = ovCopyEl.getAttribute("data-ov-copy");
+    navigator.clipboard.writeText(text).then(() => {
+      ovCopyEl.classList.add("copied");
+      setTimeout(() => ovCopyEl.classList.remove("copied"), 900);
+      toast("Copied " + (text.length > 60 ? text.slice(0, 57) + "..." : text));
+    });
+    return;
+  }
+  const ovRdp = e.target.closest("[data-ov-rdp]");
+  if (ovRdp) {
+    const s = state.servers.find(x => x._id === ovRdp.getAttribute("data-ov-rdp"));
+    if (!s) return;
+    downloadTextFile(ovRdpFileName(s), ovRdpFile(s), "application/x-rdp");
+    toast(ovRdpFileName(s) + " downloaded");
+    return;
+  }
+  /* Arriving from a VM card: land on that VM's password row and flash it, so the eye
+     does not have to hunt down a list of twenty. */
+  const ovPw = e.target.closest("[data-ov-pw]");
+  if (ovPw) {
+    const sid = ovPw.getAttribute("data-ov-pw");
+    state.blade = "passwords";
+    render();
+    const row = document.querySelector(`[data-pw-row="${CSS.escape(sid)}"]`);
+    if (row) {
+      row.scrollIntoView({ block: "center" });
+      row.classList.add("pw-flash");
+      // A timer, not animationend: with reduced motion there is no animation to end.
+      setTimeout(() => row.classList.remove("pw-flash"), 1300);
+    }
+    return;
+  }
+  const ovCollapse = e.target.closest("[data-ov-collapse]");
+  if (ovCollapse) {
+    const sid = ovCollapse.getAttribute("data-ov-collapse");
+    ovExpanded[sid] = !ovExpanded[sid];
+    render();
+    return;
+  }
+  const ovMode = e.target.closest("[data-ov-mode]");
+  if (ovMode) {
+    ovCompact = ovMode.getAttribute("data-ov-mode") === "compact";
+    render();
+    return;
+  }
+  if (e.target.closest("#sshDownloadAll")) {
+    const held = state.servers.filter(s => sshPrivateKeys[s._id]);
+    if (!held.length) { toast("Generate a key pair first", true); return; }
+    downloadBlob("ssh-keys.zip", buildZip(held.map(s => ({ name: sshKeyFileName(s), text: sshPrivateKeys[s._id] }))));
+    held.forEach(s => { sshKeysDownloaded[s._id] = true; });
+    render();
+    toast(`ssh-keys.zip downloaded - ${held.length} key(s)`);
+    return;
+  }
+  if (e.target.closest("#pwToggleAll")) {
+    const rows = credentialRows().filter(r => r.value);
+    const reveal = rows.some(r => !passwordsVisible[r.id]);
+    rows.forEach(r => { passwordsVisible[r.id] = reveal; });
+    render();
+    return;
+  }
+  if (e.target.id === "copyJson") {
+    navigator.clipboard.writeText(JSON.stringify(buildConfig(), null, 2)).then(() => toast("JSON copied"));
+  }
+});
+
+document.getElementById("main").addEventListener("keydown", e => {
+  if (e.key !== "Enter") return;
+  if (e.target && e.target.id === "newSwitchName") {
+    e.preventDefault();
+    addAvailableSwitchFromInput();
+  }
+  // Enter does what the + does - a list typed one name at a time should not need the mouse.
+  const chipKey = e.target && e.target.getAttribute && e.target.getAttribute("data-grp-input");
+  if (chipKey) {
+    e.preventDefault();
+    const added = addGroupChip(chipKey, e.target.value);
+    e.target.value = "";
+    if (added) {
+      render();
+      const back = document.querySelector(`[data-grp-input="${CSS.escape(chipKey)}"]`);
+      if (back) back.focus();
+    }
+  }
+});
+
+document.getElementById("main").addEventListener("input", e => {
+  /* Filtered in place rather than re-rendered, so typing never fights the caret. */
+  if (e.target.id === "ovFilter") {
+    ovFilter = e.target.value.trim().toLowerCase();
+    let any = false;
+    document.querySelectorAll("[data-ov-vm]").forEach(card => {
+      const s = state.servers.find(x => x._id === card.getAttribute("data-ov-vm"));
+      const show = !ovFilter || (s && ovSearchText(s).includes(ovFilter));
+      card.hidden = !show;
+      any = any || show;
+    });
+    const none = document.querySelector(".ov-nomatch");
+    if (none) none.hidden = any;
+    return;
+  }
+  const dKey = e.target.getAttribute("data-d");
+  if (dKey) { state.defaults[dKey] = e.target.value; return; }
+
+  // Committed live like every other text field — the change handler alone left the name
+  // uncommitted when the checkmark's mousedown is prevented below and blur never fires.
+  if (e.target.getAttribute("data-cl") === "name") { state.defaults.cluster.name = e.target.value; return; }
+
+  if (e.target.getAttribute("data-nm") === "fqdn") {
+    state.defaults.naming = state.defaults.naming || {};
+    state.defaults.naming.fqdn = e.target.value;
+    liveValidateRequired(e.target);
+    return;
+  }
+
+  const spvIdx = e.target.getAttribute("data-spv");
+  if (spvIdx !== null) {
+    const vol = storagePlacement().volumes[Number(spvIdx)];
+    const spk = e.target.getAttribute("data-spk");
+    if (vol && spk) vol[spk] = e.target.value;
+    // Same rule the validator uses, applied live: every path box answers for itself,
+    // so filling one never clears another.
+    document.querySelectorAll("[data-spv][data-spk]").forEach(el => {
+      const bad = !String(el.value || "").trim();
+      el.classList.toggle("is-invalid", bad);
+      el.setAttribute("aria-invalid", bad ? "true" : "false");
+    });
+    return;
+  }
+
+  const djaId = e.target.getAttribute("data-dja");
+  if (djaId) {
+    const a = state.domainJoinAccounts.find(x => x._id === djaId);
+    const dk = e.target.getAttribute("data-dk");
+    if (a && dk) {
+      a[dk] = e.target.value;
+      if (dk === "domain" || dk === "joinUser" || dk === "joinPassword") {
+        liveValidateRequired(e.target);
+      }
+      if (dk === "domain" || dk === "joinUser") {
+        const titleEl = e.target.closest("article.card") && e.target.closest("article.card").querySelector(".card-title");
+        if (titleEl) titleEl.innerHTML = domainJoinAccountTitleHtml(a);
+      }
+    }
+    return;
+  }
+  const arcpId = e.target.getAttribute("data-arcp");
+  if (arcpId) {
+    const a = state.azureArcPrincipals.find(x => x._id === arcpId);
+    const ak = e.target.getAttribute("data-ak");
+    if (a && ak) {
+      a[ak] = e.target.value;
+      if (["subscriptionId", "tenantId", "resourceGroup", "servicePrincipalAppId", "servicePrincipalSecret"].includes(ak)) {
+        liveValidateRequired(e.target);
+      }
+      if (ak === "resourceGroup") {
+        const titleEl = e.target.closest("article.card") && e.target.closest("article.card").querySelector(".card-title");
+        if (titleEl) titleEl.textContent = azureArcPrincipalTitle(a);
+      }
+    }
+    return;
+  }
+  const netId = e.target.getAttribute("data-net");
+  if (netId) {
+    const n = state.networks.find(x => x._id === netId);
+    const dnsIdxAttr = e.target.getAttribute("data-dns-i");
+    if (n && dnsIdxAttr !== null) {
+      const idx = Number(dnsIdxAttr);
+      n.dnsServers = n.dnsServers || [];
+      n.dnsServers[idx] = e.target.value;
+      patchNetworkDnsValidation(n, e.target.closest("article.card"));
+      syncNetworkToAttachedServers(n);
+      return;
+    }
+    const nk = e.target.getAttribute("data-nk");
+    if (n && nk) {
+      if (nk === "vlanId") {
+        n.vlanId = e.target.value === "" ? null : Number(e.target.value);
+      } else {
+        n[nk] = e.target.value;
+      }
+      const netCard = e.target.closest("article.card");
+      if (nk === "gateway") {
+        liveValidateIp(e.target, () => networkGatewayProblem(n), true);
+      }
+      if (nk === "subnet") {
+        liveValidateIp(e.target, ip => subnetAddressProblem(ip, n.prefixLength));
+        // Gateway and DNS are judged against this subnet, so both follow it.
+        patchNetworkGatewayValidation(n, netCard);
+        patchNetworkDnsValidation(n, netCard);
+      }
+      if (nk === "vlanId" || nk === "subnet") {
+        const titleEl = netCard && netCard.querySelector(".card-title");
+        if (titleEl) titleEl.innerHTML = networkTitleHtml(n);
+      }
+      if (nk === "subnet") {
+        patchNetworkUsableRangeHint(n, netCard);
+      }
+      if (["switchName", "vlanId", "gateway", "prefixLength"].includes(nk)) {
+        syncNetworkToAttachedServers(n);
+      }
+    }
+    return;
+  }
+
+  if (e.target.getAttribute("data-arc-region-filter") != null) {
+    state.regionFilter = e.target.value;
+    state.regionPickerOpen = true;
+    state.regionPickerPrincipalId = e.target.getAttribute("data-arc-region-filter");
+    render();
+    const el = document.querySelector(`[data-arc-region-filter="${state.regionPickerPrincipalId}"]`);
+    if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+    return;
+  }
+
+  const featFilter = e.target.getAttribute("data-feat-filter");
+  if (featFilter) {
+    state.featureFilter[featFilter] = e.target.value;
+    render();
+    const el = document.querySelector(`[data-feat-filter="${featFilter}"]`);
+    if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+    return;
+  }
+
+  const ip = e.target.getAttribute("data-ip");
+  if (ip) {
+    const k = e.target.getAttribute("data-k");
+    const p = state.defaults.imageProfiles[ip] || (state.defaults.imageProfiles[ip] = {});
+    if (e.target.type === "checkbox") p[k] = e.target.checked;
+    else if (k === "memoryGB" || k === "cpuCount") p[k] = Number(e.target.value) || 1;
+    else p[k] = e.target.value;
+    return;
+  }
+
+  const diskS = e.target.getAttribute("data-disk-s");
+  if (diskS != null) {
+    const s = state.servers.find(x => x._id === diskS);
+    const i = Number(e.target.getAttribute("data-disk-i"));
+    const dk = e.target.getAttribute("data-dk");
+    if (s && s.additionalDisks && s.additionalDisks[i]) {
+      let v = e.target.value;
+      if (dk === "name") v = v.toLowerCase();
+      if (dk === "sizeGB") v = Number(v) || 1;
+      s.additionalDisks[i][dk] = v;
+      if (dk === "name" && e.target.value !== v) e.target.value = v;
+      // "Leave raw" has no volume to name - re-render so the label input greys out.
+      if (dk === "fileSystem") render();
+    }
+    return;
+  }
+
+  const vs = e.target.getAttribute("data-vs");
+  if (vs) {
+    const v = state.vhdSets.find(x => x._id === vs);
+    const vk = e.target.getAttribute("data-vk");
+    if (v && vk) {
+      let val = e.target.value;
+      if (vk === "name") val = val.toLowerCase();
+      if (vk === "sizeGB") val = Number(val) || 1;
+      v[vk] = val;
+      if (vk === "name" && e.target.value !== val) e.target.value = val;
+    }
+    return;
+  }
+
+  const nicS = e.target.getAttribute("data-nic-s");
+  const nicK = e.target.getAttribute("data-nic-k");
+  if (nicS && nicK) {
+    const sNic = state.servers.find(x => x._id === nicS);
+    const nicIdx = Number(e.target.getAttribute("data-nic-i"));
+    const nic = sNic && (sNic.nics || [])[nicIdx];
+    if (nic) {
+      if (nicK === "vlanId") nic.vlanId = e.target.value === "" ? null : Number(e.target.value);
+      else if (nicK === "prefixLength") nic.prefixLength = Number(e.target.value) || 24;
+      else if (nicK === "ipAddress") {
+        nic.ipAddress = e.target.value;
+        const net = findNicNetwork(nic);
+        const base = net
+          ? { address: net.subnet, prefixLength: Number(net.prefixLength) || 24 }
+          : { address: e.target.value, prefixLength: Number(nic.prefixLength) || 24 };
+        liveValidateIp(e.target, ip => hostAddressProblem(ip, base.address, base.prefixLength));
+      }
+      else if (nicK === "name") {
+        // The input is the card's title, so nothing needs patching alongside it.
+        const clean = sanitizeNicName(e.target.value);
+        nic.name = nicNameInputValue(clean, nicIdx + 1);
+        if (e.target.value !== clean) e.target.value = clean;
+      }
+      else nic[nicK] = e.target.value;
+    }
+    return;
+  }
+
+  const sid = e.target.getAttribute("data-s");
+  const isKeyEarly = e.target.getAttribute("data-is");
+  if (sid && isKeyEarly) {
+    const sIs = state.servers.find(x => x._id === sid);
+    if (sIs) {
+      sIs.integrationServices = Object.assign(defaultIntegrationServices(), sIs.integrationServices || {});
+      sIs.integrationServices[isKeyEarly] = e.target.checked;
+    }
+    return;
+  }
+  const dnsIdxAttrS = e.target.getAttribute("data-dns-i");
+  if (sid && dnsIdxAttrS !== null) {
+    const sDns = state.servers.find(x => x._id === sid);
+    if (sDns) {
+      const idx = Number(dnsIdxAttrS);
+      sDns.dnsServers = sDns.dnsServers || [];
+      sDns.dnsServers[idx] = e.target.value;
+      const dnsBase = serverSubnetBase(sDns);
+      const invalid = ipValidationInfo(e.target.value, reservedAddressProblem(e.target.value, dnsBase.address, dnsBase.prefixLength)).invalid;
+      e.target.classList.toggle("is-invalid", invalid);
+      e.target.setAttribute("aria-invalid", invalid ? "true" : "false");
+    }
+    return;
+  }
+  const pkgIdxAttr = e.target.getAttribute("data-pkg-i");
+  if (sid && pkgIdxAttr !== null) {
+    const sPkg = state.servers.find(x => x._id === sid);
+    if (sPkg) {
+      sPkg.linuxPackages = linuxPackageRows(sPkg);
+      sPkg.linuxPackages[Number(pkgIdxAttr)] = e.target.value;
+    }
+    return;
+  }
+  const k = e.target.getAttribute("data-k");
+  if (!sid || !k) return;
+  const s = state.servers.find(x => x._id === sid);
+  if (!s) return;
+  if (k === "djOu") {
+    s.domainJoin = s.domainJoin || { enabled: false, accountId: "", ouPath: "", mode: null };
+    s.domainJoin.ouPath = e.target.value;
+    return;
+  }
+  // Re-renders (the "Automatic" note follows the value) — the change handler owns it.
+  if (k === "djDeferred") return;
+  if (k === "useDifferencingDisk" || k === "enableSecureBoot" || k === "enableVtpm" || k === "startAfterCreate") {
+    s[k] = e.target.checked; return;
+  }
+  // Both re-render (warning banner / delay fields appear) — the change handler owns them.
+  if (k === "nestedVirtualization" || k === "automaticStartEnabled" || k === "automaticStartAction") return;
+  if (k === "automaticStartDelay") {
+    s.automaticStartDelay = Math.max(0, Math.floor(Number(e.target.value) || 0));
+    return;
+  }
+  if (k === "nicName") {
+    const clean = sanitizeNicName(e.target.value);
+    s.nicName = nicNameInputValue(clean, 0);
+    if (e.target.value !== clean) e.target.value = clean;
+    return;
+  }
+  if (k === "customPaths") {
+    s.customPaths = e.target.checked;
+    if (!s.customPaths) { s.vmPath = ""; s.vhdPath = ""; }
+    render();
+    return;
+  }
+  if (k === "prefixLength" || k === "memoryGB" || k === "cpuCount") {
+    s[k] = Number(e.target.value) || 1;
+    return;
+  }
+  if (k === "vlanId") { s.vlanId = e.target.value === "" ? null : Number(e.target.value); return; }
+  if (k === "name") {
+    let lower = e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "");
+    s.name = lower;
+    if (e.target.value !== lower) e.target.value = lower;
+    const over = lower.length > NETBIOS_MAX;
+    const taken = serverNameTaken(s);
+    const bad = over || taken;
+    e.target.classList.toggle("is-invalid", bad);
+    e.target.setAttribute("aria-invalid", bad ? "true" : "false");
+    const field = e.target.closest("label.field");
+    const hint = field && field.querySelector("[data-netbios-hint]");
+    const count = field && field.querySelector("[data-netbios-count]");
+    if (hint) {
+      hint.classList.toggle("err", bad);
+      hint.textContent = over
+        ? `Too long for NetBIOS — max ${NETBIOS_MAX} characters (currently ${lower.length})`
+        : taken
+          ? `Another VM already uses this name — the VM, its folder and its disks would collide`
+          : `Lowercase · max ${NETBIOS_MAX} characters (NetBIOS)`;
+    }
+    if (count) {
+      count.classList.toggle("over", over);
+      count.textContent = `${lower.length} / ${NETBIOS_MAX}`;
+    }
+    /* Repaint the name-derived text in place. A full render() here would rebuild the
+       input and take the caret with it, so only the strings that actually depend on the
+       name are touched - and they are recomputed the same way the card computes them. */
+    const parts = serverNameParts(s);
+    const card = document.querySelector(`[data-sid="${s._id}"]`);
+    if (card) {
+      const title = card.querySelector(`[data-name-title="${s._id}"]`);
+      if (title) title.textContent = parts.hyperVName;
+      const guest = card.querySelector(`[data-name-guest="${s._id}"]`);
+      if (guest) guest.textContent = parts.hyperVName !== parts.shortName ? `guest ${parts.shortName} · ` : "";
+      const folder = card.querySelector(`[data-name-folder="${s._id}"]`);
+      if (folder) folder.textContent = parts.folderName !== parts.hyperVName ? ` · folder ${parts.folderName}\\` : "";
+      const short = card.querySelector(`[data-name-short="${s._id}"]`);
+      if (short) short.textContent = parts.shortName;
+    }
+    return;
+  }
+  if (k === "imageId") {
+    applyImageProfile(s, e.target.value);
+    render();
+    return;
+  }
+  if (k === "ipAddress") {
+    s.ipAddress = e.target.value;
+    const base = serverSubnetBase(s);
+    liveValidateIp(e.target, ip => hostAddressProblem(ip, base.address, base.prefixLength));
+    // Unbound, the gateway is measured against this very address — re-check it as it changes.
+    const gwInput = e.target.closest(".nic-card") && e.target.closest(".nic-card").querySelector('input[data-k="defaultGateway"]');
+    if (gwInput) liveValidateIp(gwInput, ip => reservedAddressProblem(ip, base.address, base.prefixLength));
+    return;
+  }
+  if (k === "defaultGateway") {
+    s.defaultGateway = e.target.value;
+    const base = serverSubnetBase(s);
+    liveValidateIp(e.target, ip => reservedAddressProblem(ip, base.address, base.prefixLength));
+    return;
+  }
+  s[k] = e.target.value;
+});
+
+document.getElementById("main").addEventListener("change", e => {
+  // Like the cluster blade's addAllVms: the per-VM assignments stay untouched, the
+  // resolvers short-circuit while the mode is on, so turning it back off restores
+  // whatever was hand-picked instead of silently rewriting every VM.
+  if (e.target.hasAttribute("data-djall")) {
+    state.defaults.domainJoinAllVms = e.target.checked;
+    scheduleRender();
+    return;
+  }
+  if (e.target.hasAttribute("data-arcall")) {
+    state.defaults.azureArcAllVms = e.target.checked;
+    scheduleRender();
+    return;
+  }
+  if (e.target.hasAttribute("data-pwlen")) {
+    state.defaults.passwordLength = Number(e.target.value) || 32;
+    // A new length applies to the whole fleet at once — every existing VM's local
+    // password is regenerated on the spot, hand-typed ones included, so no VM is left
+    // quietly carrying the old length.
+    const len = passwordLength();
+    state.servers.forEach(srv => { srv.localUserPassword = generateLocalPassword(len); });
+    scheduleRender();
+    if (state.servers.length) toast(`Local passwords regenerated for ${state.servers.length} VM(s) (${len} chars)`);
+    return;
+  }
+  const sp = e.target.getAttribute("data-sp");
+  if (sp === "auto") {
+    const placement = storagePlacement();
+    placement.mode = e.target.checked ? "auto" : "manual";
+    // First enable seeds two empty rows - the smallest catalog that makes sense.
+    // Turning it off keeps the rows so toggling back restores what was typed.
+    if (placement.mode === "auto" && placement.volumes.length === 0) {
+      placement.volumes.push({ vmPath: "", vhdPath: "" }, { vmPath: "", vhdPath: "" });
+    }
+    scheduleRender();
+    return;
+  }
+  const cl = e.target.getAttribute("data-cl");
+  if (cl) {
+    if (e.target.type === "checkbox") state.defaults.cluster[cl] = e.target.checked;
+    else state.defaults.cluster[cl] = e.target.value;
+    // "All VMs" deliberately leaves the per-VM flags alone. clusterIncludesServer already
+    // short-circuits on it, so membership and export are right while it is on - and because
+    // nothing was overwritten, switching it back off returns to whatever was picked by hand
+    // rather than silently leaving every VM in the cluster.
+    if (cl === "enabled" || cl === "name" || cl === "addAllVms") scheduleRender();
+    return;
+  }
+  const nm = e.target.getAttribute("data-nm");
+  if (nm) {
+    state.defaults.naming = state.defaults.naming || {};
+    state.defaults.naming[nm] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+    // Folder FQDN and the fixed suffix are both meaningless while the Hyper-V object name
+    // stays short - nothing would carry either one.
+    if (nm === "vmNameIncludeFqdn" && !e.target.checked) {
+      state.defaults.naming.folderIncludeFqdn = false;
+      state.defaults.naming.fqdnOverrideEnabled = false;
+    }
+    scheduleRender();
+    return;
+  }
+  const arcpChange = e.target.getAttribute("data-arcp");
+  if (arcpChange) {
+    const a = state.azureArcPrincipals.find(x => x._id === arcpChange);
+    const ak = e.target.getAttribute("data-ak");
+    if (a && ak) {
+      a[ak] = e.target.value;
+      if (ak === "authMode") scheduleRender();
+    }
+    return;
+  }
+  const netChange = e.target.getAttribute("data-net");
+  if (netChange) {
+    const n = state.networks.find(x => x._id === netChange);
+    const nk = e.target.getAttribute("data-nk");
+    if (n && nk) {
+      // Same coercion as the input handler — leaving the blur write as a raw string put a
+      // string VLAN in the catalog next to numbers everywhere else.
+      if (nk === "prefixLength") n.prefixLength = Number(e.target.value) || 24;
+      else if (nk === "vlanId") n.vlanId = e.target.value === "" ? null : Number(e.target.value);
+      else n[nk] = e.target.value;
+      syncNetworkToAttachedServers(n);
+      if (nk === "prefixLength") {
+        const titleEl = e.target.closest("article.card") && e.target.closest("article.card").querySelector(".card-title");
+        if (titleEl) titleEl.innerHTML = networkTitleHtml(n);
+      }
+      scheduleRender();
+    }
+    return;
+  }
+  const featToggle = e.target.getAttribute("data-feat-toggle");
+  if (featToggle) {
+    const s = state.servers.find(x => x._id === featToggle);
+    const feat = e.target.getAttribute("data-feat");
+    if (s && feat) {
+      s.windowsFeatures = s.windowsFeatures || [];
+      s.windowsFeatures = toggleFeatureId(s.windowsFeatures, feat, e.target.checked);
+      scheduleRender();
+    }
+    return;
+  }
+  const appToggle = e.target.getAttribute("data-app-toggle");
+  if (appToggle) {
+    const s = state.servers.find(x => x._id === appToggle);
+    const appId = e.target.getAttribute("data-app");
+    if (s && appId) {
+      // Effective pick right now: off = nothing, null = the whole catalog.
+      let sel = !s.removeBuiltInApps ? [] : (Array.isArray(s.removeApps) ? s.removeApps : APP_REMOVAL_CATALOG.map(a => a.id));
+      sel = e.target.checked ? [...new Set([...sel, appId])] : sel.filter(x => x !== appId);
+      if (sel.length === 0) {
+        // The last app untoggled turns the removal off entirely.
+        s.removeBuiltInApps = false;
+        s.removeApps = null;
+      } else {
+        s.removeBuiltInApps = true;
+        // The full set collapses to null so the export stays the compact
+        // removeBuiltInApps: true - and the all-apps switch reads it as on.
+        s.removeApps = sel.length === APP_REMOVAL_CATALOG.length ? null : sel;
+      }
+      scheduleRender();
+    }
+    return;
+  }
+  const ip = e.target.getAttribute("data-ip");
+  if (ip && e.target.type === "checkbox") {
+    const k = e.target.getAttribute("data-k");
+    state.defaults.imageProfiles[ip][k] = e.target.checked;
+    return;
+  }
+  const attach = e.target.getAttribute("data-vs-attach");
+  if (attach) {
+    const v = state.vhdSets.find(x => x._id === attach);
+    const vm = e.target.getAttribute("data-vm");
+    if (v) {
+      v.attachTo = v.attachTo || [];
+      if (e.target.checked) {
+        if (!v.attachTo.includes(vm)) v.attachTo.push(vm);
+      } else {
+        v.attachTo = v.attachTo.filter(n => n !== vm);
+      }
+    }
+    return;
+  }
+  const nicS = e.target.getAttribute("data-nic-s");
+  const nicK = e.target.getAttribute("data-nic-k");
+  if (nicS && nicK) {
+    const s = state.servers.find(x => x._id === nicS);
+    const nic = s && (s.nics || [])[Number(e.target.getAttribute("data-nic-i"))];
+    if (nic) {
+      if (nicK === "networkAttach") {
+        const net = findNetwork(e.target.value);
+        if (net) applyNetworkToNic(nic, net); else detachNetworkFromNic(nic);
+        scheduleRender();
+      }
+      else if (nicK === "prefixLength") { nic.prefixLength = Number(e.target.value) || 24; scheduleRender(); }
+      else if (nicK === "switchName") { nic.switchName = e.target.value; scheduleRender(); }
+      else if (nicK === "name") { nic.name = nicNameInputValue(e.target.value, Number(e.target.getAttribute("data-nic-i")) + 1); scheduleRender(); }
+      else scheduleRender();
+    }
+    return;
+  }
+
+  const dKeyChanged = e.target.getAttribute("data-d");
+  if (dKeyChanged === "vmPath" || dKeyChanged === "vhdPath") {
+    // Both default roots feed every VM's layout tree over on the Virtual machines blade.
+    state.servers.forEach(srv => patchServerLayoutTree(srv));
+    return;
+  }
+
+  const sid = e.target.getAttribute("data-s");
+  const k = e.target.getAttribute("data-k");
+  if (sid && k) {
+    const s = state.servers.find(x => x._id === sid);
+    if (s) {
+      if (k === "name") {
+        // Fires when the field is left. Patched in place rather than re-rendered so a
+        // click that moved focus away still lands on its target.
+        patchServerLayoutTree(s);
+        patchServerDiskNames(s);
+        return;
+      }
+      if (k === "vmPath" || k === "vhdPath") {
+        patchServerLayoutTree(s);
+        patchServerPathsMeta(s);
+        return;
+      }
+      if (k === "imageId") { applyImageProfile(s, e.target.value); scheduleRender(); return; }
+      if (k === "includeManagementTools") { s.includeManagementTools = e.target.checked; return; }
+      if (k === "removeBuiltInApps") {
+        // The all-apps switch: on selects the whole catalog, off clears every pick.
+        // A custom pick below shows this switch off; flipping it on from there
+        // returns to the full set.
+        s.removeBuiltInApps = e.target.checked && supportsAppRemoval(s.imageId);
+        s.removeApps = null;
+        scheduleRender();
+        return;
+      }
+      if (k === "builtInAdminOnly") {
+        // AD DS forces it on and client images lock it off; the checkbox is disabled in both cases.
+        if (!supportsBuiltInAdminOnly(s)) { s.builtInAdminOnly = false; scheduleRender(); return; }
+        s.builtInAdminOnly = e.target.checked;
+        // Switching back to a provisioned account must never land on an empty name.
+        if (!e.target.checked && !String(s.localUserName || "").trim()) {
+          s.localUserName = generateLocalUsername(state.usernameTheme);
+        }
+        scheduleRender();
+        return;
+      }
+      if (k === "nestedVirtualization") { s.nestedVirtualization = nestedVirtRequired(s) || e.target.checked; scheduleRender(); return; }
+      if (k === "djDeferred") {
+        s.domainJoin = s.domainJoin || { enabled: false, accountId: "", ouPath: "", mode: null };
+        s.domainJoin.mode = e.target.checked ? "deferred" : "specialize";
+        scheduleRender();
+        return;
+      }
+      // Leaving the OU field can flip the automatic join timing; fires on blur, so the
+      // re-render never steals focus mid-typing.
+      if (k === "djOu") { scheduleRender(); return; }
+      if (k === "automaticStartEnabled") {
+        // Hyper-V's own default once a VM opts in at all — "start it again if it was running".
+        if (e.target.checked) {
+          if (serverAutoStartAction(s) === "Nothing") s.automaticStartAction = "StartIfRunning";
+        } else {
+          s.automaticStartAction = "Nothing";
+          s.automaticStartDelay = 0;
+        }
+        scheduleRender();
+        return;
+      }
+      if (k === "automaticStartAction") {
+        s.automaticStartAction = serverAutoStartAction({ automaticStartAction: e.target.value });
+        scheduleRender();
+        return;
+      }
+      if (k === "automaticStartDelay") {
+        s.automaticStartDelay = Math.max(0, Math.floor(Number(e.target.value) || 0));
+        scheduleRender();
+        return;
+      }
+      if (k === "nicName") {
+        s.nicName = nicNameInputValue(e.target.value, 0);
+        scheduleRender();
+        return;
+      }
+      if (k === "networkAttach") {
+        const net = findNetwork(e.target.value);
+        if (net) applyNetworkToServer(s, net); else detachNetworkFromServer(s);
+        scheduleRender();
+      }
+      else if (["useDifferencingDisk","enableSecureBoot","enableVtpm","startAfterCreate"].includes(k)) {
+        s[k] = e.target.checked;
+        if (k === "useDifferencingDisk") scheduleRender();
+      }
+      else if (k === "prefixLength") s.prefixLength = Number(e.target.value) || 24;
+      else if (k === "switchName" || k === "experience") s[k] = e.target.value;
+      else if (e.target.tagName === "SELECT") s[k] = e.target.value;
+    }
+  }
+  const isKey = e.target.getAttribute("data-is");
+  if (isKey) {
+    const s = state.servers.find(x => x._id === e.target.getAttribute("data-s"));
+    if (s) {
+      s.integrationServices = Object.assign(defaultIntegrationServices(), s.integrationServices || {});
+      s.integrationServices[isKey] = e.target.checked;
+    }
+  }
+  const diskS = e.target.getAttribute("data-disk-s");
+  if (diskS != null) {
+    const s = state.servers.find(x => x._id === diskS);
+    const i = Number(e.target.getAttribute("data-disk-i"));
+    const dk = e.target.getAttribute("data-dk");
+    if (s && s.additionalDisks && s.additionalDisks[i] && dk) {
+      let v = e.target.value;
+      if (dk === "sizeGB") v = Number(v) || 1;
+      s.additionalDisks[i][dk] = v;
+      scheduleRender();
+    }
+  }
+  const vs = e.target.getAttribute("data-vs");
+  if (vs && e.target.getAttribute("data-vk") === "type") {
+    const v = state.vhdSets.find(x => x._id === vs);
+    if (v) v.type = e.target.value;
+  }
+  const themeSel = e.target.getAttribute("data-uname-theme-global");
+  if (themeSel != null) {
+    state.usernameTheme = e.target.value;
+    return;
+  }
+  if (state.blade === "export") scheduleRender();
+});
+
+/* Typing must not re-render the blade - that would drop the caret mid-word - so the
+   handlers above patch the field they touched and return. The sidebar badges read the same
+   state, though, so without this they kept whatever count the last full render left behind:
+   filling in the last required field cleared its red border while the red number beside
+   Review and validate stayed put until some unrelated event forced a render. These listeners
+   run after the handlers above - listeners fire in registration order - and repaint the
+   sidebar only, never the field being typed in. */
+let pendingNavHandle = null;
+function scheduleNavRefresh() {
+  if (pendingNavHandle !== null) return;
+  pendingNavHandle = setTimeout(() => {
+    pendingNavHandle = null;
+    refreshValidation();
+    renderNav();
+  }, 150);
+}
+document.getElementById("main").addEventListener("input", scheduleNavRefresh);
+document.getElementById("main").addEventListener("change", scheduleNavRefresh);
+
+document.getElementById("themeBtn").addEventListener("click", e => {
+  e.stopPropagation();
+  const pop = document.getElementById("themePopover");
+  if (pop.classList.contains("open")) closeThemePopover();
+  else openThemePopover();
+});
+document.getElementById("tabDark").addEventListener("click", () => { themeModeTab = "dark"; renderThemeList(); });
+document.getElementById("tabLight").addEventListener("click", () => { themeModeTab = "light"; renderThemeList(); });
+document.getElementById("themePopover").addEventListener("click", e => {
+  e.stopPropagation();
+  const row = e.target.closest("[data-theme-id]");
+  if (!row) return;
+  applyTheme(row.getAttribute("data-theme-id"));
+  closeThemePopover();
+});
+document.addEventListener("click", e => {
+  if (!e.target.closest(".theme-anchor")) closeThemePopover();
+  /* A combobox that never closes on an outside click is a trap. */
+  if (state.regionPickerOpen && !e.target.closest(".region-picker")) {
+    state.regionPickerOpen = false;
+    state.regionPickerPrincipalId = null;
+    state.regionFilter = "";
+    render();
+  }
+  if ((state.imagePickerOpen || state.templatePickerOpen) && !e.target.closest(".picker")) {
+    state.imagePickerOpen = null;
+    state.templatePickerOpen = null;
+    render();
+  }
+});
+
+
+/* PVE VM Studio: no PowerShell snippets - the studio deploys itself. */
+function psObjectButton(kind, ref) { return ""; }
+function psObjectButtonHyperV(kind, ref) {
+  return `<button type="button" class="btn icon ghost sm" title="PowerShell for this object" data-ps-kind="${esc(kind)}" data-ps-ref="${esc(ref)}"><img src="${iconSrc("powershell.svg")}" alt="PS"></button>`;
+}
+
+let objectPsState = { title: "", fileName: "", hint: "", path: "", code: "" };
+
+function closeObjectPsModal() {
+  document.getElementById("objectPsOverlay").classList.remove("open");
+}
+function copyObjectPsModal() {
+  navigator.clipboard.writeText(objectPsState.code || "").then(() => toast("PowerShell snippet copied"));
+}
+function renderObjectPsEditor(code) {
+  const lines = String(code || "").split("\n");
+  document.getElementById("objectPsGutter").innerHTML = lines.map((_, i) => "<span>" + (i + 1) + "</span>").join("");
+  document.getElementById("objectPsCode").innerHTML = highlightPowerShell(code);
+}
+function openObjectPsModal(kind, ref) {
+  const packed = buildObjectPsSnippet(kind, ref);
+  if (!packed || !packed.code) { toast("No PowerShell snippet yet", true); return; }
+  objectPsState = packed;
+  document.getElementById("objectPsTitleText").textContent = packed.title;
+  document.getElementById("objectPsHint").textContent = packed.hint || "";
+  document.getElementById("objectPsPath").textContent = packed.path || "";
+  document.getElementById("objectPsFileName").textContent = packed.fileName || "snippet.ps1";
+  renderObjectPsEditor(packed.code);
+  document.getElementById("objectPsOverlay").classList.add("open");
+}
+
+function highlightPowerShell(code) {
+  const src = String(code || "");
+  let i = 0;
+  let out = "";
+  const push = (cls, text) => {
+    out += '<span class="ps-tok ' + cls + '">' + esc(text) + "</span>";
+  };
+  const isWord = ch => /[A-Za-z0-9_]/.test(ch);
+  const keywords = /^(if|else|elseif|foreach|for|while|function|param|return|switch|begin|process|end|try|catch|finally|throw|trap|filter|workflow|parallel|sequence|and|or|not|xor|band|bor|bxor|bnot)$/i;
+  const literals = /^(true|false|null)$/i;
+  const cmdletLike = /^(Get|Set|New|Remove|Add|Install|Uninstall|Enable|Disable|Test|Write|Read|ConvertTo|ConvertFrom|Out|Import|Export|Start|Stop|Restart|Invoke|Select|Where|ForEach|Sort|Group|Measure|Format|Clear|Copy|Move|Rename|Update|Join|Split|Expand|Compress|Mount|Dismount|Register|Unregister|Wait|Enter|Exit|Push|Pop|Resolve|Compare|Measure|Tee|Trace|Debug|Show|Hide|Protect|Unprotect|Publish|Unpublish|Approve|Deny|Grant|Revoke|Backup|Restore|Sync|Connect|Disconnect|Send|Receive|Search|Find|Lock|Unlock)-[A-Za-z0-9]+$/i;
+
+  while (i < src.length) {
+    const ch = src[i];
+
+    if (ch === "#") {
+      let j = i + 1;
+      while (j < src.length && src[j] !== "\n") j++;
+      push("ps-comment", src.slice(i, j));
+      i = j;
+      continue;
+    }
+
+    if (ch === "'") {
+      let j = i + 1;
+      while (j < src.length) {
+        if (src[j] === "'" && src[j + 1] === "'") { j += 2; continue; }
+        if (src[j] === "'") { j++; break; }
+        if (src[j] === "\n") break;
+        j++;
+      }
+      push("ps-string", src.slice(i, j));
+      i = j;
+      continue;
+    }
+
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < src.length) {
+        if (src[j] === "`" && j + 1 < src.length) { j += 2; continue; }
+        if (src[j] === '"') { j++; break; }
+        if (src[j] === "\n") break;
+        j++;
+      }
+      push("ps-string", src.slice(i, j));
+      i = j;
+      continue;
+    }
+
+    if (ch === "$") {
+      let j = i + 1;
+      if (src[j] === "{") {
+        j++;
+        while (j < src.length && src[j] !== "}") j++;
+        if (j < src.length) j++;
+      } else {
+        while (j < src.length && isWord(src[j])) j++;
+      }
+      push("ps-variable", src.slice(i, j));
+      i = j;
+      continue;
+    }
+
+    if (ch === "-" && /[A-Za-z]/.test(src[i + 1] || "")) {
+      let j = i + 1;
+      while (j < src.length && /[A-Za-z0-9]/.test(src[j])) j++;
+      push("ps-param", src.slice(i, j));
+      i = j;
+      continue;
+    }
+
+    if (/[0-9]/.test(ch) && (i === 0 || /[\s(,=+\-*\/]/.test(src[i - 1]))) {
+      let j = i;
+      while (j < src.length && /[0-9.]/.test(src[j])) j++;
+      push("ps-number", src.slice(i, j));
+      i = j;
+      continue;
+    }
+
+    if (/[A-Za-z_]/.test(ch)) {
+      let j = i;
+      while (j < src.length && /[A-Za-z0-9_-]/.test(src[j])) j++;
+      const word = src.slice(i, j);
+      if (literals.test(word) || keywords.test(word)) push("ps-keyword", word);
+      else if (cmdletLike.test(word) || /^[A-Z][a-z]+-[A-Za-z0-9]+$/.test(word)) push("ps-cmdlet", word);
+      else push("ps-ident", word);
+      i = j;
+      continue;
+    }
+
+    if (ch === "`" || ch === "|" || ch === ";" || ch === "{" || ch === "}" || ch === "(" || ch === ")" || ch === "=" || ch === "@") {
+      push("ps-operator", ch);
+      i++;
+      continue;
+    }
+
+    out += esc(ch);
+    i++;
+  }
+  return out;
+}
+
+
+function buildObjectPsSnippet(kind, ref) {
+  if (kind === "vm") {
+    const s = state.servers.find(x => x._id === ref);
+    if (!s) return null;
+    const shortName = (s.name || "vm").toLowerCase().slice(0, 15);
+    const domainFqdn = namingSuffixForServer(s);
+    const nmPs = namingDefaults();
+    const name = (domainFqdn && nmPs.vmNameIncludeFqdn) ? `${shortName}.${domainFqdn}` : shortName;
+    const folder = (domainFqdn && nmPs.folderIncludeFqdn) ? `${shortName}.${domainFqdn}` : shortName;
+    const mem = Number(s.memoryGB) || 4;
+    const cpu = Number(s.cpuCount) || 2;
+    const sw = s.switchName || "vExternal";
+    const img = findImage(s.imageId);
+    const diskLines = (s.additionalDisks || []).map((d, i) => {
+      const dn = (d.name || ("data" + (i + 1))).toLowerCase();
+      const pathExpr = d.path ? "'" + String(d.path).replace(/'/g, "''") + "'" : `Join-Path $VhdRoot "$Folder\\${dn}.vhdx"`;
+      const type = d.type === "Fixed" ? "-Fixed" : "-Dynamic";
+      return [
+        `$Data${i + 1} = ${pathExpr}`,
+        `New-VHD -Path $Data${i + 1} -SizeBytes ${Number(d.sizeGB) || 100}GB ${type} | Out-Null`,
+        `Add-VMHardDiskDrive -VMName $Name -Path $Data${i + 1}`
+      ].join("\n");
+    }).join("\n\n");
+    const psq = v => "'" + String(v).replace(/'/g, "''") + "'";
+    const primaryNic = effectiveNicName(s, 0);
+    const vlanLine = (s.vlanId != null && s.vlanId !== "")
+      ? `Set-VMNetworkAdapterVlan -VMName $Name -VMNetworkAdapterName ${psq(primaryNic)} -Access -VlanId ${Number(s.vlanId)}`
+      : "# no VLAN";
+    const nicLines = [
+      `Rename-VMNetworkAdapter -VMName $Name -Name 'Network Adapter' -NewName ${psq(primaryNic)}`,
+      `Set-VMNetworkAdapter -VMName $Name -Name ${psq(primaryNic)} -DeviceNaming On  # guest sees the adapter name`
+    ].concat((s.nics || []).flatMap((nic, i) => {
+      const nicName = effectiveNicName(s, i + 1);
+      const lines = [`Add-VMNetworkAdapter -VMName $Name -Name ${psq(nicName)} -SwitchName ${psq(nic.switchName || "vExternal")} -DeviceNaming On`];
+      if (nic.vlanId != null && nic.vlanId !== "") {
+        lines.push(`Set-VMNetworkAdapterVlan -VMName $Name -VMNetworkAdapterName ${psq(nicName)} -Access -VlanId ${Number(nic.vlanId)}`);
+      }
+      const nicIp = String(nic.ipAddress || "").trim();
+      if (nicIp) lines.push(`# ${nicName}: ${nicIp}/${Number(nic.prefixLength) || 24} is set in the unattend, keyed by this adapter's MAC`);
+      return lines;
+    })).join("\n");
+    const autoStartLines = serverAutoStartAction(s) === "Nothing"
+      ? "# AutomaticStartAction stays Nothing"
+      : `Set-VM -Name $Name -AutomaticStartAction ${serverAutoStartAction(s)} -AutomaticStartDelay ${serverAutoStartDelay(s)}`;
+    const nestedLines = s.nestedVirtualization
+      ? [
+          `Set-VMProcessor -VMName $Name -ExposeVirtualizationExtensions $true`,
+          `Get-VMNetworkAdapter -VMName $Name | Set-VMNetworkAdapter -MacAddressSpoofing On`
+        ].join("\n")
+      : "# nested virtualization off";
+    const diffLine = s.useDifferencingDisk
+      ? "New-VHD -Path $OsVhd -ParentPath $GoldPath -Differencing | Out-Null"
+      : "Copy-Item -LiteralPath $GoldPath -Destination $OsVhd -Force";
+    const code = [
+      `# Hyper-V outline for ${name}${domainFqdn ? ` (guest NetBIOS: ${shortName})` : ""}`,
+      `# Image: ${img.label} (imageId ${img.id})`,
+      `$Name = '${name}'`,
+      `$Folder = '${folder}'  # leaf folder under $VmRoot / $VhdRoot`,
+      `$GoldPath = 'C:\\Gold\\hv-<language>-${img.id}.vhdx'  # Build-Vms.ps1 picks the language`,
+      `$VmRoot = 'D:\\Hyper-V\\VMs'`,
+      `$VhdRoot = 'D:\\Hyper-V\\VHDs'`,
+      `$OsVhd = Join-Path $VhdRoot "${folder}\\disk-${shortName.replace(/-/g, "")}-c.vhdx"`,
+      `New-Item -ItemType Directory -Path (Split-Path $OsVhd) -Force | Out-Null`,
+      "",
+      diffLine,
+      `New-VM -Name $Folder -Generation 2 -MemoryStartupBytes ${mem}GB -VHDPath $OsVhd -Path $VmRoot | Out-Null`,
+      name !== folder
+        ? "Rename-VM -Name $Folder -NewName $Name  # New-VM derives its config folder from -Name"
+        : "# Hyper-V name == folder name, no rename",
+      `Set-VM -Name $Name -ProcessorCount ${cpu} -StaticMemory`,
+      nicLines,
+      `Connect-VMNetworkAdapter -VMName $Name -Name ${psq(primaryNic)} -SwitchName '${sw}'`,
+      vlanLine,
+      autoStartLines,
+      nestedLines,
+      s.enableSecureBoot ? "Set-VMFirmware -VMName $Name -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows" : "# Secure Boot off",
+      "",
+      diskLines || "# no data disks",
+      "",
+      "# Integration Services (Time Synchronization off by default in studio)",
+      "Disable-VMIntegrationService -VMName $Name -Name 'Time Synchronization'",
+      "Enable-VMIntegrationService -VMName $Name -Name 'Shutdown'",
+      "Enable-VMIntegrationService -VMName $Name -Name 'Heartbeat'",
+      "Enable-VMIntegrationService -VMName $Name -Name 'Key-Value Pair Exchange'",
+      "Enable-VMIntegrationService -VMName $Name -Name 'VSS'",
+      s.startAfterCreate ? `Start-VM -Name $Name` : "# Start-VM skipped"
+    ].filter(Boolean).join("\n");
+    return {
+      title: "VM · " + name,
+      fileName: name + ".ps1",
+      hint: "Reference snippet — Build-Vms.ps1 applies the full workflow from config.json",
+      path: "Build-Vms.ps1 / New-ProvisionedVm",
+      code
+    };
+  }
+  if (kind === "vhdset") {
+    const v = state.vhdSets.find(x => x._id === ref);
+    if (!v) return null;
+    const name = (v.name || "shared").toLowerCase();
+    const path = v.path || `Join-Path $VhdRoot "vhds\\${name}.vhds"`;
+    const attach = (v.attachTo || []).map(n =>
+      `Add-VMHardDiskDrive -VMName '${n}' -Path $Vhds -SupportPersistentReservations`
+    ).join("\n");
+    const code = [
+      `# VHD Set for guest cluster: ${name}`,
+      `# Path MUST be CSV (ClusterStorage) or SMB 3 — local NTFS will fail at attach.`,
+      v.path ? `$Vhds = '${String(v.path).replace(/'/g, "''")}'` : `$Vhds = 'C:\\ClusterStorage\\Volume1\\vhds\\${name}.vhds'`,
+      `New-Item -ItemType Directory -Path (Split-Path $Vhds) -Force | Out-Null`,
+      `New-VHD -Path $Vhds -SizeBytes ${Number(v.sizeGB) || 100}GB ${v.type === "Fixed" ? "-Fixed" : "-Dynamic"} | Out-Null`,
+      "",
+      "# Attach to nodes with persistent reservations",
+      attach || "# select VMs in the picker first"
+    ].join("\n");
+    return {
+      title: "VHD Set · " + name,
+      fileName: name + ".vhds.ps1",
+      hint: "Shared .vhds on CSV/SMB 3 with -SupportPersistentReservations",
+      path: "New-VHD / Add-VMHardDiskDrive -SupportPersistentReservations",
+      code
+    };
+  }
+  return null;
+}
+
+function openVmImportModal() {
+  document.getElementById("vmImportFile").value = "";
+  document.getElementById("vmImportText").value = "";
+  document.getElementById("vmImportOverlay").classList.add("open");
+}
+function closeVmImportModal() {
+  document.getElementById("vmImportOverlay").classList.remove("open");
+}
+function confirmVmImport() {
+  const raw = document.getElementById("vmImportText").value.trim();
+  if (!raw) { toast("Paste JSON or choose a file", true); return; }
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch (e) { toast("Invalid JSON: " + e.message, true); return; }
+  if (!Array.isArray(parsed) && !(parsed && Array.isArray(parsed.servers))) {
+    toast("Expected an array or { servers: [...] }", true);
+    return;
+  }
+  const { added, updated } = applyConfigDocument(parsed, { replace: false });
+  closeVmImportModal();
+  render();
+  toast(`Import done — added ${added}, updated ${updated}`);
+}
+
+function openMemberPicker(mode, targetId) {
+  let title = "Attach virtual machines";
+  let selected = [];
+  if (mode === "vhdSet") {
+    const v = state.vhdSets.find(x => x._id === targetId);
+    if (!v) return;
+    selected = [...(v.attachTo || [])];
+    title = "Attach VHD Set · " + (v.name || "unnamed");
+  } else if (mode === "domainJoin") {
+    const a = state.domainJoinAccounts.find(x => x._id === targetId);
+    if (!a) return;
+    ensureCatalogStableId(a, "dja");
+    selected = serversForDomainJoinAccount(a.id).map(s => s.name);
+    title = "Domain Join · " + domainJoinAccountTitle(a);
+  } else if (mode === "azureArc") {
+    const a = state.azureArcPrincipals.find(x => x._id === targetId);
+    if (!a) return;
+    ensureCatalogStableId(a, "arc");
+    selected = serversForArcPrincipal(a.id).map(s => s.name);
+    title = "Azure Arc · " + azureArcPrincipalTitle(a);
+  } else if (mode === "cluster") {
+    const c = clusterSettings();
+    selected = serversForCluster().map(s => s.name);
+    title = "Failover Cluster · " + (c.name || "local cluster");
+  } else if (mode === "network") {
+    const n = state.networks.find(x => x._id === targetId);
+    if (!n) return;
+    ensureCatalogStableId(n, "net");
+    selected = serversForNetwork(n.id).map(s => s.name);
+    title = "Network · " + networkName(n) + " (" + networkCidr(n) + ")";
+  } else {
+    return;
+  }
+  state.memberPicker = { mode, targetId, selected, filter: "" };
+  document.getElementById("memberPickerTitle").textContent = title;
+  document.getElementById("memberPickerHint").textContent = mode === "vhdSet"
+    ? "Select guest cluster nodes that share this VHD Set."
+    : mode === "network"
+    ? "Select virtual machines to attach. A VM can belong to only one network."
+    : mode === "cluster"
+    ? "Select the virtual machines to add to the host failover cluster."
+    : "Select virtual machines to attach. A VM can belong to only one account/principal.";
+  document.getElementById("memberPickerFilter").value = "";
+  renderMemberPickerList();
+  document.getElementById("memberPickerOverlay").classList.add("open");
+  document.getElementById("memberPickerFilter").focus();
+}
+function openVmPickerForVhdSet(vhdSetId) { openMemberPicker("vhdSet", vhdSetId); }
+function closeMemberPicker() {
+  document.getElementById("memberPickerOverlay").classList.remove("open");
+}
+function renderMemberPickerList() {
+  const ctx = state.memberPicker;
+  const filter = (document.getElementById("memberPickerFilter").value || "").toLowerCase().trim();
+  // Neither Arc nor domain join is Windows-only any more: a Linux VM joins through
+  // realmd and sssd, and onboards with azcmagent - both from the cloud-init seed.
+  const names = state.servers.filter(s => s.name).map(s => s.name);
+  const list = document.getElementById("memberPickerList");
+  const filtered = names.filter(n => !filter || n.includes(filter));
+  list.innerHTML = filtered.length ? filtered.map(n => {
+    const sel = ctx.selected.includes(n);
+    const server = state.servers.find(x => x.name === n);
+    const img = findImage(server.imageId);
+    const veto = memberPickerVeto(ctx, server);
+    // The release pill: "2025", "Windows 11", "Ubuntu" - the same headline the image
+    // picker groups by, on the same band as the VM glyph beside it.
+    const pill = img
+      ? `<span class="op-pill pill role" style="--pill-hue:${MEMBER_PICKER_BAND_VAR[serverGlyphBand(server)] || "var(--role-server)"}">${esc(imageReleaseLabel(img))}</span>`
+      : "";
+    return `<button type="button" class="btn row ${sel ? "selected" : ""} ${veto ? "vetoed" : ""}" data-pick-vm="${esc(n)}"${veto ? ` aria-disabled="true" title="${esc(veto)}"` : ""}>
+      <span class="op-check">✓</span>
+      <img src="${iconSrcBand("vm.svg", serverGlyphBand(server))}" width="16" height="16">
+      <span class="op-name">${esc(n)}</span>
+      ${pill}
+    </button>`;
+  }).join("") : '<div class="hint" style="padding:14px">No named virtual machines yet. Add VMs first.</div>';
+}
+/* Band to the theme variable that carries it: client blue, server green, Linux yellow,
+   Azure Local purple, a custom gold on the Deploy band like its icon. */
+const MEMBER_PICKER_BAND_VAR = {
+  host: "var(--role-client)", work: "var(--role-server)", linux: "var(--role-linux)",
+  ident: "var(--flag-nested)", deploy: "var(--secret-glyph)"
+};
+/* Why a VM cannot join what the picker is attaching, or "" when it can. Mirrors the
+   vetoes effectiveAzureArcPrincipal applies, so a row greyed here is exactly a VM the
+   build would skip anyway. */
+function memberPickerVeto(ctx, server) {
+  const img = findImage(server && server.imageId);
+  if (ctx.mode === "domainJoin") {
+    return imageRefusesDomainJoin(img) ? "realmd and adcli are not packaged for " + (img.label || "this distribution") : "";
+  }
+  if (ctx.mode !== "azureArc") return "";
+  if (imageRefusesAzureArc(img)) return img.noAzureArcReason || ("Azure Arc has no agent for " + (img.label || "this distribution"));
+  const a = state.azureArcPrincipals.find(x => x._id === ctx.targetId);
+  if (a && a.authMode === "hostContext" && isLinuxServer(server)) return "Host context cannot onboard a Linux VM";
+  return "";
+}
+function toggleMemberPickerVm(name) {
+  const ctx = state.memberPicker;
+  if (!ctx.selected.includes(name) && memberPickerVeto(ctx, state.servers.find(x => x.name === name))) return;
+  if (ctx.selected.includes(name)) ctx.selected = ctx.selected.filter(n => n !== name);
+  else ctx.selected.push(name);
+  renderMemberPickerList();
+}
+function applyMemberPicker() {
+  const ctx = state.memberPicker;
+  if (ctx.mode === "vhdSet") {
+    const v = state.vhdSets.find(x => x._id === ctx.targetId);
+    if (v) v.attachTo = [...ctx.selected];
+  } else if (ctx.mode === "domainJoin") {
+    const a = state.domainJoinAccounts.find(x => x._id === ctx.targetId);
+    if (a) {
+      ensureCatalogStableId(a, "dja");
+      const selected = new Set(ctx.selected);
+      state.servers.forEach(s => {
+        if (!s.name) return;
+        if (selected.has(s.name)) {
+          const ou = (s.domainJoin && s.domainJoin.accountId === a.id) ? (s.domainJoin.ouPath || "") : ((s.domainJoin && s.domainJoin.ouPath) || "");
+          s.domainJoin = { enabled: true, accountId: a.id, ouPath: ou };
+        } else if (s.domainJoin && s.domainJoin.accountId === a.id) {
+          s.domainJoin = { enabled: false, accountId: "", ouPath: "", mode: null };
+        }
+      });
+    }
+  } else if (ctx.mode === "azureArc") {
+    const a = state.azureArcPrincipals.find(x => x._id === ctx.targetId);
+    if (a) {
+      ensureCatalogStableId(a, "arc");
+      const selected = new Set(ctx.selected);
+      state.servers.forEach(s => {
+        if (!s.name) return;
+        if (selected.has(s.name)) {
+          s.azureArc = { enabled: true, principalId: a.id };
+        } else if (s.azureArc && s.azureArc.principalId === a.id) {
+          s.azureArc = { enabled: false, principalId: "" };
+        }
+      });
+    }
+  } else if (ctx.mode === "cluster") {
+    const selected = new Set(ctx.selected);
+    state.servers.forEach(s => {
+      if (!s.name) return;
+      s.cluster = { enabled: selected.has(s.name) };
+    });
+  } else if (ctx.mode === "network") {
+    const n = state.networks.find(x => x._id === ctx.targetId);
+    if (n) {
+      ensureCatalogStableId(n, "net");
+      const selected = new Set(ctx.selected);
+      state.servers.forEach(s => {
+        if (!s.name) return;
+        if (selected.has(s.name)) {
+          applyNetworkToServer(s, n);
+        } else if (s.network && s.network.networkId === n.id) {
+          detachNetworkFromServer(s);
+        }
+      });
+    }
+  }
+  closeMemberPicker();
+  render();
+}
+
+
+function boot() {
+  applyTheme(state.themeId || DEFAULT_THEME_ID);
+  render();
+}
+
+document.getElementById("exportGateCancel").addEventListener("click", closeExportGate);
+document.getElementById("exportGateConfirm").addEventListener("click", () => {
+  closeExportGate();
+  downloadConfigNow();
+});
+document.getElementById("vmImportCancel").addEventListener("click", closeVmImportModal);
+document.getElementById("vmImportConfirm").addEventListener("click", confirmVmImport);
+document.getElementById("vmImportOverlay").addEventListener("click", e => {
+  if (e.target.id === "vmImportOverlay") closeVmImportModal();
+});
+document.getElementById("vmImportFile").addEventListener("change", e => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { document.getElementById("vmImportText").value = String(reader.result || ""); };
+  reader.readAsText(file);
+});
+document.getElementById("memberPickerCancel").addEventListener("click", closeMemberPicker);
+document.getElementById("memberPickerApply").addEventListener("click", applyMemberPicker);
+document.getElementById("memberPickerClear").addEventListener("click", () => {
+  state.memberPicker.selected = [];
+  renderMemberPickerList();
+});
+document.getElementById("memberPickerOverlay").addEventListener("click", e => {
+  if (e.target.id === "memberPickerOverlay") closeMemberPicker();
+  const row = e.target.closest("[data-pick-vm]");
+  if (row) toggleMemberPickerVm(row.getAttribute("data-pick-vm"));
+});
+document.getElementById("memberPickerFilter").addEventListener("input", renderMemberPickerList);
+
+/* PVE VM Studio: server.js starts the studio once the user is signed in and the lab is
+   loaded (studioStart). */
