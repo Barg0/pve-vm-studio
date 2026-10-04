@@ -1,0 +1,31 @@
+# A release: tag vX.Y.Z on main. The notes come from the tag's annotation - write them as
+# "- New: ...", "- Fixed: ...", "- Changed: ..." and the studio's Version card shows them so.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --release
+      - run: cargo build --release
+      - name: Assets
+        run: |
+          mkdir dist
+          cp target/release/pve-vm-studio dist/pve-vm-studio-x86_64
+          cp deploy/install.sh deploy/update-lxc.sh deploy/pve-vm-studio.service deploy/pvs-update.sh \
+             deploy/pve-vm-studio-update.path deploy/pve-vm-studio-update.service dist/
+          (cd dist && sha256sum * > SHA256SUMS)
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes-file notes.md

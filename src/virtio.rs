@@ -72,8 +72,29 @@ fn version_key(v: &str) -> Vec<u32> {
     v.split(['.', '-']).filter_map(|p| p.parse().ok()).collect()
 }
 
-/// "stable" and "latest" are redirects to a release; this follows them.
+/// Releases Proxmox lists as broken for Windows guests (pve.proxmox.com/wiki/Windows_VirtIO_Drivers):
+/// 0.1.215-0.1.262, and 0.1.285 (read errors on vioscsi/viostor under heavy IO on Server
+/// 2025). None is baked into a gold - a driver problem in a gold is in every VM cloned from it.
+pub fn known_bad(release: &str) -> Option<&'static str> {
+    let n: Option<u32> = release.strip_prefix("0.1.").and_then(|r| r.split('-').next()).and_then(|r| r.parse().ok());
+    match n {
+        Some(215..=262) => Some("Proxmox lists 0.1.215 to 0.1.262 as broken for Windows guests"),
+        Some(285) => Some("Proxmox lists 0.1.285 as broken: storage read errors under heavy IO on Windows Server 2025"),
+        _ => None,
+    }
+}
+
+/// "stable" and "latest" are redirects to a release; this follows them. A release Proxmox
+/// lists as broken is refused, the channels' too.
 pub async fn resolve(wanted: &str) -> Result<String> {
+    let r = resolve_any(wanted).await?;
+    if let Some(why) = known_bad(&r) {
+        bail!("virtio-win {r}{} - {why}; pin another release under Media", if r == wanted { String::new() } else { format!(" (what '{wanted}' points at)") });
+    }
+    Ok(r)
+}
+
+async fn resolve_any(wanted: &str) -> Result<String> {
     if wanted != "stable" && wanted != "latest" {
         if !wanted.starts_with("0.1.") {
             bail!("'{wanted}' is not a virtio-win release");

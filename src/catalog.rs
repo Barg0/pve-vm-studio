@@ -120,6 +120,7 @@ pub static FEATURES: &[Feature] = &[
     Feature { id: "aliases", label: "Shell aliases", images: &[] },
     Feature { id: "prompt", label: "Coloured prompt", images: &[] },
     Feature { id: "fastfetch", label: "fastfetch at login", images: &[] },
+    Feature { id: "pskeys", label: "PowerShell-style keys", images: &[] },
     Feature {
         id: "quietmotd",
         label: "Quiet SSH login",

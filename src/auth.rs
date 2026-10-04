@@ -42,10 +42,60 @@ impl Session {
     }
 }
 
+/// The sessions, kept in a file of the studio's own (root only, beside the PVE token it
+/// already keeps) so an update of the studio does not sign everyone out.
 #[derive(Clone, Default)]
-pub struct Sessions(Arc<RwLock<HashMap<String, Session>>>);
+pub struct Sessions(Arc<RwLock<HashMap<String, Session>>>, Option<Arc<std::path::PathBuf>>);
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Saved {
+    id: String,
+    user: String,
+    csrf: String,
+    ticket: Ticket,
+    /// Unix seconds.
+    ticket_at: u64,
+    last_seen: u64,
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
 
 impl Sessions {
+    /// The sessions the last run left behind; the ones idle too long are dropped.
+    pub fn load(path: std::path::PathBuf) -> Self {
+        let now = unix_now();
+        let back = |t: u64| Instant::now().checked_sub(Duration::from_secs(now.saturating_sub(t))).unwrap_or_else(Instant::now);
+        let saved: Vec<Saved> = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let map: HashMap<String, Session> = saved
+            .into_iter()
+            .filter(|s| now.saturating_sub(s.last_seen) < IDLE_LIMIT.as_secs())
+            .map(|s| (s.id, Session { user: s.user, csrf: s.csrf, ticket: s.ticket, ticket_at: back(s.ticket_at), last_seen: back(s.last_seen) }))
+            .collect();
+        Self(Arc::new(RwLock::new(map)), Some(Arc::new(path)))
+    }
+
+    async fn save(&self) {
+        let Some(path) = &self.1 else { return };
+        let now = unix_now();
+        let ago = |i: Instant| now.saturating_sub(i.elapsed().as_secs());
+        let saved: Vec<Saved> = self
+            .0
+            .read()
+            .await
+            .iter()
+            .map(|(id, s)| Saved { id: id.clone(), user: s.user.clone(), csrf: s.csrf.clone(), ticket: s.ticket.clone(), ticket_at: ago(s.ticket_at), last_seen: ago(s.last_seen) })
+            .collect();
+        let Ok(bytes) = serde_json::to_vec(&saved) else { return };
+        let tmp = path.with_extension("tmp");
+        use std::os::unix::fs::OpenOptionsExt;
+        let ok = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp).and_then(|mut f| std::io::Write::write_all(&mut f, &bytes));
+        if ok.is_ok() {
+            let _ = std::fs::rename(&tmp, path.as_ref());
+        }
+    }
+
     pub async fn create(&self, ticket: Ticket) -> (String, Session) {
         let id = random_token();
         let now = Instant::now();
@@ -59,11 +109,14 @@ impl Sessions {
         let mut map = self.0.write().await;
         map.retain(|_, s| s.last_seen.elapsed() < IDLE_LIMIT);
         map.insert(id.clone(), session.clone());
+        drop(map);
+        self.save().await;
         (id, session)
     }
 
     pub async fn remove(&self, id: &str) {
         self.0.write().await.remove(id);
+        self.save().await;
     }
 
     async fn touch(&self, id: &str) -> Option<Session> {
@@ -82,6 +135,7 @@ impl Sessions {
             s.ticket = ticket;
             s.ticket_at = Instant::now();
         }
+        self.save().await;
     }
 }
 

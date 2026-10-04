@@ -21,14 +21,20 @@ pub struct WimImage {
     pub installation_type: String,
     pub language: String,
     pub build: String,
+    /// major.minor.build.revision - 10.0.26100.4061, the revision being the cumulative
+    /// update the media was refreshed with (New-Vhdx's Get-ImageBuildInfo). What golds of
+    /// one image are sorted by.
+    #[serde(default)]
+    pub version: String,
     /// What applying it writes - the measure for the bake's progress bar.
     pub total_bytes: u64,
 }
 
 pub async fn inspect(iso: &Path, cache_file: &Path) -> Result<Vec<WimImage>> {
     let meta = tokio::fs::metadata(iso).await.with_context(|| format!("reading {}", iso.display()))?;
+    // v2: entries carry the full version.
     let key = format!(
-        "{}|{}|{}",
+        "v2|{}|{}|{}",
         iso.display(),
         meta.len(),
         meta.modified().ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0)
@@ -59,6 +65,20 @@ pub async fn inspect(iso: &Path, cache_file: &Path) -> Result<Vec<WimImage>> {
         }
     }
     Err(last_err)
+}
+
+/// What the cache already knows about an ISO, without ever starting 7z - for lookups that
+/// must stay fast (the gold list filling in an old gold's full build).
+pub async fn cached(iso: &Path, cache_file: &Path) -> Option<Vec<WimImage>> {
+    let meta = tokio::fs::metadata(iso).await.ok()?;
+    let key = format!(
+        "v2|{}|{}|{}",
+        iso.display(),
+        meta.len(),
+        meta.modified().ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0)
+    );
+    let cache: HashMap<String, Vec<WimImage>> = serde_json::from_slice(&tokio::fs::read(cache_file).await.ok()?).ok()?;
+    cache.get(&key).cloned()
 }
 
 async fn read_xml(iso: &Path, inner: &str) -> Result<String> {
@@ -128,6 +148,13 @@ pub fn parse_images(xml: &str) -> Vec<WimImage> {
             installation_type: tag(windows, "INSTALLATIONTYPE").unwrap_or("").to_owned(),
             language: tag(windows.split("<LANGUAGES>").nth(1).unwrap_or(""), "LANGUAGE").unwrap_or("").to_owned(),
             build: tag(version, "BUILD").unwrap_or("").to_owned(),
+            version: match (tag(version, "MAJOR"), tag(version, "MINOR"), tag(version, "BUILD")) {
+                (Some(a), Some(b), Some(c)) => match tag(version, "SPBUILD") {
+                    Some(d) => format!("{a}.{b}.{c}.{d}"),
+                    None => format!("{a}.{b}.{c}"),
+                },
+                _ => String::new(),
+            },
             total_bytes: tag(block, "TOTALBYTES").and_then(|t| t.parse().ok()).unwrap_or(0),
         });
     }

@@ -1,0 +1,34 @@
+# The development channel: every push to main is built and published as the rolling
+# pre-release "edge" - the studio's Version card (Development) offers it. Untested by design.
+name: edge
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+concurrency:
+  group: edge
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --release
+      - run: cargo build --release
+      - name: Assets
+        run: |
+          mkdir dist
+          cp target/release/pve-vm-studio dist/pve-vm-studio-x86_64
+          cp deploy/install.sh deploy/update-lxc.sh deploy/pve-vm-studio.service deploy/pvs-update.sh \
+             deploy/pve-vm-studio-update.path deploy/pve-vm-studio-update.service dist/
+          (cd dist && sha256sum * > SHA256SUMS)
+      - name: Publish edge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete edge --yes --cleanup-tag || true
+          gh release create edge dist/* --prerelease --target "$GITHUB_SHA" \
+            --title "Development build $GITHUB_SHA" \
+            --notes "Development build $GITHUB_SHA - main, untested. $(git log -1 --format=%s)"

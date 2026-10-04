@@ -1,0 +1,11 @@
+[Unit]
+Description=PVE VM Studio: grow the CIS volumes to the disk
+ConditionPathExists=/etc/pvs-cis/layout.done
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/lib/pvs-cis/layout.sh grow
+
+[Install]
+WantedBy=multi-user.target

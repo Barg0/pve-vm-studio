@@ -1,0 +1,4 @@
+# Studio deviations for this benchmark - recommendation <tab> reason. The fix leaves these
+# alone, the check still runs and reports "exception" with the reason.
+1.6.5	HMAC-SHA1 stays allowed for Kerberos only: Active Directory signs Kerberos with AES-SHA1 (aes256-cts-hmac-sha1-96) and a domain join needs it. SSH and TLS have it off (crypto policy module PVS-NO-SHA1-MAC, scope !kerberos).
+5.3.2.4.4	pam_unix in the password stack keeps try_first_pass: pam-config (which owns common-password, and through which a domain join adds sssd) has no use_authtok option for pam_unix. pam_pwquality runs first (requisite), so the password is checked before pam_unix takes it.

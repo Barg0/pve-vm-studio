@@ -1,0 +1,17 @@
+[Unit]
+Description=PVE VM Studio: CIS Level 2 filesystems (bake only, runs once)
+DefaultDependencies=no
+ConditionPathExists=/etc/pvs-cis/layout.wanted
+ConditionPathExists=!/etc/pvs-cis/layout.done
+After=systemd-remount-fs.service systemd-udevd.service systemd-udev-trigger.service
+Before=local-fs-pre.target systemd-journal-flush.service systemd-tmpfiles-setup.service systemd-random-seed.service
+Wants=local-fs-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=0
+ExecStart=/bin/bash /usr/local/lib/pvs-cis/layout.sh migrate
+
+[Install]
+WantedBy=sysinit.target

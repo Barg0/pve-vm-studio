@@ -8,6 +8,8 @@ mod auth;
 mod catalog;
 mod config;
 mod error;
+mod cis;
+mod fod;
 mod golds;
 mod guest;
 mod jobs;
@@ -18,13 +20,17 @@ mod pve;
 mod seed;
 mod serial;
 mod settings;
+mod tags;
 mod tls;
+mod uup;
 mod virtio;
 mod vms;
 mod web;
 mod wim;
 mod windows;
 mod winpe;
+mod media;
+mod update;
 
 use std::sync::Arc;
 
@@ -148,15 +154,26 @@ async fn main() -> Result<()> {
             .user_agent(concat!("pve-vm-studio/", env!("CARGO_PKG_VERSION")))
             .timeout(std::time::Duration::from_secs(60))
             .build()?,
-        sessions: Sessions::default(),
-        jobs: Jobs::new(db.clone(), config.jobs_dir()).await?,
+        sessions: Sessions::load(config.data_dir.join("sessions.json")),
+        jobs: {
+            // An update ends in the process after the restart: close it before the jobs
+            // table marks the running ones interrupted.
+            update::finish_pending(&db, &config.data_dir, &config.jobs_dir()).await;
+            Jobs::new(db.clone(), config.jobs_dir()).await?
+        },
         db,
         tls: tls_live.clone(),
         config: Arc::new(config),
     };
 
+    tokio::spawn(reconcile_after_restart(state.clone()));
+    tokio::spawn(warm_caches(state.clone()));
+    tokio::spawn(clean_work(state.clone()));
+    tokio::spawn(auto_update(state.clone()));
+
     let app = Router::new()
-        .nest("/api", api::router())
+        .nest("/api", api::router().layer(axum::middleware::from_fn(time_request)))
+        .merge(media::worker_router())
         .fallback(web::static_file)
         .with_state(state.clone());
 
@@ -216,4 +233,255 @@ fn to_https(uri: &Uri, headers: &axum::http::HeaderMap, port: u16) -> Response {
     let port = if port == 443 { String::new() } else { format!(":{port}") };
     let path = uri.path_and_query().map(|p| p.as_str()).unwrap_or("/");
     Redirect::permanent(&format!("https://{host}{port}{path}")).into_response()
+}
+
+/// Every API call's time: slow ones (250 ms and up) at info, the rest at debug - where the
+/// studio spends its time, without a profiler. The event stream of a job is left out; it
+/// is meant to stay open.
+async fn time_request(req: axum::extract::Request, next: axum::middleware::Next) -> axum::response::Response {
+    let (method, path) = (req.method().clone(), req.uri().path().to_owned());
+    let start = std::time::Instant::now();
+    let res = next.run(req).await;
+    let ms = start.elapsed().as_millis();
+    if !path.ends_with("/events") {
+        if ms >= 250 {
+            tracing::info!("{method} /api{path} -> {} in {ms} ms", res.status().as_u16());
+        } else {
+            tracing::debug!("{method} /api{path} -> {} in {ms} ms", res.status().as_u16());
+        }
+    }
+    res
+}
+
+/// Everything slow the UI waits for on a first visit, done in the background instead: the
+/// editions of every Windows ISO (7z reads through the whole install.wim to its index), each
+/// ISO's SHA-256 for the sidecar, the virtio-win releases, lego's DNS providers. All of it
+/// is cached, so after the first pass a round costs a directory listing. Repeated every
+/// ten minutes for ISOs uploaded since.
+/// The work folder holds only what running jobs build - seed disks, WinPE trees, media
+/// downloads; every job removes its own. What a crash or a restart left behind goes here:
+/// every five minutes, and only while no job runs, anything in it untouched for ten minutes
+/// (a job that is just starting has written seconds ago) - the download cache of Windows
+/// media builds after six hours, so a failed build can be retried without downloading again. The volume is mounted with
+/// discard, so the space goes back to the storage at once.
+async fn clean_work(app: AppState) {
+    let work = app.config.data_dir.join("work");
+    loop {
+        if app.jobs.idle().await
+            && let Ok(mut entries) = tokio::fs::read_dir(&work).await
+        {
+            let mut freed = 0u64;
+            let mut removed = Vec::new();
+            while let Ok(Some(e)) = entries.next_entry().await {
+                let Ok(meta) = e.metadata().await else { continue };
+                // The Windows media download cache waits six hours for a retry of a failed build.
+                let limit = if e.file_name() == "uup-files" { 6 * 3600 } else { 600 };
+                let old = meta.modified().ok().and_then(|m| m.elapsed().ok()).is_some_and(|age| age.as_secs() > limit);
+                // lost+found belongs to the volume's file system, not to a job.
+                if !old || e.file_name() == "lost+found" || !app.jobs.idle().await {
+                    continue;
+                }
+                let path = e.path();
+                let size = dir_size(&path).await;
+                let gone = if meta.is_dir() { tokio::fs::remove_dir_all(&path).await } else { tokio::fs::remove_file(&path).await };
+                if gone.is_ok() {
+                    freed += size;
+                    removed.push(e.file_name().to_string_lossy().into_owned());
+                }
+            }
+            if !removed.is_empty() {
+                tracing::info!("work folder: removed {} leftover(s), {:.1} GB: {}", removed.len(), freed as f64 / 1e9, removed.join(", "));
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+    }
+}
+
+async fn dir_size(path: &std::path::Path) -> u64 {
+    let mut total = 0;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        let Ok(meta) = tokio::fs::symlink_metadata(&p).await else { continue };
+        if meta.is_dir() {
+            if let Ok(mut rd) = tokio::fs::read_dir(&p).await {
+                while let Ok(Some(e)) = rd.next_entry().await {
+                    stack.push(e.path());
+                }
+            }
+        } else {
+            total += meta.len();
+        }
+    }
+    total
+}
+
+async fn warm_caches(app: AppState) {
+    tokio::join!(virtio::upstream(&app.web), tls::dns_providers());
+    loop {
+        let mut isos = Vec::new();
+        if let Ok(mut stores) = tokio::fs::read_dir(&app.config.iso_root).await {
+            while let Ok(Some(store)) = stores.next_entry().await {
+                let Ok(mut files) = tokio::fs::read_dir(store.path()).await else { continue };
+                while let Ok(Some(f)) = files.next_entry().await {
+                    let name = f.file_name().to_string_lossy().to_lowercase();
+                    if name.ends_with(".iso") && !name.starts_with("pvs-") && !name.starts_with("virtio-win") {
+                        isos.push(f.path());
+                    }
+                }
+            }
+        }
+        for iso in isos {
+            let started = std::time::Instant::now();
+            if wim::inspect(&iso, &app.config.data_dir.join("wim-cache.json")).await.is_ok() {
+                let _ = golds::iso_sha256(&iso, &app.config.data_dir.join("iso-sha256-cache.json")).await;
+            }
+            if started.elapsed().as_secs() >= 1 {
+                tracing::info!("cached {} in {} s", iso.display(), started.elapsed().as_secs());
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+    }
+}
+
+/// What a restart leaves behind. A job dies with the process (Jobs::new marks it
+/// interrupted) and never reaches its own cleanup, so at startup - when no job can be
+/// running - the studio does it: the golds and VMs those jobs were making are marked failed,
+/// every seed ISO goes (they carry passwords, and none can be in use now), and every bake VM
+/// is destroyed. Bake VMs are only ever bake-<id>, tagged bake (pvs-bake before), never a template.
+async fn reconcile_after_restart(app: AppState) {
+    let db = &app.db;
+    for (what, sql) in [
+        ("golds left baking", "UPDATE golds SET status = 'failed' WHERE status = 'baking'"),
+        ("VMs left building", "UPDATE vms SET status = 'failed' WHERE status = 'building'"),
+    ] {
+        if let Ok(r) = sqlx::query(sql).execute(db).await
+            && r.rows_affected() > 0
+        {
+            tracing::info!("{} {what} by the restart are marked failed", r.rows_affected());
+        }
+    }
+    let Ok(res) = app.pve.resources().await else { return };
+    let mut seen = std::collections::HashSet::new();
+    // Seeds were ISOs once and are uploaded disk images (content "import") now - both go.
+    let mut stores: Vec<(&pve::Resource, &str)> = Vec::new();
+    for r in res.iter().filter(|r| r.kind == "storage" && r.status.as_deref() == Some("available")) {
+        for c in ["iso", "import"] {
+            if r.has_content(c) {
+                stores.push((r, c));
+            }
+        }
+    }
+    for (st, content) in stores {
+        let (Some(node), Some(storage)) = (st.node.as_deref(), st.storage.as_deref()) else { continue };
+        for v in app.pve.storage_content(node, storage, content).await.unwrap_or_default() {
+            let file = v.volid.rsplit('/').next().unwrap_or("");
+            if file.starts_with("pvs-seed-") && seen.insert(v.volid.clone()) {
+                match app.pve.delete_volume(node, &v.volid).await {
+                    Ok(()) => tracing::info!("removed leftover seed {}", v.volid),
+                    Err(e) => tracing::warn!("could not remove leftover seed {}: {e:#}", v.volid),
+                }
+            }
+        }
+    }
+    // Older golds were named pve-<id>; a gold is its id alone now - template and record.
+    let golds: Vec<(String, String, String, Option<i64>)> =
+        sqlx::query_as("SELECT id, name, node, vmid FROM golds WHERE status = 'ready' AND name LIKE 'pve-%'").fetch_all(db).await.unwrap_or_default();
+    for (id, name, node, vmid) in golds {
+        let Some(vmid) = vmid else { continue };
+        if name != format!("pve-{id}") {
+            continue;
+        }
+        if app.pve.vm_set(&node, vmid as u32, crate::form![("name", &id)]).await.is_ok() {
+            let _ = sqlx::query("UPDATE golds SET name = ? WHERE id = ?").bind(&id).bind(&id).execute(db).await;
+            tracing::info!("gold {name} is named {id} now");
+        }
+    }
+    retag(&app, &res).await;
+    for vm in res.iter().filter(|r| {
+        r.kind == "qemu" && r.template != Some(1) && r.name.as_deref().is_some_and(golds::is_bake_vm_name) && r.tags.as_deref().is_some_and(|t| t.split(';').any(|t| t == tags::BAKE || t == "pvs-bake"))
+    }) {
+        let (Some(node), Some(vmid)) = (vm.node.as_deref(), vm.vmid) else { continue };
+        match app.pve.vm_destroy(node, vmid).await {
+            Ok(()) => tracing::info!("removed leftover bake VM {vmid}"),
+            Err(e) => tracing::warn!("could not remove leftover bake VM {vmid}: {e:#}"),
+        }
+    }
+}
+
+/// Golds and VMs made before the tags were clean (pvs, pvs-gold, pvs-vm, pvs-img-<id>) get
+/// today's (tags.rs), and a VM's notes lose the user and address rows they used to carry.
+/// Runs at every start, touches only what still has a pvs tag; the colours are checked each time.
+async fn retag(app: &AppState, res: &[pve::Resource]) {
+    let old = |r: &pve::Resource| r.tags.as_deref().is_some_and(|t| t.split(';').any(|t| t.starts_with("pvs")));
+    let at = |vmid: i64| res.iter().find(|r| r.kind == "qemu" && r.vmid == Some(vmid as u32) && old(r));
+    let golds: Vec<(String, String, String, Option<i64>, String)> =
+        sqlx::query_as("SELECT id, image_id, os, vmid, manifest FROM golds WHERE status = 'ready'").fetch_all(&app.db).await.unwrap_or_default();
+    for (id, image, os, vmid, manifest) in &golds {
+        let Some(r) = vmid.and_then(at) else { continue };
+        let (Some(node), Some(vmid)) = (r.node.as_deref(), r.vmid) else { continue };
+        let tags = tags::gold(os, image, &serde_json::from_str(manifest).unwrap_or_default());
+        if app.pve.vm_set(node, vmid, crate::form![("tags", tags.join(";"))]).await.is_ok() {
+            tags::paint(&app.pve, &tags).await;
+            tracing::info!("gold {id}: tags {}", tags.join(", "));
+        }
+    }
+    let vms: Vec<(String, String, Option<i64>)> =
+        sqlx::query_as("SELECT name, gold_id, vmid FROM vms WHERE status = 'ready'").fetch_all(&app.db).await.unwrap_or_default();
+    // Every studio tag in use gets its colour (once the token may set it, see install.sh).
+    let mut all: Vec<String> = vec![tags::BAKE.into(), tags::WORKER.into()];
+    for (_, image, os, _, manifest) in &golds {
+        all.extend(tags::gold(os, image, &serde_json::from_str(manifest).unwrap_or_default()));
+        all.push(tags::os(os, image, None));
+    }
+    all.sort();
+    all.dedup();
+    tags::paint(&app.pve, &all).await;
+    for (name, gold, vmid) in vms {
+        let Some(r) = vmid.and_then(at) else { continue };
+        let (Some(node), Some(vmid)) = (r.node.as_deref(), r.vmid) else { continue };
+        let Some((_, image, os, _, _)) = golds.iter().find(|g| g.0 == gold) else { continue };
+        let os_tag = tags::os(os, image, None);
+        let mut tags = vec![os_tag.clone()];
+        for t in r.tags.as_deref().unwrap_or("").split(';').filter(|t| !t.is_empty() && !t.starts_with("pvs")) {
+            if !tags.iter().any(|x| x == t) {
+                tags.push(t.to_owned());
+            }
+        }
+        let mut form = crate::form![("tags", tags.join(";"))];
+        if let Ok(cfg) = app.pve.vm_config(node, vmid).await
+            && let Some(d) = cfg.get("description").and_then(|d| d.as_str())
+            && d.contains("| User |")
+        {
+            let d: Vec<&str> = d.lines().filter(|l| !l.starts_with("| User |") && !l.starts_with("| Address |")).collect();
+            let d = d.join("\n").replace("\n\n| | |\n|---|---|", "");
+            form.push(("description".into(), d.trim_end().to_owned() + "\n"));
+        }
+        if app.pve.vm_set(node, vmid, form).await.is_ok() {
+            tags::paint(&app.pve, &[os_tag]).await;
+            tracing::info!("VM {name}: tags {}", tags.join(", "));
+        }
+    }
+}
+
+/// "Install updates automatically": between 03:00 and 04:00 local time, when a newer release
+/// is out and no job runs, the same update job an admin starts from Studio settings.
+async fn auto_update(app: AppState) {
+    use chrono::Timelike;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
+        let s: update::UpdateSettings = settings::load(&app.db, "update").await.unwrap_or_default();
+        if !s.auto || chrono::Local::now().hour() != 3 || !app.jobs.running_ids().await.is_empty() {
+            continue;
+        }
+        let v = update::status(&app.web, true, s.development()).await;
+        if v["state"] != "update" {
+            continue;
+        }
+        let tag = if s.development() { Some(update::EDGE) } else { v["releases"][0]["tag"].as_str() };
+        let Some(tag) = tag else { continue };
+        match api::start_update(&app, tag, "automatic update").await {
+            Ok(id) => tracing::info!("automatic update to {tag} started (job {id})"),
+            Err(e) => tracing::warn!("automatic update to {tag} could not start: {e:#}"),
+        }
+    }
 }

@@ -37,7 +37,9 @@ impl Progress {
         if pct > self.pct {
             self.pct = pct;
         }
-        self.log.progress(&self.label, Some(self.pct.min(100.0)), detail);
+        // The stage's own share, for the running step's row.
+        let step = if self.to > self.from { Some(((self.pct - self.from) / (self.to - self.from) * 100.0).clamp(0.0, 100.0)) } else { None };
+        self.log.progress_step(&self.label, Some(self.pct.min(100.0)), step, detail);
     }
 }
 

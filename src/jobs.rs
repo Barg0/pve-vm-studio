@@ -20,7 +20,9 @@ pub enum Event {
     Line { n: usize, text: String },
     /// The step running now and how far it got (None: no percentage to give). Not
     /// logged - a progress bar, not history. `done` clears it.
-    Progress { label: String, pct: Option<f64>, detail: String, done: bool },
+    /// `step`: how far the current stage got (0-100) - the running step's own percentage,
+    /// where `pct` is the whole job's.
+    Progress { label: String, pct: Option<f64>, step: Option<f64>, detail: String, done: bool },
     Status { status: String, error: Option<String> },
 }
 
@@ -84,6 +86,8 @@ struct Live {
     order: Arc<Mutex<()>>,
     /// The last progress event, for a browser that starts watching mid-step.
     progress: std::sync::Mutex<Option<Event>>,
+    /// Who asked the job to stop; the job ends at its next check (JobLog::check_abort).
+    abort: std::sync::Mutex<Option<String>>,
 }
 
 struct LiveInner {
@@ -92,6 +96,15 @@ struct LiveInner {
 }
 
 impl JobLog {
+    /// Err once someone pressed Abort - the long waits call this, so the job fails the normal
+    /// way and its own cleanup (bake and worker VMs) still runs.
+    pub fn check_abort(&self) -> Result<()> {
+        match self.live.abort.lock().unwrap().as_ref() {
+            Some(who) => anyhow::bail!("cancelled by {who}"),
+            None => Ok(()),
+        }
+    }
+
     /// Same layout as the PowerShell logs: date and time, the tag, the message.
     pub async fn tag(&self, tag: Tag, text: impl Into<String>) {
         let text = format!("{} [ {:<5} ] {}", Local::now().format("%Y-%m-%d %H:%M:%S"), tag.shown(), text.into());
@@ -135,13 +148,17 @@ impl JobLog {
 
     /// The progress bar: what runs now, how far (0-100) when that is known.
     pub fn progress(&self, label: impl Into<String>, pct: Option<f64>, detail: impl Into<String>) {
-        let ev = Event::Progress { label: label.into(), pct, detail: detail.into(), done: false };
+        self.progress_step(label, pct, None, detail)
+    }
+
+    pub fn progress_step(&self, label: impl Into<String>, pct: Option<f64>, step: Option<f64>, detail: impl Into<String>) {
+        let ev = Event::Progress { label: label.into(), pct, step, detail: detail.into(), done: false };
         *self.live.progress.lock().unwrap() = Some(ev.clone());
         let _ = self.live.tx.send(ev);
     }
 
     pub fn progress_done(&self) {
-        let ev = Event::Progress { label: String::new(), pct: None, detail: String::new(), done: true };
+        let ev = Event::Progress { label: String::new(), pct: None, step: None, detail: String::new(), done: true };
         *self.live.progress.lock().unwrap() = None;
         let _ = self.live.tx.send(ev);
     }
@@ -160,6 +177,15 @@ impl Jobs {
     /// A job that was running when the process stopped is not running any more.
     pub async fn new(db: SqlitePool, dir: PathBuf) -> Result<Self> {
         tokio::fs::create_dir_all(&dir).await?;
+        // Their logs get the closing line too - a log ends with [ end ] or [ error ], always.
+        let cut: Vec<(String,)> = sqlx::query_as("SELECT id FROM jobs WHERE status IN ('queued', 'running')").fetch_all(&db).await?;
+        for (id,) in &cut {
+            use tokio::io::AsyncWriteExt;
+            if let Ok(mut f) = tokio::fs::OpenOptions::new().append(true).open(dir.join(format!("{id}.log"))).await {
+                let line = format!("{} [ {:<5} ] interrupted - the studio stopped while this job ran\n", Local::now().format("%Y-%m-%d %H:%M:%S"), "error");
+                let _ = f.write_all(line.as_bytes()).await;
+            }
+        }
         sqlx::query(
             "UPDATE jobs SET status = 'interrupted', ended_at = ?, \
              error = 'the studio stopped while this job ran' \
@@ -206,6 +232,7 @@ impl Jobs {
             tx,
             order: Arc::new(Mutex::new(())),
             progress: std::sync::Mutex::new(None),
+            abort: std::sync::Mutex::new(None),
         });
         self.running.write().await.insert(id.clone(), live.clone());
 
@@ -250,6 +277,17 @@ impl Jobs {
             .await?)
     }
 
+    /// The progress bar of every running job that has one, by job id - what the
+    /// dashboard shows without opening an event stream per job.
+    pub async fn progress(&self) -> std::collections::HashMap<String, Event> {
+        self.running
+            .read()
+            .await
+            .iter()
+            .filter_map(|(id, live)| live.progress.lock().unwrap().clone().map(|p| (id.clone(), p)))
+            .collect()
+    }
+
     pub async fn get(&self, id: &str) -> Result<Option<JobRow>> {
         Ok(sqlx::query_as("SELECT * FROM jobs WHERE id = ?")
             .bind(id)
@@ -267,6 +305,38 @@ impl Jobs {
         }
         let text = tokio::fs::read_to_string(self.log_path(id)).await.unwrap_or_default();
         Ok((text.lines().map(str::to_owned).collect(), None, None))
+    }
+
+    /// No job runs - the work folder holds nothing anyone needs.
+    pub async fn idle(&self) -> bool {
+        self.running.read().await.is_empty()
+    }
+
+    /// Asks a running job to stop. False when it is not running here.
+    pub async fn abort(&self, id: &str, who: &str) -> bool {
+        let Some(live) = self.running.read().await.get(id).cloned() else { return false };
+        let first = live.abort.lock().unwrap().replace(who.to_owned()).is_none();
+        if first {
+            JobLog { live }.warn(format!("Cancel requested by {who} - stopping at the next safe point, then cleaning up")).await;
+        }
+        true
+    }
+
+    /// Whether the job is running in this process right now.
+    /// The jobs running in this process now.
+    pub async fn running_ids(&self) -> Vec<String> {
+        self.running.read().await.keys().cloned().collect()
+    }
+
+    pub async fn is_running(&self, id: &str) -> bool {
+        self.running.read().await.contains_key(id)
+    }
+
+    /// Drops a finished job: its row and its log file.
+    pub async fn delete(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM jobs WHERE id = ? AND status NOT IN ('queued', 'running')").bind(id).execute(&self.db).await?;
+        let _ = tokio::fs::remove_file(self.log_path(id)).await;
+        Ok(())
     }
 
     fn log_path(&self, id: &str) -> PathBuf {

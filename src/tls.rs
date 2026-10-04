@@ -45,6 +45,17 @@ pub struct AcmeSettings {
     pub challenge: String,
     pub dns_provider: String,
     pub staging: bool,
+    /// More names the certificate covers, beside the studio's own DNS name (which is always
+    /// the first). A wildcard (*.example.com) only with DNS-01 - Let's Encrypt's rule.
+    #[serde(default)]
+    pub extra_names: Vec<String>,
+}
+
+/// Whether `name` is a DNS name a certificate can carry; `*.` in front only with DNS-01.
+pub fn valid_cert_name(name: &str, dns01: bool) -> bool {
+    let n = name.strip_prefix("*.").filter(|_| dns01).unwrap_or(name);
+    let label_ok = |l: &str| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    n.len() <= 253 && n.contains('.') && n.split('.').all(label_ok)
 }
 
 /// The name the studio is reached by. Everything else follows it: the certificate, the
@@ -53,6 +64,8 @@ pub struct AcmeSettings {
 #[serde(default)]
 pub struct ServerSettings {
     pub fqdn: String,
+    /// How the pages show times: "12h" (3:45 PM) or "24h" (15:45); "" reads as 12h.
+    pub clock: String,
 }
 
 pub struct Paths {
@@ -218,7 +231,28 @@ const LE_STAGING: &str = "https://acme-staging-v02.api.letsencrypt.org/directory
 
 /// lego's DNS provider codes, from `lego dnshelp`.
 pub async fn dns_providers() -> Vec<String> {
-    let Ok(out) = tokio::process::Command::new("lego").arg("dnshelp").output().await else {
+    // lego's list only changes with lego itself - asked once per run, not per page view.
+    static LIST: tokio::sync::OnceCell<Vec<String>> = tokio::sync::OnceCell::const_new();
+    LIST.get_or_init(read_dns_providers).await.clone()
+}
+
+/// `lego dnshelp`. lego creates its --path (default ./.lego) before any command, even this
+/// one; under the unit's ProtectSystem=strict the default lands on the read-only / and lego
+/// exits with nothing - the empty provider list. The private /tmp takes it instead.
+async fn dnshelp(args: &[&str]) -> std::io::Result<std::process::Output> {
+    let tmp = std::env::temp_dir();
+    tokio::process::Command::new("lego")
+        .current_dir(&tmp)
+        .arg("--path")
+        .arg(tmp.join("lego-help"))
+        .arg("dnshelp")
+        .args(args)
+        .output()
+        .await
+}
+
+async fn read_dns_providers() -> Vec<String> {
+    let Ok(out) = dnshelp(&[]).await else {
         return vec![];
     };
     let text = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
@@ -238,7 +272,7 @@ pub async fn provider_help(code: &str) -> Result<String> {
     if code.is_empty() || !code.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         bail!("unknown DNS provider '{code}'");
     }
-    let out = tokio::process::Command::new("lego").args(["dnshelp", "-c", code]).output().await.context("running lego - is it installed?")?;
+    let out = dnshelp(&["-c", code]).await.context("running lego - is it installed?")?;
     let text = String::from_utf8_lossy(&out.stdout).trim().to_owned();
     if text.is_empty() {
         bail!("lego knows no DNS provider '{code}'");
@@ -301,6 +335,15 @@ async fn lego_args(paths: &Paths, fqdn: &str, acme: &AcmeSettings) -> Result<(Ve
         "--server".into(),
         if acme.staging { LE_STAGING } else { LE_PRODUCTION }.into(),
     ];
+    // The extra names, each once and never the studio's own again.
+    let mut seen = vec![fqdn.to_lowercase()];
+    for n in &acme.extra_names {
+        let n = n.trim().trim_end_matches('.').to_lowercase();
+        if !n.is_empty() && !seen.contains(&n) {
+            args.extend(["--domains".into(), n.clone()]);
+            seen.push(n);
+        }
+    }
     let mut env = Vec::new();
     if acme.challenge == "dns-01" {
         env = credentials_env(paths, &acme.dns_provider).await?;
@@ -360,9 +403,9 @@ pub async fn acme_issue(
     }
     let (mut args, env) = lego_args(paths, fqdn, acme).await?;
     if acme.challenge == "dns-01" {
-        log.tag(Tag::Run, format!("Let's Encrypt, DNS-01 through {}, for {fqdn}", acme.dns_provider)).await;
+        log.tag(Tag::Run, format!("Let's Encrypt, DNS-01 through {}, for {}", acme.dns_provider, std::iter::once(fqdn.to_owned()).chain(acme.extra_names.iter().cloned()).collect::<Vec<_>>().join(", "))).await;
     } else {
-        log.tag(Tag::Run, format!("Let's Encrypt, HTTP-01 on port 80, for {fqdn}")).await;
+        log.tag(Tag::Run, format!("Let's Encrypt, HTTP-01 on port 80, for {}", std::iter::once(fqdn.to_owned()).chain(acme.extra_names.iter().cloned()).collect::<Vec<_>>().join(", "))).await;
     }
     if acme.staging {
         log.warn("Staging: the certificate will not be trusted by browsers - for testing the setup only").await;

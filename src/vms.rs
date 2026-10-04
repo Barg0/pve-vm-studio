@@ -25,12 +25,15 @@ use crate::{
     pve::{enc, Pve},
     progress::{self, PackageCounter, Progress},
     windows,
-    seed::SeedIso,
+    seed::{self, SeedDisk},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmSpec {
     pub name: String,
+    /// The design card this VM was built from - what ties a built VM to its card, not the name.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub card: String,
     pub gold: String,
     #[serde(default = "two")]
     pub cores: u32,
@@ -95,6 +98,21 @@ pub struct VmSpec {
     pub rsat: Vec<String>,
     #[serde(default)]
     pub app_compat: bool,
+    /// Client optional features (Hyper-V Management Tools) - enabled by the deploy pass.
+    #[serde(default)]
+    pub client_features: Vec<String>,
+    /// Built-in apps removed by the deploy pass (Windows 11 only), by package family.
+    #[serde(default)]
+    pub remove_apps: Vec<String>,
+    /// The Features on Demand ISO for the capabilities above, when one is set for the family.
+    #[serde(default)]
+    pub fod: Option<crate::fod::FodPlan>,
+    /// The PVE resource pool the VM joins (created when missing); "" = none.
+    #[serde(default)]
+    pub pool: String,
+    /// PVE tags beside the studio's own pvs ones.
+    #[serde(default)]
+    pub tags: Vec<String>,
     #[serde(default)]
     pub domain_join: Option<crate::guest::DomainJoin>,
     #[serde(default)]
@@ -106,6 +124,10 @@ pub struct VmSpec {
     /// Set by a lab deploy.
     #[serde(default)]
     pub lab: Option<String>,
+    /// Windows: the product key the Windows licenses blade gives the VM's image, installed and
+    /// activated at first boot (SetupComplete). Never stored with the record.
+    #[serde(default, skip_serializing)]
+    pub product_key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,7 +233,8 @@ pub struct VmRow {
 }
 
 pub async fn list(db: &SqlitePool) -> Result<Vec<VmRow>> {
-    Ok(sqlx::query_as("SELECT * FROM vms WHERE status != 'removed' ORDER BY name").fetch_all(db).await?)
+    // Cleared VMs still exist in PVE (and still need their gold) - only the view drops them.
+    Ok(sqlx::query_as("SELECT * FROM vms WHERE status NOT IN ('removed', 'cleared') ORDER BY name").fetch_all(db).await?)
 }
 
 pub async fn get(db: &SqlitePool, id: &str) -> Result<Option<VmRow>> {
@@ -227,12 +250,8 @@ pub fn new_mac() -> String {
 
 pub async fn deploy(pve: Pve, db: SqlitePool, work: std::path::PathBuf, log: JobLog, vm_id: String, spec: VmSpec) -> Result<()> {
     let mut made: Option<(String, u32)> = None;
-    let mut seed_vol: Option<(String, String)> = None;
-    let result = deploy_inner(&pve, &db, &work, &log, &vm_id, &spec, &mut made, &mut seed_vol).await;
+    let result = deploy_inner(&pve, &db, &work, &log, &vm_id, &spec, &mut made).await;
     if result.is_err() {
-        if let Some((node, volid)) = seed_vol {
-            let _ = pve.delete_volume(&node, &volid).await;
-        }
         if let Some((node, vmid)) = made {
             match pve.vm_destroy(&node, vmid).await {
                 Ok(()) => log.line(format!("Removed the half-built VM {vmid}")).await,
@@ -253,7 +272,6 @@ async fn deploy_inner(
     vm_id: &str,
     spec: &VmSpec,
     made: &mut Option<(String, u32)>,
-    seed_vol: &mut Option<(String, String)>,
 ) -> Result<()> {
     let gold: GoldRow = golds::get(db, &spec.gold).await?.ok_or_else(|| anyhow!("gold {} does not exist", spec.gold))?;
     if gold.status != "ready" {
@@ -268,7 +286,8 @@ async fn deploy_inner(
         Some(catalog::linux(&gold.image_id).ok_or_else(|| anyhow!("{} is not a known gold image", gold.image_id))?)
     };
     let image_name = img.map(|i| i.name.to_owned()).unwrap_or_else(|| manifest["name"].as_str().unwrap_or("Windows").to_owned());
-    let gold_disk_gb = img.map(|i| i.disk_gb).unwrap_or(64);
+    // The gold's own size (its sidecar), else the catalog's: a clone never shrinks.
+    let gold_disk_gb = manifest["diskSizeGB"].as_u64().map(|g| g as u32).or(img.map(|i| i.disk_gb)).unwrap_or(64);
     let template = gold.vmid.ok_or_else(|| anyhow!("gold {} has no template", gold.name))? as u32;
     let node = if spec.node.is_empty() { gold.node.clone() } else { spec.node.clone() };
 
@@ -305,6 +324,11 @@ async fn deploy_inner(
     if !spec.linked && !spec.storage.is_empty() {
         clone.push(("storage".into(), spec.storage.clone()));
     }
+    // The pool is how admins group VMs in PVE - the studio's grouping too.
+    if !spec.pool.is_empty() {
+        pve.ensure_pool(&spec.pool, "PVE VM Studio").await.with_context(|| format!("creating the pool {}", spec.pool))?;
+        clone.push(("pool".into(), spec.pool.clone()));
+    }
     let cloned = pve
         .run_task(&format!("/nodes/{}/qemu/{template}/clone", enc(&gold.node)), clone, |_| {})
         .await;
@@ -326,18 +350,18 @@ async fn deploy_inner(
         net0 += &format!(",tag={v}");
     }
     let extra_macs: Vec<String> = spec.extra_nics.iter().map(|_| new_mac()).collect();
-    let mut tags = vec!["pvs".to_owned(), "pvs-vm".to_owned(), format!("pvs-img-{}", gold.image_id)];
-    if let Some(lab) = &spec.lab {
-        tags.push(format!("pvs-lab-{}", lab.to_lowercase().replace(|c: char| !c.is_ascii_alphanumeric(), "-")));
+    // Its OS without a build (it updates), then the design's own tags.
+    let os_tag = crate::tags::os(&gold.os, &gold.image_id, None);
+    let mut tags = vec![os_tag.clone()];
+    for t in &spec.tags {
+        let t = crate::tags::clean(t);
+        if !t.is_empty() && !tags.contains(&t) {
+            tags.push(t);
+        }
     }
-    let notes = format!(
-        "## {}\n\nBuilt by PVE VM Studio from gold `{}` ({}).\n\n| | |\n|---|---|\n| User | `{}` |\n| Address | {} |\n",
-        spec.name,
-        gold.name,
-        image_name,
-        spec.user,
-        if spec.ip.is_empty() { "DHCP".into() } else { format!("`{}/{}`", spec.ip, spec.prefix) },
-    );
+    crate::tags::paint(pve, &[os_tag]).await;
+    // No user and no address: the notes are readable by anyone who sees the VM.
+    let notes = format!("## {}\n\nBuilt by PVE VM Studio from gold `{}` ({}).\n", spec.name, gold.name, image_name);
     let mut hw = form![
         ("cores", spec.cores),
         ("memory", spec.memory_mb),
@@ -405,15 +429,60 @@ async fn deploy_inner(
         log.run(format!("Data disk {slot}: {} GiB on {storage}", d.size_gb)).await;
     }
 
+    // ---- Windows: the WinPE deploy pass, when WinPE can boot here ----
+    let pass_media = if win { deploy_pass_media(pve, db, log, &node, &manifest).await? } else { None };
+
+    // The join: in specialize when the answer file reaches it (the deploy pass writes it
+    // into Panther), as the design asks; on the seed-CD path the VM's file only reaches
+    // oobeSystem, so the join is deferred to GuestProvision's task.
+    let join_mode = match &spec.domain_join {
+        Some(d) if win && pass_media.is_some() && d.mode != "deferred" => "specialize",
+        Some(d) if win => {
+            if d.mode == "specialize" {
+                log.line("The join is deferred to after first boot - without the WinPE deploy pass the answer file does not reach specialize").await;
+            }
+            "deferred"
+        }
+        _ => "deferred",
+    };
+
+    // Roles and features: offline in the deploy pass where Windows' own table knows them
+    // (Install-WindowsFeature -Vhd on Hyper-V); GuestProvision keeps the full list - a
+    // feature already installed is "no change needed" there, one that failed offline gets
+    // its second chance online, and the guest-only ones are installed there for the first time.
+    let feature_plan = if win && pass_media.is_some() && manifest["installationType"].as_str() != Some("Client") {
+        let build = manifest["build"].as_str().unwrap_or("");
+        windows::plan_server_features(&spec.windows_features, spec.include_management_tools, build)
+    } else {
+        windows::FeaturePlan { dism: vec![], online: spec.windows_features.clone(), groups: vec![] }
+    };
+    let (server_dism, server_online) = (feature_plan.dism.clone(), feature_plan.online.clone());
+    if !server_dism.is_empty() {
+        log.line(format!(
+            "Roles and features offline as {} DISM feature(s){}",
+            server_dism.len(),
+            if server_online.is_empty() { String::new() } else { format!("; at first boot: {}", server_online.join(", ")) }
+        ))
+        .await;
+    }
+    // .NET 3.5's payload is not in the image; the gold's source ISO carries it (sources\sxs).
+    let sxs_iso = if server_dism.iter().any(|d| d.starts_with("NetFx3")) {
+        manifest["sourceMedia"].as_str().or_else(|| manifest["sourceIso"].as_str()).filter(|v| !v.is_empty()).map(str::to_owned)
+    } else {
+        None
+    };
+
     // ---- 3. seed ----
     pr.stage(30.0, 35.0, "building the seed");
     let stamp = Utc::now().format("%Y%m%d%H%M%S").to_string();
-    let iso_storage = iso_storage_on(pve, &node).await?;
     let seed_name = format!("pvs-seed-{}-{stamp}", spec.name);
-    // The CD slot: ide2 on Linux (cloud-init's NoCloud), sata0 on Windows (the gold's
-    // CD slots were emptied when it was sealed).
-    let slot = if win { "sata0" } else { "ide2" };
-    let iso = if let Some(img) = img {
+    // The seed is a small disk (a FAT partition labelled CIDATA for cloud-init, PVSVM for
+    // Windows), on the VM's own storage. Windows: sata2 beside the deploy pass's CDs, else
+    // sata0. Linux: scsi30 (data disks count up from scsi1) - Debian 12's cloud kernel has no
+    // AHCI driver and would not see a SATA seed.
+    let slot = if !win { linux::SEED_SLOT } else if pass_media.is_some() { "sata2" } else { "sata0" };
+    let seed_storage = if spec.storage.is_empty() { gold.storage.clone() } else { spec.storage.clone() };
+    let seed_disk = if let Some(img) = img {
         let mut nics = vec![linux::NicCfg {
             mac: mac.clone(),
             address: spec.ip.clone(),
@@ -433,6 +502,7 @@ async fn deploy_inner(
             packages: spec.packages.clone(),
             domain_join: spec.domain_join.clone(),
             arc: spec.arc.clone(),
+            cis: manifest["cis"].is_object(),
         };
         let user_data = linux::vm_user_data(img, &seed);
         let meta_data = linux::vm_meta_data(&spec.name, &stamp);
@@ -441,7 +511,7 @@ async fn deploy_inner(
         if let Some(n) = &net_cfg {
             files.push(("network-config", n.as_str()));
         }
-        SeedIso::build(work, &seed_name, "cidata", &files).await?
+        SeedDisk::build(work, &seed_name, "CIDATA", &files).await?
     } else {
         let ws = windows::WinVmSeed {
             name: spec.name.clone(),
@@ -455,13 +525,19 @@ async fn deploy_inner(
             gateway: spec.gateway.clone(),
             dns: spec.dns.clone(),
             extra: spec.extra_nics.iter().zip(&extra_macs).filter(|(n, _)| !n.ip.is_empty()).map(|(n, m)| (m.clone(), n.ip.clone(), n.prefix)).collect(),
-            manifest: guest_manifest(spec, &mac, &extra_macs),
+            manifest: guest_manifest(spec, &mac, &extra_macs, join_mode),
             arc_secret: spec.arc.as_ref().filter(|a| !a.secret.is_empty()).map(|a| {
                 serde_json::json!({ "servicePrincipalAppId": a.app_id, "servicePrincipalSecret": a.secret })
             }),
-            join_secret: spec.domain_join.as_ref().map(|d| {
+            // The sealed credential and DomainJoin.ps1 only for a deferred join (Build-Vms);
+            // a specialize join carries its credential in the answer file, which Setup
+            // scrubs once it is used.
+            join_secret: spec.domain_join.as_ref().filter(|_| join_mode == "deferred").map(|d| {
                 serde_json::json!({ "domain": d.domain, "ouPath": d.ou, "joinUser": d.user, "joinPassword": d.password })
             }),
+            specialize: pass_media.is_some(),
+            join_specialize: spec.domain_join.clone().filter(|_| join_mode == "specialize"),
+            product_key: spec.product_key.clone(),
         };
         let unattend = windows::vm_unattend(&ws, &manifest);
         let vmcmd = windows::vm_cmd(&ws);
@@ -476,7 +552,22 @@ async fn deploy_inner(
         // writes none): a BOM breaks the consumers.
         if windows::needs_guest(&ws.manifest) {
             files.push(("pvs-vm/GuestProvision/GuestProvision.ps1", windows::GUEST_PROVISION_PS1.to_owned()));
-            files.push(("pvs-vm/GuestProvision/manifest.json", serde_json::to_string_pretty(&ws.manifest)?));
+            if pass_media.is_some() {
+                // What GuestProvision still has to do once the deploy pass has done its part:
+                // features it cannot stage offline, and capabilities only when there is no
+                // FoD ISO to install them from. The full lists ride along as the fallback the
+                // pass switches in when anything failed offline.
+                let mut online = ws.manifest.clone();
+                online["pendingWindowsFeatures"] = serde_json::json!(server_online);
+                if spec.fod.is_some() {
+                    online["pendingCapabilities"] = serde_json::json!([]);
+                    online["pendingRsatCapabilities"] = serde_json::json!([]);
+                }
+                files.push(("pvs-vm/GuestProvision/manifest.json", serde_json::to_string_pretty(&online)?));
+                files.push(("pvs-vm/GuestProvision/manifest-fallback.json", serde_json::to_string_pretty(&ws.manifest)?));
+            } else {
+                files.push(("pvs-vm/GuestProvision/manifest.json", serde_json::to_string_pretty(&ws.manifest)?));
+            }
             if let Some(a) = &ws.arc_secret {
                 files.push(("pvs-vm/GuestProvision/arc-deploy.json", a.to_string()));
             }
@@ -485,24 +576,128 @@ async fn deploy_inner(
                 files.push(("pvs-vm/GuestProvision/domain-join.json", j.to_string()));
             }
         }
+        if pass_media.is_some() {
+            let mut caps = spec.rsat.clone();
+            if spec.app_compat {
+                caps.push("ServerCore.AppCompatibility~~~~0.0.1.0".into());
+            }
+            let fod = spec.fod.as_ref();
+            files.push((
+                "pvs/pe.cmd",
+                windows::pe_deploy_cmd(&windows::DeployPass {
+                    capabilities: &caps,
+                    fod_root: fod.map(|f| f.root.as_str()).unwrap_or(""),
+                    fod_marker: fod.map(|f| f.marker.as_str()).unwrap_or(""),
+                    client_features: if ws.client { &spec.client_features } else { &[] },
+                    server_features: &server_dism,
+                    remove_apps: if ws.client { &spec.remove_apps } else { &[] },
+                }),
+            ));
+        }
         let refs: Vec<(&str, &str)> = files.iter().map(|(n, c)| (*n, c.as_str())).collect();
-        SeedIso::build(work, &seed_name, "PVSVM", &refs).await?
+        SeedDisk::build(work, &seed_name, "PVSVM", &refs).await?
     };
-    let uploaded = pve.upload(&node, &iso_storage, "iso", &iso.iso, &format!("{seed_name}.iso")).await;
-    iso.remove().await;
-    let volid = uploaded?;
-    *seed_vol = Some((node.clone(), volid.clone()));
-    pve.vm_set(&node, vmid, form![(slot, format!("{volid},media=cdrom"))]).await?;
-
+    seed::attach(pve, &node, vmid, slot, &seed_storage, seed_disk, &seed_name).await.context("attaching the seed disk")?;
+    log.ok(format!("Seed attached as a disk ({slot})")).await;
     // ---- 4. first boot ----
-    pve.vm_action(&node, vmid, "start").await?;
-    pr.stage(35.0, 90.0, "first boot");
-    if win {
+    if let (true, Some((winpe, virtio))) = (win, &pass_media) {
+        // Build-Vms serviced the VHDX offline before the first boot; WinPE does it here: the
+        // VM boots it once, it services the disk and writes the answer file and
+        // GuestProvision in, and powers off. Every CD then goes while the VM is off - no
+        // drive is left behind and no shutdown is needed just to unplug one.
+        let mut drives = vec![("sata0", winpe.clone())];
+        if let Some(v) = virtio {
+            drives.push(("sata1", v.clone()));
+        }
+        if let Some(f) = &spec.fod {
+            drives.push(("sata3", f.volid.clone()));
+            log.run(format!("Features on Demand from {}", f.volid)).await;
+        }
+        if let Some(src) = &sxs_iso {
+            drives.push(("sata4", src.clone()));
+            log.run(format!(".NET 3.5 payload from {src}")).await;
+        }
+        let set: crate::pve::Form = drives.iter().map(|(k, v)| ((*k).to_owned(), format!("{v},media=cdrom"))).collect();
+        pve.vm_set(&node, vmid, set).await?;
+        windows::set_boot(pve, &node, vmid, "sata0").await?;
+        log.run("WinPE deploy pass: capabilities, features, app removal, the VM's answer file and GuestProvision").await;
+        pr.stage(35.0, 50.0, "WinPE deploy pass");
+        let m = windows::run_pass(pve, log, &mut pr, &node, vmid, "deploy pass", 30).await?;
+        let count = |p: &str| m.iter().filter(|l| l.starts_with(p)).count();
+        for l in m.iter().filter(|l| l.starts_with("PVS-CAP-FAIL") || l.starts_with("PVS-FEATURE-FAIL") || l.starts_with("PVS-APP-FAIL")) {
+            log.warn(format!("{l} - see the debug lines above")).await;
+        }
+        if !m.iter().any(|l| l == "PVS-DEPLOY-OK") {
+            let why = m.iter().rev().find(|l| l.starts_with("PVS-NO-") || l.ends_with("FAILED")).cloned();
+            bail!("the deploy pass failed: {}", why.or_else(|| m.last().cloned()).unwrap_or_else(|| "no markers on the serial console".into()));
+        }
+        // As Hyper-V's log names them: per Server Manager feature, per capability, apps summed.
+        let ok = |p: &str, name: &str| m.iter().any(|l| l.strip_prefix(p).is_some_and(|r| r.trim() == name));
+        for (feature, dism) in &feature_plan.groups {
+            let failed: Vec<&String> = dism.iter().filter(|d| !ok("PVS-FEATURE-OK", d)).collect();
+            if dism.is_empty() {
+                log.ok(format!("{feature}: came with the features above")).await;
+            } else if failed.is_empty() {
+                log.ok(format!("{feature}: {} DISM feature{} enabled offline", dism.len(), if dism.len() == 1 { "" } else { "s" })).await;
+            } else {
+                log.warn(format!(
+                    "{feature}: {} of {} DISM features enabled offline - not {} (GuestProvision installs it online)",
+                    dism.len() - failed.len(),
+                    dism.len(),
+                    failed.iter().map(|f| f.as_str()).collect::<Vec<_>>().join(", ")
+                ))
+                .await;
+            }
+        }
+        for c in m.iter().filter_map(|l| l.strip_prefix("PVS-CAP-OK ")) {
+            log.ok(format!("{} installed offline", c.trim())).await;
+        }
+        for c in m.iter().filter_map(|l| l.strip_prefix("PVS-CAP-SKIP ")) {
+            log.line(format!("{} - no FoD ISO for this family, GuestProvision installs it online", c.trim())).await;
+        }
+        for f in spec.client_features.iter().filter(|f| ok("PVS-FEATURE-OK", f)) {
+            log.ok(format!("{f} enabled offline")).await;
+        }
+        if count("PVS-APP-REMOVED") > 0 {
+            log.ok(format!("{} built-in app(s) removed offline", count("PVS-APP-REMOVED"))).await;
+        }
+        if m.iter().any(|l| l == "PVS-FALLBACK") {
+            log.warn("Something failed offline - GuestProvision gets the full lists and installs the rest at first boot").await;
+        }
+        log.ok("Deploy pass done").await;
+        let names: Vec<&str> = drives.iter().map(|(k, _)| *k).collect();
+        pve.vm_set(&node, vmid, form![("delete", names.join(","))]).await?;
+        seed::detach(pve, &node, vmid, slot).await?;
+        log.ok("CDs removed, the seed disk deleted").await;
+        windows::set_boot(pve, &node, vmid, "scsi0").await?;
+
+        pve.vm_action(&node, vmid, "start").await?;
+        pr.stage(50.0, 90.0, "first boot");
+        log.run("First boot: specialize names the VM, OOBE takes its answer file").await;
+        windows::follow_first_boot(pve, log, &mut pr, &node, vmid).await?;
+        if m.iter().any(|l| l.contains("-FAIL ")) {
+            deploy_pass_dism_errors(pve, log, &node, vmid).await;
+        }
+        if guest_provision_result(pve, log, &node, vmid).await? {
+            pr.stage(90.0, 93.0, "restarting");
+            log.run("Restarting - a role asked for it").await;
+            pve.run_task(
+                &format!("/nodes/{}/qemu/{vmid}/status/shutdown", crate::pve::enc(&node)),
+                form![("timeout", "300"), ("forceStop", "1")],
+                |_| {},
+            )
+            .await
+            .context("shutting the VM down")?;
+            pve.vm_action(&node, vmid, "start").await?;
+        }
+    } else if win {
+        pve.vm_action(&node, vmid, "start").await?;
+        pr.stage(35.0, 90.0, "first boot");
         log.run("First boot: specialize names the VM, OOBE takes the VM's answer file").await;
         windows::follow_first_boot(pve, log, &mut pr, &node, vmid).await?;
         let restart = guest_provision_result(pve, log, &node, vmid).await?;
-        // [diff] Hyper-V's VMs never had a DVD drive: everything went into the VHDX. Here the
-        // seed rode in on one, and a SATA drive cannot be unplugged from a running VM - so
+        // [diff] Hyper-V's VMs never had a seed drive: everything went into the VHDX. Here the
+        // seed rides in on a SATA disk, which cannot be unplugged from a running VM - so
         // one clean shutdown, the drive goes, and the VM starts again. A role that asked for
         // a restart (GuestProvision's restartNeeded) gets it from the same stop.
         pr.stage(90.0, 93.0, "removing the seed drive");
@@ -519,19 +714,17 @@ async fn deploy_inner(
         )
         .await
         .context("shutting the VM down")?;
-        pve.vm_set(&node, vmid, form![("delete", slot)]).await?;
-        pve.delete_volume(&node, &volid).await?;
-        *seed_vol = None;
-        log.ok("Seed drive removed and its ISO deleted - it held the passwords").await;
+        seed::detach(pve, &node, vmid, slot).await?;
+        log.ok("Seed disk removed and deleted").await;
         pve.vm_action(&node, vmid, "start").await?;
     } else {
+        pve.vm_action(&node, vmid, "start").await?;
+        pr.stage(35.0, 90.0, "first boot");
         log.run("First boot: cloud-init provisions, then powers off").await;
         follow_first_boot(pve, log, &mut pr, &node, vmid, 20).await?;
         pr.stage(90.0, 93.0, "removing the seed");
-        pve.vm_set(&node, vmid, form![("delete", slot)]).await?;
-        pve.delete_volume(&node, &volid).await?;
-        *seed_vol = None;
-        log.ok("Seed detached and deleted").await;
+        seed::detach(pve, &node, vmid, slot).await?;
+        log.ok("Seed disk removed and deleted").await;
     }
 
     // ---- 5. running ----
@@ -574,6 +767,7 @@ async fn follow_first_boot(pve: &Pve, log: &JobLog, pr: &mut Progress, node: &st
     let mut stage = 0u8;
     let mut packages = PackageCounter::default();
     loop {
+        log.check_abort()?;
         let s = pve.vm_status(node, vmid).await?;
         if s.status == "stopped" {
             return Ok(());
@@ -627,31 +821,11 @@ pub async fn iso_storage_on(pve: &Pve, node: &str) -> Result<String> {
     fit.into_iter().next().ok_or_else(|| anyhow!("no storage on {node} holds ISOs"))
 }
 
-pub async fn remove(pve: &Pve, db: &SqlitePool, vm: &VmRow, log: &JobLog) -> Result<()> {
-    if let Some(vmid) = vm.vmid {
-        let vmid = vmid as u32;
-        match pve.vm_config(&vm.node, vmid).await {
-            Ok(cfg) => {
-                // Only a VM that still is the one the studio built.
-                let tags = cfg.get("tags").and_then(|t| t.as_str()).unwrap_or("");
-                let name = cfg.get("name").and_then(|t| t.as_str()).unwrap_or("");
-                if !tags.split(';').any(|t| t == "pvs-vm") || name != vm.name {
-                    bail!("VM {vmid} is no longer {} built by the studio - not touching it", vm.name);
-                }
-                pve.vm_destroy(&vm.node, vmid).await?;
-                log.ok(format!("Removed VM {vmid} ({})", vm.name)).await;
-            }
-            Err(_) => log.line(format!("VM {vmid} is gone already")).await,
-        }
-    }
-    sqlx::query("UPDATE vms SET status = 'removed' WHERE id = ?").bind(&vm.id).execute(db).await?;
-    Ok(())
-}
 
 /// GuestProvision's manifest.json for a Windows VM - the fields Build-Vms'
 /// Set-OfflineGuestProvisionPayload writes. Everything lands online at first boot here:
 /// the studio cannot service the disk offline.
-fn guest_manifest(spec: &VmSpec, mac: &str, extra_macs: &[String]) -> serde_json::Value {
+fn guest_manifest(spec: &VmSpec, mac: &str, extra_macs: &[String], join_mode: &str) -> serde_json::Value {
     let letter = |i: usize| ((b'd' + i as u8) as char).to_string();
     let data_disks: Vec<serde_json::Value> = spec
         .data_disks
@@ -685,9 +859,9 @@ fn guest_manifest(spec: &VmSpec, mac: &str, extra_macs: &[String]) -> serde_json
         "sharedDiskCount": 0,
         "networkAdapters": nics,
         "dataDisks": data_disks,
-        // Specialize joins are not available off Hyper-V (the VM's answer file only reaches
-        // oobeSystem), so every Windows join is deferred - research §7.
-        "domainJoin": spec.domain_join.as_ref().map(|d| serde_json::json!({ "enabled": true, "mode": "deferred", "domain": d.domain, "ouPath": d.ou })),
+        // "specialize": the answer file joined (the deploy pass wrote it into Panther);
+        // "deferred": GuestProvision registers the join task (research §7).
+        "domainJoin": spec.domain_join.as_ref().map(|d| serde_json::json!({ "enabled": true, "mode": join_mode, "domain": d.domain, "ouPath": d.ou })),
         "azureArc": spec.arc.as_ref().map(|a| serde_json::json!({
             "enabled": true, "authMode": a.auth_mode, "subscriptionId": a.subscription_id, "tenantId": a.tenant_id,
             "resourceGroup": a.resource_group, "location": a.location, "servicePrincipalAppId": a.app_id,
@@ -747,7 +921,7 @@ mod tests {
 
     #[test]
     fn manifest_like_build_vms() {
-        let m = guest_manifest(&spec(), "BC:24:11:AA:BB:CC", &["BC:24:11:00:00:01".into()]);
+        let m = guest_manifest(&spec(), "BC:24:11:AA:BB:CC", &["BC:24:11:00:00:01".into()], "deferred");
         assert_eq!(m["pendingWindowsFeatures"][0], "AD-Domain-Services");
         assert_eq!(m["pendingCapabilities"][0], "ServerCore.AppCompatibility~~~~0.0.1.0");
         assert_eq!(m["networkAdapters"][0]["name"], "LAN");
@@ -760,5 +934,60 @@ mod tests {
         assert_eq!(m["dataDisks"][0]["label"], "Data D");
         assert!(m["domainJoin"].is_null() && m["azureArc"].is_null());
         assert!(crate::windows::needs_guest(&m));
+    }
+}
+
+/// The WinPE ISO the deploy pass boots, and the virtio-win ISO when that WinPE does not carry
+/// vioscsi itself (built before it did) - or None, and the VM takes the seed-CD path: no
+/// WinPE yet, or one on a node-local storage of another node.
+async fn deploy_pass_media(pve: &Pve, db: &SqlitePool, log: &JobLog, node: &str, manifest: &serde_json::Value) -> Result<Option<(String, Option<String>)>> {
+    let pe: crate::winpe::WinPe = crate::settings::load(db, "winpe").await?;
+    if pe.volid.is_empty() {
+        log.line("No WinPE built yet (Media) - capabilities, features and app removal wait for the guest, the seed CD carries the answer file").await;
+        return Ok(None);
+    }
+    if pe.node != node {
+        let storage = pe.volid.split(':').next().unwrap_or("");
+        let shared = pve.resources().await?.iter().any(|r| r.kind == "storage" && r.storage.as_deref() == Some(storage) && r.shared == Some(1));
+        if !shared {
+            log.warn(format!("WinPE lives on {}'s local storage {storage} - this VM runs on {node}, so it takes the seed-CD path", pe.node)).await;
+            return Ok(None);
+        }
+    }
+    if !pe.vioscsi.is_empty() {
+        return Ok(Some((pe.volid, None)));
+    }
+    log.line("This WinPE was built without vioscsi - the virtio ISO rides along (rebuild WinPE under Media to drop it)").await;
+    let win: crate::virtio::WindowsSettings = crate::settings::load(db, "windows").await?;
+    let release = match manifest["virtio"].as_str().filter(|r| !r.is_empty()) {
+        Some(r) => r.to_owned(),
+        None => crate::virtio::resolve(&win.virtio).await?,
+    };
+    let storage = if win.iso_storage.is_empty() { iso_storage_on(pve, node).await? } else { win.iso_storage.clone() };
+    let virtio = crate::virtio::fetch(pve, log, node, &storage, &release).await?;
+    Ok(Some((pe.volid, Some(virtio))))
+}
+
+/// The deploy pass's DISM log, copied onto the disk by WinPE, read back once the guest agent
+/// answers: the errors in it say why a capability or feature failed offline (the serial
+/// console only carries DISM's one-line summary).
+async fn deploy_pass_dism_errors(pve: &Pve, log: &JobLog, node: &str, vmid: u32) {
+    let file = r"C:\Windows\Temp\pvs-deploy-dism.log";
+    let (mut offset, mut errors) = (0u64, Vec::new());
+    while let Some((text, n)) = pve.agent_read(node, vmid, file, offset).await {
+        errors.extend(text.lines().filter(|l| l.contains(", Error")).map(|l| l.trim().to_owned()));
+        offset += n;
+        if n < 1 << 20 {
+            break;
+        }
+    }
+    if errors.is_empty() {
+        log.line(format!("No DISM errors in {file} (or the guest agent could not read it)")).await;
+        return;
+    }
+    log.warn(format!("Offline servicing failures - the last DISM errors from {file}:")).await;
+    let skip = errors.len().saturating_sub(15);
+    for e in errors.into_iter().skip(skip) {
+        log.warn(e).await;
     }
 }

@@ -28,7 +28,7 @@ LOG_FILE=/var/log/pve-vm-studio-install.log
 USER_ID=pve-vm-studio@pve
 TOKEN=studio
 ROLES=PVEVMAdmin,PVEDatastoreAdmin,PVESDNUser,PVEAuditor
-PACKAGES="ca-certificates xorriso lego 7zip wimtools"
+PACKAGES="ca-certificates xorriso lego 7zip wimtools dosfstools mtools cabextract genisoimage gcab"
 
 # ---------------------------------------------------------------------------------
 # Output - the studio's palette and the PowerShell log layout
@@ -236,7 +236,7 @@ run_steps() {
 
 NODE=$(hostname)
 SEARCH=$(awk '/^search/ {print $2; exit}' /etc/resolv.conf 2>/dev/null)
-VMID="" FQDN="" STORAGE="" BRIDGE="" IPMODE=dhcp IP="" GW="" VLAN="" CORES=2 MEMORY=2048 DISK=64
+VMID="" FQDN="" STORAGE="" BRIDGE="" IPMODE=dhcp IP="" GW="" VLAN="" CORES=2 MEMORY=2048 DISK=8 WORK=64
 
 step_vmid() {
     local next; next=$(pvesh get /cluster/nextid 2>/dev/null)
@@ -301,13 +301,15 @@ step_vlan() {
 
 step_size() {
     menu_one "Size" 1 \
-        "Small|1 core, 1 GiB, 32 GiB disk - Linux golds only" \
-        "Standard|2 cores, 2 GiB, 64 GiB disk - room for a few Windows ISOs" \
-        "Large|4 cores, 4 GiB, 200 GiB disk - many Windows ISOs and editions" || return 1
+        "Small|1 core, 1 GiB, 32 GiB work volume - Linux golds only" \
+        "Standard|2 cores, 2 GiB, 64 GiB work volume - Windows golds and media" \
+        "Large|4 cores, 4 GiB, 128 GiB work volume - several Windows media builds" || return 1
+    # The studio itself fits in 8 GiB; what bakes and media builds need while they run goes
+    # on the work volume - thin, out of backups, emptied by the studio between jobs.
     case $PICK in
-        0) CORES=1 MEMORY=1024 DISK=32 ;; 1) CORES=2 MEMORY=2048 DISK=64 ;; 2) CORES=4 MEMORY=4096 DISK=200 ;;
+        0) CORES=1 MEMORY=1024 WORK=32 ;; 1) CORES=2 MEMORY=2048 WORK=64 ;; 2) CORES=4 MEMORY=4096 WORK=128 ;;
     esac
-    ANS[Size]="$CORES cores, $MEMORY MiB, $DISK GiB"
+    ANS[Size]="$CORES cores, $MEMORY MiB, $DISK GiB system, $WORK GiB work"
 }
 
 step_confirm() {
@@ -366,6 +368,11 @@ install() {
     pveum role list --output-format json | grep -q '"roleid":"VmStudioNetwork"' ||
         pveum role add VmStudioNetwork --privs Sys.AccessNetwork >>"$LOG_FILE" 2>&1
     pveum acl modify /nodes --users "$USER_ID" --roles "$ROLES,VmStudioNetwork" >>"$LOG_FILE" 2>&1
+    # Tag colours: the studio keeps its entries in the datacenter tag-style map (PUT
+    # /cluster/options), which takes Sys.Modify on / - granted on / alone, not inherited.
+    pveum role list --output-format json | grep -q '"roleid":"VmStudioTagStyle"' ||
+        pveum role add VmStudioTagStyle --privs Sys.Modify >>"$LOG_FILE" 2>&1
+    pveum acl modify / --users "$USER_ID" --roles VmStudioTagStyle --propagate 0 >>"$LOG_FILE" 2>&1
     # Golds are parked in a pool of their own (and labs get pools later): pool rights.
     pveum acl modify /pool --users "$USER_ID" --roles PVEPoolAdmin >>"$LOG_FILE" 2>&1
     pvesh get /pools/vm-studio &>/dev/null ||
@@ -404,6 +411,7 @@ install() {
         --hostname "$host" ${domain:+--searchdomain "$domain"} \
         --description "PVE VM Studio" --tags pve-vm-studio \
         --cores "$CORES" --memory "$MEMORY" --swap 512 --rootfs "$STORAGE:$DISK" \
+        --mp9 "${WORK_VOLUME:-$STORAGE:$WORK},mp=/var/lib/pve-vm-studio/work,backup=0,mountoptions=discard" \
         --net0 "$net" --unprivileged 1 --features nesting=1 --onboot 1 --timezone host \
         >>"$LOG_FILE" 2>&1 || die "pct create failed - see $LOG_FILE"
     # The ISO storages, read-only: the studio reads which editions a Windows ISO holds.
@@ -425,9 +433,16 @@ install() {
     pct exec "$VMID" -- bash -c '
         useradd --system --home-dir /var/lib/pve-vm-studio --shell /usr/sbin/nologin pve-vm-studio
         install -d -o pve-vm-studio -g pve-vm-studio -m 0750 /var/lib/pve-vm-studio
+        install -d -o pve-vm-studio -g pve-vm-studio -m 0750 /var/lib/pve-vm-studio/work
         install -d -g pve-vm-studio -m 0750 /etc/pve-vm-studio' >>"$LOG_FILE" 2>&1
     pct push "$VMID" "$bin" /usr/local/bin/pve-vm-studio --perms 0755
     pct push "$VMID" "$HERE/pve-vm-studio.service" /etc/systemd/system/pve-vm-studio.service
+    if [[ -f $HERE/pvs-update.sh ]]; then
+        pct exec "$VMID" -- mkdir -p /usr/local/lib/pve-vm-studio
+        pct push "$VMID" "$HERE/pvs-update.sh" /usr/local/lib/pve-vm-studio/pvs-update.sh --perms 0755
+        pct push "$VMID" "$HERE/pve-vm-studio-update.path" /etc/systemd/system/pve-vm-studio-update.path
+        pct push "$VMID" "$HERE/pve-vm-studio-update.service" /etc/systemd/system/pve-vm-studio-update.service
+    fi
     pct push "$VMID" /etc/pve/pve-root-ca.pem /etc/pve-vm-studio/pve-root-ca.pem --perms 0644
 
     # The node's own address: its certificate names it, and no DNS is needed to reach it.
@@ -452,6 +467,7 @@ CFG
     rm -f "$config"
     pct exec "$VMID" -- systemctl daemon-reload
     pct exec "$VMID" -- systemctl enable --now pve-vm-studio >>"$LOG_FILE" 2>&1
+    pct exec "$VMID" -- bash -c '[ -x /usr/local/lib/pve-vm-studio/pvs-update.sh ] && install -d -o pve-vm-studio -g pve-vm-studio -m 0750 /var/lib/pve-vm-studio/update && systemctl daemon-reload && systemctl enable --now pve-vm-studio-update.path' >>"$LOG_FILE" 2>&1 || true
     sleep 2
     pct exec "$VMID" -- systemctl is-active --quiet pve-vm-studio ||
         die "the service did not start - pct exec $VMID -- journalctl -u pve-vm-studio"

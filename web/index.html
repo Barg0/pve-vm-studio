@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="kaido_dark" data-mode="dark">
+<html lang="en" data-theme="proxmox_dark" data-mode="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -14,19 +14,7 @@
     <img data-icon="mark.svg" src="" width="22" height="22" alt="">
     PVE VM Studio
   </div>
-  <div class="lab-anchor">
-    <button class="btn ghost lab-btn" id="labBtn" type="button" title="Labs">
-      <img data-icon="servers.svg" src="" alt=""><span id="labName">No lab</span>
-      <span class="save-state" id="saveState"></span>
-    </button>
-    <div class="theme-popover lab-popover" id="labPopover">
-      <div class="theme-panel lab-panel">
-        <div class="tp-title">Labs</div>
-        <div id="labList"></div>
-        <div class="lab-new"><input id="labNewName" placeholder="New lab name"><button class="btn sm" type="button" id="labNewBtn">Create</button></div>
-      </div>
-    </div>
-  </div>
+  <span class="save-state" id="saveState" title="The studio saves your design as you go"></span>
   <div class="actions">
     <div class="theme-anchor">
       <button class="btn ghost" id="themeBtn" type="button" title="Appearance">
@@ -44,10 +32,9 @@
         </div>
       </div>
     </div>
-    <button class="btn ghost" type="button" onclick="openStateModal('load')" title="Take over a Hyper-V VM Studio state token (HVSS1.)"><img data-icon="download.svg" src="" alt=""> Import token</button>
     <span class="user-chip" id="userChip"></span>
     <button class="btn ghost" type="button" id="logoutBtn">Sign out</button>
-    <button class="btn primary" type="button" id="deployBtn"><img data-icon="first-boot.svg" data-icon-on-accent="1" src="" alt=""> Deploy</button>
+    <button class="btn primary" type="button" id="deployBtn"><img data-icon="deploy.svg" data-icon-on-accent="1" src="" alt=""> Deploy</button>
   </div>
 </header>
 

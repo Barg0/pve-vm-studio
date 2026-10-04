@@ -1,0 +1,2695 @@
+{
+ "AD-Certificate": {
+  "deps": [],
+  "dism": [
+   "ADCertificateServicesRole"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "AD-Domain-Services": {
+  "deps": [
+   "NET-Framework-45-Core",
+   "PowerShell",
+   "RSAT-AD-PowerShell"
+  ],
+  "dism": [
+   "DirectoryServices-DomainController"
+  ],
+  "parent": "",
+  "tools": [
+   "GPMC",
+   "RSAT-AD-AdminCenter",
+   "RSAT-ADDS-Tools"
+  ]
+ },
+ "ADCS-Cert-Authority": {
+  "deps": [],
+  "dism": [
+   "CertificateServices"
+  ],
+  "parent": "AD-Certificate",
+  "tools": [
+   "RSAT-ADCS-Mgmt"
+  ]
+ },
+ "ADCS-Device-Enrollment": {
+  "deps": [
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Redirect",
+   "Web-Http-Tracing",
+   "Web-ISAPI-Ext",
+   "Web-Log-Libraries",
+   "Web-Metabase",
+   "Web-Request-Monitor",
+   "Web-Stat-Compression",
+   "Web-Static-Content",
+   "Web-Windows-Auth"
+  ],
+  "dism": [
+   "NetworkDeviceEnrollmentServices"
+  ],
+  "parent": "AD-Certificate",
+  "tools": []
+ },
+ "ADCS-Enroll-Web-Pol": {
+  "deps": [
+   "NET-Framework-45-Core",
+   "NET-WCF-HTTP-Activation45",
+   "Web-Cert-Auth",
+   "Web-Client-Auth",
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Filtering",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Net-Ext45",
+   "Web-Request-Monitor",
+   "Web-Scripting-Tools",
+   "Web-Stat-Compression",
+   "Web-Static-Content",
+   "Web-Windows-Auth"
+  ],
+  "dism": [
+   "CertificateEnrollmentPolicyServer"
+  ],
+  "parent": "AD-Certificate",
+  "tools": []
+ },
+ "ADCS-Enroll-Web-Svc": {
+  "deps": [
+   "NET-Framework-45-Core",
+   "NET-WCF-HTTP-Activation45",
+   "Web-Cert-Auth",
+   "Web-Client-Auth",
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Filtering",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Net-Ext45",
+   "Web-Request-Monitor",
+   "Web-Scripting-Tools",
+   "Web-Stat-Compression",
+   "Web-Static-Content",
+   "Web-Windows-Auth"
+  ],
+  "dism": [
+   "CertificateEnrollmentServer"
+  ],
+  "parent": "AD-Certificate",
+  "tools": []
+ },
+ "ADCS-Online-Cert": {
+  "deps": [
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Redirect",
+   "Web-Http-Tracing",
+   "Web-ISAPI-Ext",
+   "Web-Log-Libraries",
+   "Web-Metabase",
+   "Web-Request-Monitor",
+   "Web-Stat-Compression",
+   "Web-Static-Content"
+  ],
+  "dism": [
+   "OnlineRevocationServices"
+  ],
+  "parent": "AD-Certificate",
+  "tools": [
+   "RSAT-Online-Responder"
+  ]
+ },
+ "ADCS-Web-Enrollment": {
+  "deps": [
+   "Web-ASP",
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Redirect",
+   "Web-Http-Tracing",
+   "Web-ISAPI-Ext",
+   "Web-Log-Libraries",
+   "Web-Metabase",
+   "Web-Request-Monitor",
+   "Web-Stat-Compression",
+   "Web-Static-Content",
+   "Web-Windows-Auth"
+  ],
+  "dism": [
+   "WebEnrollmentServices"
+  ],
+  "parent": "AD-Certificate",
+  "tools": []
+ },
+ "ADFS-Federation": {
+  "deps": [],
+  "dism": [
+   "IdentityServer-SecurityTokenService"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "ADLDS": {
+  "deps": [
+   "NET-Framework-45-Core",
+   "PowerShell",
+   "RSAT-AD-PowerShell"
+  ],
+  "dism": [
+   "DirectoryServices-ADAM"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-ADLDS"
+  ]
+ },
+ "ADRMS": {
+  "deps": [],
+  "dism": [
+   "RightsManagementServices-Role"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-ADRMS"
+  ]
+ },
+ "ADRMS-Identity": {
+  "deps": [
+   "ADRMS-Server"
+  ],
+  "dism": [
+   "RMS-Federation"
+  ],
+  "parent": "ADRMS",
+  "tools": []
+ },
+ "ADRMS-Server": {
+  "deps": [
+   "NET-Framework-45-Core",
+   "NET-WCF-HTTP-Activation45",
+   "PowerShell",
+   "Web-Asp-Net45",
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Filtering",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Redirect",
+   "Web-Http-Tracing",
+   "Web-Log-Libraries",
+   "Web-Metabase",
+   "Web-Net-Ext45",
+   "Web-Request-Monitor",
+   "Web-Stat-Compression",
+   "Web-Static-Content",
+   "Web-WMI",
+   "Web-Windows-Auth"
+  ],
+  "dism": [
+   "RightsManagementServices",
+   "RightsManagementServices-AdminTools"
+  ],
+  "parent": "ADRMS",
+  "tools": []
+ },
+ "BITS": {
+  "deps": [],
+  "dism": [
+   "BITS"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-Bits-Server"
+  ]
+ },
+ "BITS-Compact-Server": {
+  "deps": [],
+  "dism": [
+   "LightweightServer"
+  ],
+  "parent": "BITS",
+  "tools": []
+ },
+ "BITS-IIS-Ext": {
+  "deps": [
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Redirect",
+   "Web-Http-Tracing",
+   "Web-ISAPI-Ext",
+   "Web-Log-Libraries",
+   "Web-Metabase",
+   "Web-Mgmt-Console",
+   "Web-Request-Monitor",
+   "Web-Stat-Compression",
+   "Web-Static-Content"
+  ],
+  "dism": [
+   "BITSExtensions-Upload"
+  ],
+  "parent": "BITS",
+  "tools": []
+ },
+ "Biometric-Framework": {
+  "deps": [],
+  "dism": [
+   "BiometricFramework"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "BitLocker": {
+  "deps": [
+   "EnhancedStorage"
+  ],
+  "dism": [
+   "BitLocker"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-Feature-Tools-BitLocker-BdeAducExt",
+   "RSAT-Feature-Tools-BitLocker-RemoteAdminTool"
+  ]
+ },
+ "BitLocker-NetworkUnlock": {
+  "deps": [
+   "WDS-Deployment"
+  ],
+  "dism": [
+   "BitLocker-NetworkUnlock"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "BranchCache": {
+  "deps": [],
+  "dism": [
+   "PeerDist"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "CMAK": {
+  "deps": [],
+  "dism": [
+   "RasCMAK"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Containers": {
+  "deps": [],
+  "dism": [
+   "Containers"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "DHCP": {
+  "deps": [],
+  "dism": [
+   "DHCPServer"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-DHCP"
+  ]
+ },
+ "DNS": {
+  "deps": [],
+  "dism": [
+   "DNS-Server-Full-Role"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-DNS-Server"
+  ]
+ },
+ "DSC-Service": {
+  "deps": [
+   "ManagementOdata"
+  ],
+  "dism": [
+   "DSC-Service"
+  ],
+  "parent": "PowerShellRoot",
+  "tools": []
+ },
+ "Data-Center-Bridging": {
+  "deps": [],
+  "dism": [
+   "DataCenterBridging"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-DataCenterBridging-LLDP-Tools"
+  ]
+ },
+ "DeviceHealthAttestationService": {
+  "deps": [
+   "NET-Framework-45-ASPNET",
+   "NET-WCF-HTTP-Activation45",
+   "WAS-Config-APIs",
+   "WAS-Process-Model",
+   "Web-Asp-Net45",
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Tracing",
+   "Web-ISAPI-Ext",
+   "Web-ISAPI-Filter",
+   "Web-Includes",
+   "Web-Net-Ext45",
+   "Web-Stat-Compression",
+   "Web-Static-Content"
+  ],
+  "dism": [
+   "DeviceHealthAttestationService"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Direct-Play": {
+  "deps": [],
+  "dism": [
+   "DirectPlay"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "DirectAccess-VPN": {
+  "deps": [
+   "PowerShell",
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Filtering",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-IP-Security",
+   "Web-Scripting-Tools",
+   "Web-Stat-Compression",
+   "Web-Static-Content",
+   "Windows-Internal-Database"
+  ],
+  "dism": [
+   "RemoteAccessServer"
+  ],
+  "parent": "RemoteAccess",
+  "tools": [
+   "RSAT-RemoteAccess-Mgmt",
+   "RSAT-RemoteAccess-PowerShell"
+  ]
+ },
+ "DiskIo-QoS": {
+  "deps": [],
+  "dism": [
+   "DiskIo-QoS"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "EnhancedStorage": {
+  "deps": [],
+  "dism": [
+   "EnhancedStorage"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "FS-BranchCache": {
+  "deps": [
+   "FS-FileServer"
+  ],
+  "dism": [
+   "SMBHashGeneration"
+  ],
+  "parent": "File-Services",
+  "tools": []
+ },
+ "FS-DFS-Namespace": {
+  "deps": [
+   "FS-FileServer"
+  ],
+  "dism": [
+   "DFSN-Server"
+  ],
+  "parent": "File-Services",
+  "tools": [
+   "RSAT-DFS-Mgmt-Con"
+  ]
+ },
+ "FS-DFS-Replication": {
+  "deps": [
+   "FS-FileServer"
+  ],
+  "dism": [
+   "DFSR-Infrastructure-ServerEdition"
+  ],
+  "parent": "File-Services",
+  "tools": [
+   "RSAT-DFS-Mgmt-Con"
+  ]
+ },
+ "FS-Data-Deduplication": {
+  "deps": [
+   "FS-FileServer"
+  ],
+  "dism": [
+   "Dedup-Core"
+  ],
+  "parent": "File-Services",
+  "tools": []
+ },
+ "FS-FileServer": {
+  "deps": [],
+  "dism": [
+   "CoreFileServer"
+  ],
+  "parent": "File-Services",
+  "tools": []
+ },
+ "FS-NFS-Service": {
+  "deps": [
+   "FS-FileServer"
+  ],
+  "dism": [
+   "ServerForNFS-Infrastructure",
+   "ServicesForNFS-ServerAndClient"
+  ],
+  "parent": "File-Services",
+  "tools": [
+   "RSAT-NFS-Admin"
+  ]
+ },
+ "FS-Resource-Manager": {
+  "deps": [
+   "FS-FileServer",
+   "NET-Framework-45-Core"
+  ],
+  "dism": [
+   "FSRM-Infrastructure"
+  ],
+  "parent": "File-Services",
+  "tools": [
+   "RSAT-FSRM-Mgmt"
+  ]
+ },
+ "FS-SMB1": {
+  "deps": [],
+  "dism": [
+   "SMB1Protocol"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "FS-SMB1-CLIENT": {
+  "deps": [],
+  "dism": [
+   "SMB1Protocol-Client"
+  ],
+  "parent": "FS-SMB1",
+  "tools": []
+ },
+ "FS-SMB1-SERVER": {
+  "deps": [],
+  "dism": [
+   "SMB1Protocol-Server"
+  ],
+  "parent": "FS-SMB1",
+  "tools": []
+ },
+ "FS-SMBBW": {
+  "deps": [],
+  "dism": [
+   "SMBBW"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "FS-SyncShareService": {
+  "deps": [
+   "FS-FileServer",
+   "Web-WHC"
+  ],
+  "dism": [
+   "WorkFolders-Server"
+  ],
+  "parent": "File-Services",
+  "tools": []
+ },
+ "FS-VSS-Agent": {
+  "deps": [
+   "FS-FileServer"
+  ],
+  "dism": [
+   "FileServerVSSAgent"
+  ],
+  "parent": "File-Services",
+  "tools": []
+ },
+ "FS-iSCSITarget-Server": {
+  "deps": [
+   "FS-FileServer"
+  ],
+  "dism": [
+   "iSCSITargetServer"
+  ],
+  "parent": "File-Services",
+  "tools": []
+ },
+ "FabricShieldedTools": {
+  "deps": [],
+  "dism": [
+   "FabricShieldedTools"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Failover-Clustering": {
+  "deps": [],
+  "dism": [
+   "FailoverCluster-FullServer"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-Clustering-Mgmt",
+   "RSAT-Clustering-PowerShell"
+  ]
+ },
+ "Fax": {
+  "deps": [
+   "Print-Server"
+  ],
+  "dism": [
+   "FaxServiceRole"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-Fax"
+  ]
+ },
+ "File-Services": {
+  "deps": [],
+  "dism": [
+   "File-Services"
+  ],
+  "parent": "FileAndStorage-Services",
+  "tools": []
+ },
+ "FileAndStorage-Services": {
+  "deps": [],
+  "dism": [
+   "FileAndStorage-Services"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "GPMC": {
+  "deps": [],
+  "dism": [
+   "Microsoft-Windows-GroupPolicy-ServerAdminTools-Update"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "HostGuardian": {
+  "deps": [
+   "BitLocker",
+   "Hyper-V"
+  ],
+  "dism": [
+   "HostGuardian"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "HostGuardianServiceRole": {
+  "deps": [
+   "AD-Domain-Services",
+   "BitLocker",
+   "Failover-Clustering",
+   "NET-Framework-45-ASPNET",
+   "NET-WCF-HTTP-Activation45",
+   "RSAT-Clustering-PowerShell",
+   "WAS-Config-APIs",
+   "WAS-Process-Model",
+   "Web-Asp-Net45",
+   "Web-Basic-Auth",
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Tracing",
+   "Web-ISAPI-Ext",
+   "Web-ISAPI-Filter",
+   "Web-Includes",
+   "Web-Net-Ext45",
+   "Web-Scripting-Tools",
+   "Web-Stat-Compression",
+   "Web-Static-Content",
+   "Web-Windows-Auth"
+  ],
+  "dism": [
+   "HostGuardianService-Package"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Hyper-V": {
+  "deps": [],
+  "dism": [
+   "Microsoft-Hyper-V-Offline",
+   "Microsoft-Hyper-V-Online"
+  ],
+  "parent": "",
+  "tools": [
+   "Hyper-V-PowerShell",
+   "Hyper-V-Tools"
+  ]
+ },
+ "Hyper-V-PowerShell": {
+  "deps": [],
+  "dism": [
+   "Microsoft-Hyper-V-Management-PowerShell"
+  ],
+  "parent": "RSAT-Hyper-V-Tools",
+  "tools": []
+ },
+ "Hyper-V-Tools": {
+  "deps": [],
+  "dism": [
+   "Microsoft-Hyper-V-Management-Clients"
+  ],
+  "parent": "RSAT-Hyper-V-Tools",
+  "tools": []
+ },
+ "IPAM": {
+  "deps": [
+   "GPMC",
+   "NET-WCF-TCP-Activation45",
+   "PowerShell",
+   "RSAT-DHCP",
+   "RSAT-DNS-Server",
+   "Windows-Internal-Database"
+  ],
+  "dism": [
+   "IPAMServerFeature"
+  ],
+  "parent": "",
+  "tools": [
+   "IPAM-Client-Feature"
+  ]
+ },
+ "IPAM-Client-Feature": {
+  "deps": [
+   "GPMC",
+   "NET-Framework-45-Core",
+   "RSAT-DHCP",
+   "RSAT-DNS-Server"
+  ],
+  "dism": [
+   "IPAMClientFeature"
+  ],
+  "parent": "RSAT-Feature-Tools",
+  "tools": []
+ },
+ "Internet-Print-Client": {
+  "deps": [],
+  "dism": [
+   "Printing-InternetPrinting-Client"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "LPR-Port-Monitor": {
+  "deps": [],
+  "dism": [
+   "Printing-LPRPortMonitor"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "MSMQ": {
+  "deps": [],
+  "dism": [
+   "MSMQ"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "MSMQ-DCOM": {
+  "deps": [],
+  "dism": [
+   "MSMQ-DCOMProxy"
+  ],
+  "parent": "MSMQ",
+  "tools": []
+ },
+ "MSMQ-Directory": {
+  "deps": [
+   "MSMQ-Server"
+  ],
+  "dism": [
+   "MSMQ-ADIntegration"
+  ],
+  "parent": "MSMQ-Services",
+  "tools": []
+ },
+ "MSMQ-HTTP-Support": {
+  "deps": [
+   "MSMQ-Server",
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Redirect",
+   "Web-Http-Tracing",
+   "Web-ISAPI-Ext",
+   "Web-Log-Libraries",
+   "Web-Metabase",
+   "Web-Request-Monitor",
+   "Web-Stat-Compression",
+   "Web-Static-Content"
+  ],
+  "dism": [
+   "MSMQ-HTTP"
+  ],
+  "parent": "MSMQ-Services",
+  "tools": []
+ },
+ "MSMQ-Multicasting": {
+  "deps": [
+   "MSMQ-Server"
+  ],
+  "dism": [
+   "MSMQ-Multicast"
+  ],
+  "parent": "MSMQ-Services",
+  "tools": []
+ },
+ "MSMQ-Routing": {
+  "deps": [
+   "MSMQ-Directory",
+   "MSMQ-Server"
+  ],
+  "dism": [
+   "MSMQ-RoutingServer"
+  ],
+  "parent": "MSMQ-Services",
+  "tools": []
+ },
+ "MSMQ-Server": {
+  "deps": [],
+  "dism": [
+   "MSMQ-Server"
+  ],
+  "parent": "MSMQ-Services",
+  "tools": []
+ },
+ "MSMQ-Services": {
+  "deps": [],
+  "dism": [
+   "MSMQ-Services"
+  ],
+  "parent": "MSMQ",
+  "tools": []
+ },
+ "MSMQ-Triggers": {
+  "deps": [
+   "MSMQ-Server"
+  ],
+  "dism": [
+   "MSMQ-Triggers"
+  ],
+  "parent": "MSMQ-Services",
+  "tools": []
+ },
+ "ManagementOdata": {
+  "deps": [
+   "NET-WCF-HTTP-Activation45",
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Filtering",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Tracing",
+   "Web-Request-Monitor",
+   "Web-Stat-Compression",
+   "Web-Static-Content"
+  ],
+  "dism": [
+   "ManagementOdata"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Microsoft-Windows-Subsystem-Linux": {
+  "deps": [],
+  "dism": [
+   "Microsoft-Windows-Subsystem-Linux"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Migration": {
+  "deps": [],
+  "dism": [
+   "ServerMigration"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "MultiPoint-Connector": {
+  "deps": [],
+  "dism": [
+   "MultiPoint-Connector"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "MultiPoint-Connector-Services": {
+  "deps": [],
+  "dism": [
+   "MultiPoint-Connector-Services"
+  ],
+  "parent": "MultiPoint-Connector",
+  "tools": [
+   "MultiPoint-Tools"
+  ]
+ },
+ "MultiPoint-Tools": {
+  "deps": [
+   "MultiPoint-Connector-Services"
+  ],
+  "dism": [
+   "MultiPoint-Tools"
+  ],
+  "parent": "MultiPoint-Connector",
+  "tools": []
+ },
+ "Multipath-IO": {
+  "deps": [],
+  "dism": [
+   "MultipathIo"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "NET-Framework-45-ASPNET": {
+  "deps": [
+   "NET-Framework-45-Core"
+  ],
+  "dism": [
+   "NetFx4Extended-ASPNET45"
+  ],
+  "parent": "NET-Framework-45-Features",
+  "tools": []
+ },
+ "NET-Framework-45-Core": {
+  "deps": [],
+  "dism": [
+   "NetFx4"
+  ],
+  "parent": "NET-Framework-45-Features",
+  "tools": []
+ },
+ "NET-Framework-45-Extended": {
+  "deps": [],
+  "dism": [
+   "NetFx4Extended"
+  ],
+  "parent": "NET-Framework-45-Core",
+  "tools": []
+ },
+ "NET-Framework-45-Features": {
+  "deps": [],
+  "dism": [
+   "NetFx4ServerFeatures"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "NET-Framework-Core": {
+  "deps": [],
+  "dism": [
+   "NetFx3"
+  ],
+  "parent": "NET-Framework-Features",
+  "tools": []
+ },
+ "NET-Framework-Features": {
+  "deps": [],
+  "dism": [
+   "NetFx3ServerFeatures"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "NET-HTTP-Activation": {
+  "deps": [
+   "NET-Framework-Core",
+   "WAS-Config-APIs",
+   "WAS-NET-Environment",
+   "WAS-Process-Model",
+   "Web-Net-Ext"
+  ],
+  "dism": [
+   "WCF-HTTP-Activation"
+  ],
+  "parent": "NET-Framework-Features",
+  "tools": []
+ },
+ "NET-Non-HTTP-Activ": {
+  "deps": [
+   "NET-Framework-Core",
+   "WAS-Config-APIs",
+   "WAS-NET-Environment",
+   "WAS-Process-Model"
+  ],
+  "dism": [
+   "WCF-NonHTTP-Activation"
+  ],
+  "parent": "NET-Framework-Features",
+  "tools": []
+ },
+ "NET-WCF-HTTP-Activation45": {
+  "deps": [
+   "NET-Framework-45-ASPNET",
+   "NET-Framework-45-Core",
+   "WAS-Config-APIs",
+   "WAS-Process-Model",
+   "Web-Asp-Net45"
+  ],
+  "dism": [
+   "WCF-HTTP-Activation45"
+  ],
+  "parent": "NET-WCF-Services45",
+  "tools": []
+ },
+ "NET-WCF-MSMQ-Activation45": {
+  "deps": [
+   "MSMQ-Server",
+   "NET-Framework-45-ASPNET",
+   "NET-Framework-45-Core",
+   "WAS-Config-APIs",
+   "WAS-Process-Model"
+  ],
+  "dism": [
+   "WCF-MSMQ-Activation45"
+  ],
+  "parent": "NET-WCF-Services45",
+  "tools": []
+ },
+ "NET-WCF-Pipe-Activation45": {
+  "deps": [
+   "NET-Framework-45-ASPNET",
+   "NET-Framework-45-Core",
+   "WAS-Config-APIs",
+   "WAS-Process-Model"
+  ],
+  "dism": [
+   "WCF-Pipe-Activation45"
+  ],
+  "parent": "NET-WCF-Services45",
+  "tools": []
+ },
+ "NET-WCF-Services45": {
+  "deps": [
+   "NET-Framework-45-Core"
+  ],
+  "dism": [
+   "WCF-Services45"
+  ],
+  "parent": "NET-Framework-45-Features",
+  "tools": []
+ },
+ "NET-WCF-TCP-Activation45": {
+  "deps": [
+   "NET-Framework-45-ASPNET",
+   "NET-Framework-45-Core",
+   "NET-WCF-TCP-PortSharing45",
+   "WAS-Config-APIs",
+   "WAS-Process-Model"
+  ],
+  "dism": [
+   "WCF-TCP-Activation45"
+  ],
+  "parent": "NET-WCF-Services45",
+  "tools": []
+ },
+ "NET-WCF-TCP-PortSharing45": {
+  "deps": [
+   "NET-Framework-45-Core"
+  ],
+  "dism": [
+   "WCF-TCP-PortSharing45"
+  ],
+  "parent": "NET-WCF-Services45",
+  "tools": []
+ },
+ "NFS-Client": {
+  "deps": [],
+  "dism": [
+   "ClientForNFS-Infrastructure",
+   "ServicesForNFS-ServerAndClient"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "NLB": {
+  "deps": [],
+  "dism": [
+   "NetworkLoadBalancingFullServer"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-NLB"
+  ]
+ },
+ "NPAS": {
+  "deps": [],
+  "dism": [
+   "NPAS-Role"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-NPAS"
+  ]
+ },
+ "NetworkATC": {
+  "deps": [],
+  "dism": [
+   "NetworkATC"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "NetworkController": {
+  "deps": [
+   "NET-Framework-45-Core",
+   "NET-WCF-TCP-PortSharing45",
+   "PowerShell"
+  ],
+  "dism": [
+   "NetworkController"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-NetworkController"
+  ]
+ },
+ "NetworkVirtualization": {
+  "deps": [
+   "Hyper-V"
+  ],
+  "dism": [
+   "NetworkVirtualization"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "PowerShell": {
+  "deps": [
+   "NET-Framework-45-Core"
+  ],
+  "dism": [
+   "MicrosoftWindowsPowerShell"
+  ],
+  "parent": "PowerShellRoot",
+  "tools": []
+ },
+ "PowerShell-V2": {
+  "deps": [
+   "NET-Framework-Core",
+   "PowerShell"
+  ],
+  "dism": [
+   "MicrosoftWindowsPowerShellV2"
+  ],
+  "parent": "PowerShellRoot",
+  "tools": []
+ },
+ "PowerShellRoot": {
+  "deps": [],
+  "dism": [
+   "MicrosoftWindowsPowerShellRoot"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Print-Internet": {
+  "deps": [
+   "Print-Server",
+   "Web-ASP",
+   "Web-Basic-Auth",
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Redirect",
+   "Web-Http-Tracing",
+   "Web-ISAPI-Ext",
+   "Web-ISAPI-Filter",
+   "Web-Log-Libraries",
+   "Web-Metabase",
+   "Web-Mgmt-Console",
+   "Web-Net-Ext45",
+   "Web-Request-Monitor",
+   "Web-Stat-Compression",
+   "Web-Static-Content",
+   "Web-Windows-Auth"
+  ],
+  "dism": [
+   "Printing-InternetPrinting-Server"
+  ],
+  "parent": "Print-Services",
+  "tools": []
+ },
+ "Print-LPD-Service": {
+  "deps": [
+   "Print-Server"
+  ],
+  "dism": [
+   "Printing-LPDPrintService"
+  ],
+  "parent": "Print-Services",
+  "tools": []
+ },
+ "Print-Server": {
+  "deps": [
+   "WoW64-Support"
+  ],
+  "dism": [
+   "Printing-Server-Role"
+  ],
+  "parent": "Print-Services",
+  "tools": [
+   "RSAT-Print-Services"
+  ]
+ },
+ "Print-Services": {
+  "deps": [],
+  "dism": [
+   "Printing-Server-Foundation-Features"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "RDC": {
+  "deps": [],
+  "dism": [
+   "MSRDC-Infrastructure"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "RDS-Connection-Broker": {
+  "deps": [
+   "Windows-Internal-Database"
+  ],
+  "dism": [
+   "SBMgr-UI",
+   "SessionDirectory"
+  ],
+  "parent": "Remote-Desktop-Services",
+  "tools": []
+ },
+ "RDS-Gateway": {
+  "deps": [
+   "NPAS",
+   "RPC-over-HTTP-Proxy",
+   "Web-Metabase"
+  ],
+  "dism": [
+   "Gateway"
+  ],
+  "parent": "Remote-Desktop-Services",
+  "tools": [
+   "RSAT-RDS-Gateway"
+  ]
+ },
+ "RDS-Licensing": {
+  "deps": [],
+  "dism": [
+   "Licensing"
+  ],
+  "parent": "Remote-Desktop-Services",
+  "tools": [
+   "RDS-Licensing-UI"
+  ]
+ },
+ "RDS-Licensing-UI": {
+  "deps": [],
+  "dism": [
+   "Licensing-UI"
+  ],
+  "parent": "RSAT-RDS-Tools",
+  "tools": []
+ },
+ "RDS-RD-Server": {
+  "deps": [],
+  "dism": [
+   "AppServer"
+  ],
+  "parent": "Remote-Desktop-Services",
+  "tools": [
+   "RSAT-RDS-Licensing-Diagnosis-UI"
+  ]
+ },
+ "RDS-Virtualization": {
+  "deps": [
+   "Hyper-V"
+  ],
+  "dism": [
+   "VmHostAgent"
+  ],
+  "parent": "Remote-Desktop-Services",
+  "tools": [
+   "RSAT-RDS-Licensing-Diagnosis-UI"
+  ]
+ },
+ "RDS-Web-Access": {
+  "deps": [
+   "NET-Framework-45-ASPNET",
+   "Web-Asp-Net45",
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Redirect",
+   "Web-Http-Tracing",
+   "Web-Log-Libraries",
+   "Web-Mgmt-Console",
+   "Web-Net-Ext45",
+   "Web-Request-Monitor",
+   "Web-Scripting-Tools",
+   "Web-Stat-Compression",
+   "Web-Static-Content",
+   "Web-Windows-Auth"
+  ],
+  "dism": [
+   "WebAccess"
+  ],
+  "parent": "Remote-Desktop-Services",
+  "tools": []
+ },
+ "RPC-over-HTTP-Proxy": {
+  "deps": [
+   "Web-Basic-Auth",
+   "Web-Client-Auth",
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Redirect",
+   "Web-Http-Tracing",
+   "Web-ISAPI-Ext",
+   "Web-Log-Libraries",
+   "Web-Metabase",
+   "Web-Request-Monitor",
+   "Web-Stat-Compression",
+   "Web-Static-Content",
+   "Web-WebServer",
+   "Web-Windows-Auth"
+  ],
+  "dism": [
+   "RPC-HTTP_Proxy"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "RSAT": {
+  "deps": [],
+  "dism": [
+   "ServerManager-Core-RSAT"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "RSAT-AD-AdminCenter": {
+  "deps": [
+   "NET-Framework-45-Core",
+   "RSAT-AD-PowerShell",
+   "RSAT-ADDS-Tools"
+  ],
+  "dism": [
+   "DirectoryServices-AdministrativeCenter"
+  ],
+  "parent": "RSAT-ADDS",
+  "tools": []
+ },
+ "RSAT-AD-PowerShell": {
+  "deps": [
+   "NET-Framework-45-Core",
+   "PowerShell"
+  ],
+  "dism": [
+   "ActiveDirectory-PowerShell"
+  ],
+  "parent": "RSAT-AD-Tools",
+  "tools": []
+ },
+ "RSAT-AD-Tools": {
+  "deps": [],
+  "dism": [
+   "RSAT-AD-Tools-Feature"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-ADCS": {
+  "deps": [],
+  "dism": [
+   "ADCertificateServicesManagementTools"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-ADCS-Mgmt": {
+  "deps": [],
+  "dism": [
+   "CertificateServicesManagementTools"
+  ],
+  "parent": "RSAT-ADCS",
+  "tools": []
+ },
+ "RSAT-ADDS": {
+  "deps": [],
+  "dism": [
+   "RSAT-ADDS-Tools-Feature"
+  ],
+  "parent": "RSAT-AD-Tools",
+  "tools": []
+ },
+ "RSAT-ADDS-Tools": {
+  "deps": [],
+  "dism": [
+   "DirectoryServices-DomainController-Tools"
+  ],
+  "parent": "RSAT-ADDS",
+  "tools": []
+ },
+ "RSAT-ADLDS": {
+  "deps": [],
+  "dism": [
+   "DirectoryServices-ADAM-Tools"
+  ],
+  "parent": "RSAT-AD-Tools",
+  "tools": []
+ },
+ "RSAT-ADRMS": {
+  "deps": [],
+  "dism": [
+   "RightsManagementServicesManagementTools"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-Bits-Server": {
+  "deps": [
+   "Web-Metabase",
+   "Web-Mgmt-Console"
+  ],
+  "dism": [
+   "BITSExtensions-AdminPack"
+  ],
+  "parent": "RSAT-Feature-Tools",
+  "tools": []
+ },
+ "RSAT-Clustering": {
+  "deps": [],
+  "dism": [
+   "FailoverCluster-AdminPak"
+  ],
+  "parent": "RSAT-Feature-Tools",
+  "tools": []
+ },
+ "RSAT-Clustering-AutomationServer": {
+  "deps": [],
+  "dism": [
+   "FailoverCluster-AutomationServer"
+  ],
+  "parent": "RSAT-Clustering",
+  "tools": []
+ },
+ "RSAT-Clustering-CmdInterface": {
+  "deps": [],
+  "dism": [
+   "FailoverCluster-CmdInterface"
+  ],
+  "parent": "RSAT-Clustering",
+  "tools": []
+ },
+ "RSAT-Clustering-Mgmt": {
+  "deps": [],
+  "dism": [
+   "FailoverCluster-Mgmt"
+  ],
+  "parent": "RSAT-Clustering",
+  "tools": []
+ },
+ "RSAT-Clustering-PowerShell": {
+  "deps": [],
+  "dism": [
+   "FailoverCluster-PowerShell"
+  ],
+  "parent": "RSAT-Clustering",
+  "tools": []
+ },
+ "RSAT-DFS-Mgmt-Con": {
+  "deps": [],
+  "dism": [
+   "DfsMgmt"
+  ],
+  "parent": "RSAT-File-Services",
+  "tools": []
+ },
+ "RSAT-DHCP": {
+  "deps": [],
+  "dism": [
+   "DHCPServer-Tools"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-DNS-Server": {
+  "deps": [],
+  "dism": [
+   "DNS-Server-Tools"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-DataCenterBridging-LLDP-Tools": {
+  "deps": [
+   "PowerShell"
+  ],
+  "dism": [
+   "DataCenterBridging-LLDP-Tools"
+  ],
+  "parent": "RSAT-Feature-Tools",
+  "tools": []
+ },
+ "RSAT-FSRM-Mgmt": {
+  "deps": [],
+  "dism": [
+   "FSRM-Management"
+  ],
+  "parent": "RSAT-File-Services",
+  "tools": []
+ },
+ "RSAT-Fax": {
+  "deps": [],
+  "dism": [
+   "FaxServiceConfigRole"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-Feature-Tools": {
+  "deps": [],
+  "dism": [
+   "ServerManager-Core-RSAT-Feature-Tools"
+  ],
+  "parent": "RSAT",
+  "tools": []
+ },
+ "RSAT-Feature-Tools-BitLocker": {
+  "deps": [],
+  "dism": [
+   "Bitlocker-Utilities"
+  ],
+  "parent": "RSAT-Feature-Tools",
+  "tools": []
+ },
+ "RSAT-Feature-Tools-BitLocker-BdeAducExt": {
+  "deps": [
+   "RSAT-ADDS-Tools"
+  ],
+  "dism": [
+   "BdeAducExtTool"
+  ],
+  "parent": "RSAT-Feature-Tools-BitLocker",
+  "tools": []
+ },
+ "RSAT-Feature-Tools-BitLocker-RemoteAdminTool": {
+  "deps": [],
+  "dism": [
+   "BitLocker-RemoteAdminTool"
+  ],
+  "parent": "RSAT-Feature-Tools-BitLocker",
+  "tools": []
+ },
+ "RSAT-File-Services": {
+  "deps": [],
+  "dism": [
+   "Server-Manager-RSAT-File-Services"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-Hyper-V-Tools": {
+  "deps": [],
+  "dism": [
+   "RSAT-Hyper-V-Tools-Feature"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-NFS-Admin": {
+  "deps": [],
+  "dism": [
+   "NFS-Administration"
+  ],
+  "parent": "RSAT-File-Services",
+  "tools": []
+ },
+ "RSAT-NLB": {
+  "deps": [],
+  "dism": [
+   "NetworkLoadBalancingManagementClient"
+  ],
+  "parent": "RSAT-Feature-Tools",
+  "tools": []
+ },
+ "RSAT-NPAS": {
+  "deps": [],
+  "dism": [
+   "NPSMMC"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-NetworkController": {
+  "deps": [
+   "PowerShell"
+  ],
+  "dism": [
+   "NetworkControllerTools"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-Online-Responder": {
+  "deps": [],
+  "dism": [
+   "OnlineRevocationServicesManagementTools"
+  ],
+  "parent": "RSAT-ADCS",
+  "tools": []
+ },
+ "RSAT-Print-Services": {
+  "deps": [],
+  "dism": [
+   "Printing-AdminTools-Collection"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-RDS-Gateway": {
+  "deps": [
+   "Web-Metabase"
+  ],
+  "dism": [
+   "Gateway-UI"
+  ],
+  "parent": "RSAT-RDS-Tools",
+  "tools": []
+ },
+ "RSAT-RDS-Licensing-Diagnosis-UI": {
+  "deps": [],
+  "dism": [
+   "Licensing-Diagnosis-UI"
+  ],
+  "parent": "RSAT-RDS-Tools",
+  "tools": []
+ },
+ "RSAT-RDS-Tools": {
+  "deps": [],
+  "dism": [
+   "RSAT-RDS-Tools-Feature"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-RemoteAccess": {
+  "deps": [],
+  "dism": [
+   "RemoteAccessMgmtTools"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-RemoteAccess-Mgmt": {
+  "deps": [
+   "CMAK",
+   "GPMC",
+   "RSAT-RemoteAccess-PowerShell"
+  ],
+  "dism": [
+   "DamgmtTools"
+  ],
+  "parent": "RSAT-RemoteAccess",
+  "tools": []
+ },
+ "RSAT-RemoteAccess-PowerShell": {
+  "deps": [
+   "GPMC",
+   "PowerShell"
+  ],
+  "dism": [
+   "RemoteAccessPowerShell"
+  ],
+  "parent": "RSAT-RemoteAccess",
+  "tools": []
+ },
+ "RSAT-Role-Tools": {
+  "deps": [],
+  "dism": [
+   "ServerManager-Core-RSAT-Role-Tools"
+  ],
+  "parent": "RSAT",
+  "tools": []
+ },
+ "RSAT-SMS": {
+  "deps": [],
+  "dism": [
+   "StorageMigrationServiceManagement"
+  ],
+  "parent": "RSAT-Feature-Tools",
+  "tools": []
+ },
+ "RSAT-SNMP": {
+  "deps": [],
+  "dism": [
+   "Server-RSAT-SNMP"
+  ],
+  "parent": "RSAT-Feature-Tools",
+  "tools": []
+ },
+ "RSAT-Shielded-VM-Tools": {
+  "deps": [
+   "BitLocker"
+  ],
+  "dism": [
+   "ShieldedVMToolsAdminPack"
+  ],
+  "parent": "RSAT-Feature-Tools",
+  "tools": []
+ },
+ "RSAT-Storage-Replica": {
+  "deps": [],
+  "dism": [
+   "Storage-Replica-AdminPack"
+  ],
+  "parent": "RSAT-Feature-Tools",
+  "tools": []
+ },
+ "RSAT-System-Insights": {
+  "deps": [],
+  "dism": [
+   "SystemInsightsManagement"
+  ],
+  "parent": "RSAT-Feature-Tools",
+  "tools": []
+ },
+ "RSAT-VA-Tools": {
+  "deps": [],
+  "dism": [
+   "Security-SPP-Vmw"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "RSAT-WINS": {
+  "deps": [],
+  "dism": [
+   "WINS-Server-Tools"
+  ],
+  "parent": "RSAT-Feature-Tools",
+  "tools": []
+ },
+ "Remote-Assistance": {
+  "deps": [],
+  "dism": [
+   "RemoteAssistance"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Remote-Desktop-Services": {
+  "deps": [],
+  "dism": [
+   "Remote-Desktop-Services"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "RemoteAccess": {
+  "deps": [],
+  "dism": [
+   "RemoteAccess"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Routing": {
+  "deps": [
+   "DirectAccess-VPN"
+  ],
+  "dism": [
+   "RasRoutingProtocols"
+  ],
+  "parent": "RemoteAccess",
+  "tools": []
+ },
+ "SMS": {
+  "deps": [
+   "SMS-Proxy"
+  ],
+  "dism": [
+   "StorageMigrationService"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-SMS"
+  ]
+ },
+ "SMS-Proxy": {
+  "deps": [],
+  "dism": [
+   "StorageMigrationServiceProxy"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "SNMP-Service": {
+  "deps": [],
+  "dism": [
+   "SNMP"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-SNMP"
+  ]
+ },
+ "SNMP-WMI-Provider": {
+  "deps": [],
+  "dism": [
+   "WMISnmpProvider"
+  ],
+  "parent": "SNMP-Service",
+  "tools": []
+ },
+ "Search-Service": {
+  "deps": [],
+  "dism": [
+   "File-Services-Search-Service",
+   "SearchEngine-Server-Package"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Server-Media-Foundation": {
+  "deps": [],
+  "dism": [
+   "ServerMediaFoundation"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Setup-and-Boot-Event-Collection": {
+  "deps": [],
+  "dism": [
+   "SetupAndBootEventCollection"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Simple-TCPIP": {
+  "deps": [],
+  "dism": [
+   "SimpleTCP"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "SoftwareLoadBalancer": {
+  "deps": [],
+  "dism": [
+   "SoftwareLoadBalancer"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Storage-Replica": {
+  "deps": [],
+  "dism": [
+   "Storage-Replica"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-Storage-Replica"
+  ]
+ },
+ "Storage-Services": {
+  "deps": [],
+  "dism": [
+   "Storage-Services"
+  ],
+  "parent": "FileAndStorage-Services",
+  "tools": []
+ },
+ "Sysmon": {
+  "deps": [],
+  "dism": [
+   "Sysmon"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "System-DataArchiver": {
+  "deps": [],
+  "dism": [
+   "SystemDataArchiver"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "System-Insights": {
+  "deps": [],
+  "dism": [
+   "SystemInsights"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-System-Insights"
+  ]
+ },
+ "TFTP-Client": {
+  "deps": [],
+  "dism": [
+   "TFTP"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Telnet-Client": {
+  "deps": [],
+  "dism": [
+   "TelnetClient"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "UpdateServices": {
+  "deps": [],
+  "dism": [
+   "UpdateServices"
+  ],
+  "parent": "",
+  "tools": [
+   "UpdateServices-UI"
+  ]
+ },
+ "UpdateServices-API": {
+  "deps": [
+   "NET-Framework-45-Core"
+  ],
+  "dism": [
+   "UpdateServices-API"
+  ],
+  "parent": "UpdateServices-RSAT",
+  "tools": []
+ },
+ "UpdateServices-DB": {
+  "deps": [
+   "UpdateServices-Services"
+  ],
+  "dism": [
+   "UpdateServices-Database"
+  ],
+  "parent": "UpdateServices",
+  "tools": []
+ },
+ "UpdateServices-RSAT": {
+  "deps": [],
+  "dism": [
+   "UpdateServices-RSAT"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "UpdateServices-Services": {
+  "deps": [
+   "NET-WCF-HTTP-Activation45",
+   "UpdateServices-API",
+   "WAS-Config-APIs",
+   "Web-Asp-Net45",
+   "Web-Dyn-Compression",
+   "Web-Metabase",
+   "Web-Mgmt-Compat",
+   "Web-Static-Content",
+   "Web-Windows-Auth"
+  ],
+  "dism": [
+   "UpdateServices-Services"
+  ],
+  "parent": "UpdateServices",
+  "tools": []
+ },
+ "UpdateServices-UI": {
+  "deps": [
+   "UpdateServices-API"
+  ],
+  "dism": [
+   "UpdateServices-UI"
+  ],
+  "parent": "UpdateServices-RSAT",
+  "tools": []
+ },
+ "UpdateServices-WidDB": {
+  "deps": [
+   "UpdateServices-Services",
+   "Windows-Internal-Database"
+  ],
+  "dism": [
+   "UpdateServices-WidDatabase"
+  ],
+  "parent": "UpdateServices",
+  "tools": []
+ },
+ "VolumeActivation": {
+  "deps": [],
+  "dism": [
+   "VolumeActivation-Full-Role"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-VA-Tools"
+  ]
+ },
+ "WAS": {
+  "deps": [],
+  "dism": [
+   "WAS-WindowsActivationService"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "WAS-Config-APIs": {
+  "deps": [],
+  "dism": [
+   "WAS-ConfigurationAPI"
+  ],
+  "parent": "WAS",
+  "tools": []
+ },
+ "WAS-NET-Environment": {
+  "deps": [
+   "NET-Framework-45-ASPNET",
+   "NET-Framework-Core"
+  ],
+  "dism": [
+   "WAS-NetFxEnvironment"
+  ],
+  "parent": "WAS",
+  "tools": []
+ },
+ "WAS-Process-Model": {
+  "deps": [],
+  "dism": [
+   "WAS-ProcessModel"
+  ],
+  "parent": "WAS",
+  "tools": []
+ },
+ "WDS": {
+  "deps": [],
+  "dism": [
+   "Microsoft-Windows-Deployment-Services"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "WDS-AdminPack": {
+  "deps": [],
+  "dism": [
+   "Microsoft-Windows-Deployment-Services-Admin-Pack"
+  ],
+  "parent": "RSAT-Role-Tools",
+  "tools": []
+ },
+ "WDS-Deployment": {
+  "deps": [
+   "WDS-Transport"
+  ],
+  "dism": [
+   "Microsoft-Windows-Deployment-Services-Deployment-Server"
+  ],
+  "parent": "WDS",
+  "tools": [
+   "WDS-AdminPack"
+  ]
+ },
+ "WDS-Transport": {
+  "deps": [],
+  "dism": [
+   "Microsoft-Windows-Deployment-Services",
+   "Microsoft-Windows-Deployment-Services-Transport-Server"
+  ],
+  "parent": "WDS",
+  "tools": []
+ },
+ "WINS": {
+  "deps": [],
+  "dism": [
+   "WINSRuntime"
+  ],
+  "parent": "",
+  "tools": [
+   "RSAT-WINS"
+  ]
+ },
+ "Web-ASP": {
+  "deps": [
+   "Web-Filtering",
+   "Web-ISAPI-Ext"
+  ],
+  "dism": [
+   "IIS-ASP"
+  ],
+  "parent": "Web-App-Dev",
+  "tools": []
+ },
+ "Web-App-Dev": {
+  "deps": [],
+  "dism": [
+   "IIS-ApplicationDevelopment"
+  ],
+  "parent": "Web-WebServer",
+  "tools": []
+ },
+ "Web-AppInit": {
+  "deps": [],
+  "dism": [
+   "IIS-ApplicationInit"
+  ],
+  "parent": "Web-App-Dev",
+  "tools": []
+ },
+ "Web-Application-Proxy": {
+  "deps": [],
+  "dism": [
+   "Web-Application-Proxy"
+  ],
+  "parent": "RemoteAccess",
+  "tools": [
+   "RSAT-RemoteAccess-Mgmt",
+   "RSAT-RemoteAccess-PowerShell"
+  ]
+ },
+ "Web-Asp-Net": {
+  "deps": [
+   "Web-Default-Doc",
+   "Web-ISAPI-Ext",
+   "Web-ISAPI-Filter",
+   "Web-Net-Ext"
+  ],
+  "dism": [
+   "IIS-ASPNET"
+  ],
+  "parent": "Web-App-Dev",
+  "tools": []
+ },
+ "Web-Asp-Net45": {
+  "deps": [
+   "Web-Default-Doc",
+   "Web-Filtering",
+   "Web-ISAPI-Ext",
+   "Web-ISAPI-Filter",
+   "Web-Net-Ext45"
+  ],
+  "dism": [
+   "IIS-ASPNET45"
+  ],
+  "parent": "Web-App-Dev",
+  "tools": []
+ },
+ "Web-Basic-Auth": {
+  "deps": [],
+  "dism": [
+   "IIS-BasicAuthentication"
+  ],
+  "parent": "Web-Security",
+  "tools": []
+ },
+ "Web-CGI": {
+  "deps": [],
+  "dism": [
+   "IIS-CGI"
+  ],
+  "parent": "Web-App-Dev",
+  "tools": []
+ },
+ "Web-Cert-Auth": {
+  "deps": [],
+  "dism": [
+   "IIS-IISCertificateMappingAuthentication"
+  ],
+  "parent": "Web-Security",
+  "tools": []
+ },
+ "Web-CertProvider": {
+  "deps": [],
+  "dism": [
+   "IIS-CertProvider"
+  ],
+  "parent": "Web-Security",
+  "tools": []
+ },
+ "Web-Client-Auth": {
+  "deps": [],
+  "dism": [
+   "IIS-ClientCertificateMappingAuthentication"
+  ],
+  "parent": "Web-Security",
+  "tools": []
+ },
+ "Web-Common-Http": {
+  "deps": [],
+  "dism": [
+   "IIS-CommonHttpFeatures"
+  ],
+  "parent": "Web-WebServer",
+  "tools": []
+ },
+ "Web-Custom-Logging": {
+  "deps": [],
+  "dism": [
+   "IIS-CustomLogging"
+  ],
+  "parent": "Web-Health",
+  "tools": []
+ },
+ "Web-DAV-Publishing": {
+  "deps": [
+   "Web-Filtering",
+   "Web-Static-Content"
+  ],
+  "dism": [
+   "IIS-WebDAV"
+  ],
+  "parent": "Web-Common-Http",
+  "tools": []
+ },
+ "Web-Default-Doc": {
+  "deps": [],
+  "dism": [
+   "IIS-DefaultDocument"
+  ],
+  "parent": "Web-Common-Http",
+  "tools": []
+ },
+ "Web-Digest-Auth": {
+  "deps": [],
+  "dism": [
+   "IIS-DigestAuthentication"
+  ],
+  "parent": "Web-Security",
+  "tools": []
+ },
+ "Web-Dir-Browsing": {
+  "deps": [],
+  "dism": [
+   "IIS-DirectoryBrowsing"
+  ],
+  "parent": "Web-Common-Http",
+  "tools": []
+ },
+ "Web-Dyn-Compression": {
+  "deps": [],
+  "dism": [
+   "IIS-HttpCompressionDynamic"
+  ],
+  "parent": "Web-Performance",
+  "tools": []
+ },
+ "Web-Filtering": {
+  "deps": [],
+  "dism": [
+   "IIS-RequestFiltering"
+  ],
+  "parent": "Web-Security",
+  "tools": []
+ },
+ "Web-Ftp-Ext": {
+  "deps": [
+   "Web-Ftp-Service"
+  ],
+  "dism": [
+   "IIS-FTPExtensibility"
+  ],
+  "parent": "Web-Ftp-Server",
+  "tools": []
+ },
+ "Web-Ftp-Server": {
+  "deps": [],
+  "dism": [
+   "IIS-FTPServer"
+  ],
+  "parent": "Web-Server",
+  "tools": []
+ },
+ "Web-Ftp-Service": {
+  "deps": [],
+  "dism": [
+   "IIS-FTPSvc"
+  ],
+  "parent": "Web-Ftp-Server",
+  "tools": []
+ },
+ "Web-Health": {
+  "deps": [],
+  "dism": [
+   "IIS-HealthAndDiagnostics"
+  ],
+  "parent": "Web-WebServer",
+  "tools": []
+ },
+ "Web-Http-Errors": {
+  "deps": [],
+  "dism": [
+   "IIS-HttpErrors"
+  ],
+  "parent": "Web-Common-Http",
+  "tools": []
+ },
+ "Web-Http-Logging": {
+  "deps": [],
+  "dism": [
+   "IIS-HttpLogging"
+  ],
+  "parent": "Web-Health",
+  "tools": []
+ },
+ "Web-Http-Redirect": {
+  "deps": [],
+  "dism": [
+   "IIS-HttpRedirect"
+  ],
+  "parent": "Web-Common-Http",
+  "tools": []
+ },
+ "Web-Http-Tracing": {
+  "deps": [],
+  "dism": [
+   "IIS-HttpTracing"
+  ],
+  "parent": "Web-Health",
+  "tools": []
+ },
+ "Web-IP-Security": {
+  "deps": [],
+  "dism": [
+   "IIS-IPSecurity"
+  ],
+  "parent": "Web-Security",
+  "tools": []
+ },
+ "Web-ISAPI-Ext": {
+  "deps": [],
+  "dism": [
+   "IIS-ISAPIExtensions"
+  ],
+  "parent": "Web-App-Dev",
+  "tools": []
+ },
+ "Web-ISAPI-Filter": {
+  "deps": [],
+  "dism": [
+   "IIS-ISAPIFilter"
+  ],
+  "parent": "Web-App-Dev",
+  "tools": []
+ },
+ "Web-Includes": {
+  "deps": [],
+  "dism": [
+   "IIS-ServerSideIncludes"
+  ],
+  "parent": "Web-App-Dev",
+  "tools": []
+ },
+ "Web-Lgcy-Scripting": {
+  "deps": [
+   "Web-Metabase",
+   "Web-WMI"
+  ],
+  "dism": [
+   "IIS-LegacyScripts"
+  ],
+  "parent": "Web-Mgmt-Compat",
+  "tools": []
+ },
+ "Web-Log-Libraries": {
+  "deps": [],
+  "dism": [
+   "IIS-LoggingLibraries"
+  ],
+  "parent": "Web-Health",
+  "tools": []
+ },
+ "Web-Metabase": {
+  "deps": [],
+  "dism": [
+   "IIS-Metabase"
+  ],
+  "parent": "Web-Mgmt-Compat",
+  "tools": []
+ },
+ "Web-Mgmt-Compat": {
+  "deps": [],
+  "dism": [
+   "IIS-IIS6ManagementCompatibility"
+  ],
+  "parent": "Web-Mgmt-Tools",
+  "tools": []
+ },
+ "Web-Mgmt-Console": {
+  "deps": [],
+  "dism": [
+   "IIS-ManagementConsole"
+  ],
+  "parent": "Web-Mgmt-Tools",
+  "tools": []
+ },
+ "Web-Mgmt-Service": {
+  "deps": [
+   "NET-Framework-45-ASPNET"
+  ],
+  "dism": [
+   "IIS-ManagementService"
+  ],
+  "parent": "Web-Mgmt-Tools",
+  "tools": []
+ },
+ "Web-Mgmt-Tools": {
+  "deps": [],
+  "dism": [
+   "IIS-WebServerManagementTools"
+  ],
+  "parent": "Web-Server",
+  "tools": []
+ },
+ "Web-Net-Ext": {
+  "deps": [
+   "NET-Framework-45-ASPNET",
+   "NET-Framework-Core",
+   "Web-Filtering"
+  ],
+  "dism": [
+   "IIS-NetFxExtensibility"
+  ],
+  "parent": "Web-App-Dev",
+  "tools": []
+ },
+ "Web-Net-Ext45": {
+  "deps": [
+   "NET-Framework-45-ASPNET",
+   "Web-Filtering"
+  ],
+  "dism": [
+   "IIS-NetFxExtensibility45"
+  ],
+  "parent": "Web-App-Dev",
+  "tools": []
+ },
+ "Web-ODBC-Logging": {
+  "deps": [],
+  "dism": [
+   "IIS-ODBCLogging"
+  ],
+  "parent": "Web-Health",
+  "tools": []
+ },
+ "Web-Performance": {
+  "deps": [],
+  "dism": [
+   "IIS-Performance"
+  ],
+  "parent": "Web-WebServer",
+  "tools": []
+ },
+ "Web-Request-Monitor": {
+  "deps": [],
+  "dism": [
+   "IIS-RequestMonitor"
+  ],
+  "parent": "Web-Health",
+  "tools": []
+ },
+ "Web-Scripting-Tools": {
+  "deps": [],
+  "dism": [
+   "IIS-ManagementScriptingTools"
+  ],
+  "parent": "Web-Mgmt-Tools",
+  "tools": []
+ },
+ "Web-Security": {
+  "deps": [],
+  "dism": [
+   "IIS-Security"
+  ],
+  "parent": "Web-WebServer",
+  "tools": []
+ },
+ "Web-Server": {
+  "deps": [],
+  "dism": [
+   "IIS-WebServerRole"
+  ],
+  "parent": "",
+  "tools": [
+   "Web-Mgmt-Console"
+  ]
+ },
+ "Web-Stat-Compression": {
+  "deps": [],
+  "dism": [
+   "IIS-HttpCompressionStatic"
+  ],
+  "parent": "Web-Performance",
+  "tools": []
+ },
+ "Web-Static-Content": {
+  "deps": [],
+  "dism": [
+   "IIS-StaticContent"
+  ],
+  "parent": "Web-Common-Http",
+  "tools": []
+ },
+ "Web-Url-Auth": {
+  "deps": [],
+  "dism": [
+   "IIS-URLAuthorization"
+  ],
+  "parent": "Web-Security",
+  "tools": []
+ },
+ "Web-WHC": {
+  "deps": [],
+  "dism": [
+   "IIS-HostableWebCore"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Web-WMI": {
+  "deps": [
+   "Web-Metabase"
+  ],
+  "dism": [
+   "IIS-WMICompatibility"
+  ],
+  "parent": "Web-Mgmt-Compat",
+  "tools": []
+ },
+ "Web-WebServer": {
+  "deps": [],
+  "dism": [
+   "IIS-WebServer"
+  ],
+  "parent": "Web-Server",
+  "tools": []
+ },
+ "Web-WebSockets": {
+  "deps": [],
+  "dism": [
+   "IIS-WebSockets"
+  ],
+  "parent": "Web-App-Dev",
+  "tools": []
+ },
+ "Web-Windows-Auth": {
+  "deps": [],
+  "dism": [
+   "IIS-WindowsAuthentication"
+  ],
+  "parent": "Web-Security",
+  "tools": []
+ },
+ "WebDAV-Redirector": {
+  "deps": [],
+  "dism": [
+   "WebDAV-Redirector"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "WinRM-IIS-Ext": {
+  "deps": [
+   "Web-Default-Doc",
+   "Web-Dir-Browsing",
+   "Web-Filtering",
+   "Web-Http-Errors",
+   "Web-Http-Logging",
+   "Web-Http-Tracing",
+   "Web-Request-Monitor",
+   "Web-Stat-Compression",
+   "Web-Static-Content"
+  ],
+  "dism": [
+   "Microsoft-Windows-Web-Services-for-Management-IIS-Extension"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Windows-Defender": {
+  "deps": [],
+  "dism": [
+   "Windows-Defender"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Windows-Identity-Foundation": {
+  "deps": [],
+  "dism": [
+   "Windows-Identity-Foundation"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Windows-Internal-Database": {
+  "deps": [],
+  "dism": [
+   "Windows-Internal-Database"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Windows-Server-Backup": {
+  "deps": [],
+  "dism": [
+   "WindowsServerBackup"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Windows-TIFF-IFilter": {
+  "deps": [],
+  "dism": [
+   "TIFFIFilter"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "WindowsAdminCenterSetup": {
+  "deps": [],
+  "dism": [
+   "WindowsAdminCenterSetup"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "WindowsPowerShellWebAccess": {
+  "deps": [
+   "PowerShell",
+   "Web-Asp-Net45",
+   "Web-Default-Doc",
+   "Web-Filtering",
+   "Web-Http-Errors",
+   "Web-Http-Redirect",
+   "Web-Static-Content"
+  ],
+  "dism": [
+   "WindowsPowerShellWebAccess"
+  ],
+  "parent": "PowerShellRoot",
+  "tools": []
+ },
+ "WindowsStorageManagementService": {
+  "deps": [],
+  "dism": [
+   "WindowsStorageManagementService"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "Wireless-Networking": {
+  "deps": [],
+  "dism": [
+   "WirelessNetworking"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "WoW64-Support": {
+  "deps": [],
+  "dism": [
+   "ServerCore-WOW64"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "XPS-Viewer": {
+  "deps": [],
+  "dism": [
+   "Xps-Foundation-Xps-Viewer"
+  ],
+  "parent": "",
+  "tools": []
+ },
+ "iSCSITarget-VSS-VDS": {
+  "deps": [
+   "FS-FileServer"
+  ],
+  "dism": [
+   "iSCSITargetStorageProviders"
+  ],
+  "parent": "File-Services",
+  "tools": []
+ },
+ "qWave": {
+  "deps": [],
+  "dism": [
+   "QWAVE"
+  ],
+  "parent": "",
+  "tools": []
+ }
+}

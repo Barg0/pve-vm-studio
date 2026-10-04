@@ -1,5 +1,4 @@
-/* icons.js — Hyper-V VM Studio icon system.
-   Replaces the ICONS map of Microsoft Azure SVGs. Every glyph here is an original drawing.
+/* icons.js — PVE VM Studio icon system. Every glyph here is an original drawing.
 
    HOW IT WORKS
    Each entry is a TEMPLATE, not a finished SVG. Two placeholders:
@@ -18,9 +17,9 @@
    - Every glyph must stay legible at 12px. Test before shipping.
 
    LEGAL CONSTRAINT — READ THIS
-   These replace Microsoft's Azure portal icons, which is the point of the exercise. Do not
-   reintroduce vendor artwork, and do not "tint" or otherwise modify a vendor logo to match
-   the palette: a recoloured logo is a modified logo and is worse than using the original.
+   No vendor artwork. Do not add a vendor's icon or logo, and do not "tint" or otherwise
+   modify one to match the palette: a recoloured logo is a modified logo, and worse than
+   the original.
    There are no logo slots left. Every OS glyph draws the machine - a rack of units for a
    server, a monitor on its stand for a client - and nothing draws a vendor mark, including
    the four-pane grid that reads as one. Do not add one back.
@@ -33,6 +32,7 @@ const DEFS = {
   "overview.svg": ["studio", '<g fill="@H"><rect x="1.8" y="1.8" width="6.6" height="6.6" rx="1"/><rect x="9.6" y="1.8" width="6.6" height="6.6" rx="1"/><rect x="1.8" y="9.6" width="6.6" height="6.6" rx="1"/><rect x="9.6" y="9.6" width="6.6" height="6.6" rx="1"/></g>'],
   "help.svg": ["studio", '<g fill="@H"><circle cx="9" cy="9" r="7.2"/></g>' + S + '<path d="M6.9 7a2.2 2.2 0 1 1 2.1 2.8v.9"/><path d="M9 13.2h.01" stroke-width="1.7"/></g>'],
   "language.svg": ["studio", '<g fill="@H"><circle cx="9" cy="9" r="7.2"/></g>' + S + '<path d="M1.9 9h14.2M9 1.9c3.4 3.8 3.4 10.4 0 14.2M9 1.9c-3.4 3.8-3.4 10.4 0 14.2"/></g>'],
+  "clock.svg": ["studio", '<g fill="@H"><circle cx="9" cy="9" r="7.2"/></g>' + S + '<path d="M9 4.8V9l2.9 1.8"/></g>'],
   "monitor.svg": ["studio", '<g fill="@H"><rect x="1.6" y="2.6" width="14.8" height="10" rx="1.4"/><rect x="6.4" y="14.4" width="5.2" height="1.8" rx=".9"/></g>' + S + '<path d="M1.6 5.8h14.8M9 12.6v1.8"/></g>'],
   "settings.svg": ["host", '<g fill="@H"><rect x="1.8" y="3" width="14.4" height="2.4" rx="1.2"/><rect x="1.8" y="7.8" width="14.4" height="2.4" rx="1.2"/><rect x="1.8" y="12.6" width="14.4" height="2.4" rx="1.2"/></g>' + S + '<circle cx="5.4" cy="4.2" r="1.6"/><circle cx="11.4" cy="9" r="1.6"/><circle cx="7" cy="13.8" r="1.6"/></g>'],
   "vnet.svg": ["host", '<g fill="@H"><rect x="6.6" y="6.6" width="4.8" height="4.8" rx="1"/><rect x="1.4" y="1.4" width="3.8" height="3.8" rx="1"/><rect x="12.8" y="1.4" width="3.8" height="3.8" rx="1"/><rect x="1.4" y="12.8" width="3.8" height="3.8" rx="1"/><rect x="12.8" y="12.8" width="3.8" height="3.8" rx="1"/></g>' + S + '<path d="M5.2 5.2l1.6 1.6M12.8 5.2l-1.6 1.6M5.2 12.8l1.6-1.6M12.8 12.8l-1.6-1.6"/></g>'],
@@ -69,7 +69,7 @@ const DEFS = {
   "abs-member.svg": ["ident", '<g fill="@H"><rect x="1.8" y="1.8" width="14.4" height="14.4" rx="3"/></g>' + S + '<circle cx="6.4" cy="6.4" r="1.6"/><circle cx="11.6" cy="6.4" r="1.6"/><circle cx="9" cy="11.6" r="1.6"/></g>'],
   "gpo.svg": ["ident", '<g fill="@H"><rect x="2.4" y="1.8" width="9.4" height="14.4" rx="1.3"/><circle cx="14.2" cy="12.8" r="2.4"/></g>' + S + '<path d="M4.8 5.4h4.6M4.8 8.2h4.6M4.8 11h3"/></g>'],
   "arc.svg": ["ident", '<g fill="@H"><rect x="1.4" y="11.4" width="4" height="4.6" rx="1"/><rect x="7" y="11.4" width="4" height="4.6" rx="1"/><rect x="12.6" y="11.4" width="4" height="4.6" rx="1"/></g>' + S + '<path d="M2.6 8.4a7.8 7.8 0 0 1 12.8 0"/><path d="M3.4 11.4V9.7M9 11.4V8.4M14.6 11.4V9.7"/></g>'],
-  "azure.svg": ["ident", '<g fill="@H"><path d="M4.9 14.6a3.7 3.7 0 0 1-.4-7.4 4.9 4.9 0 0 1 9.3-1.2 3.8 3.8 0 0 1 .6 8.6z"/></g>' + S + '<path d="M6.6 11.6h4.8"/></g>'],
+  "cloud.svg": ["ident", '<g fill="@H"><path d="M4.9 14.6a3.7 3.7 0 0 1-.4-7.4 4.9 4.9 0 0 1 9.3-1.2 3.8 3.8 0 0 1 .6 8.6z"/></g>' + S + '<path d="M6.6 11.6h4.8"/></g>'],
   "export.svg": ["deploy", '<g fill="@H"><path d="M2.4 2.6h6v2.4H4.8v8.4h8.4V9.6h2.4v6.2H2.4z"/><path d="M10.2 2.6h5.6v5.6l-2-2-3.4 3.4-1.6-1.6 3.4-3.4z"/></g>'],
   "download.svg": ["deploy", '<g fill="@H"><rect x="7.8" y="1.6" width="2.4" height="8.6" rx="1"/><path d="M9 13L4.4 8h9.2z"/><rect x="1.8" y="14" width="14.4" height="2.4" rx="1.1"/></g>'],
   "save.svg": ["deploy", '<g fill="@H"><path d="M2.6 3.6a1.2 1.2 0 0 1 1.2-1.2h8.4l3.2 3.2v8.8a1.2 1.2 0 0 1-1.2 1.2H3.8a1.2 1.2 0 0 1-1.2-1.2z"/></g>' + S + '<path d="M6.2 2.6v3.4h4.8M6.4 15.4v-4.2h5.2v4.2"/></g>'],
@@ -95,6 +95,8 @@ const FRESH = {
   "differencing.svg": ["host", "A child disk on its parent", '<g fill="@H"><path d="M1.6 4.4c0-1.3 2.2-2.3 4.9-2.3s4.9 1 4.9 2.3v4c0 1.3-2.2 2.3-4.9 2.3S1.6 9.7 1.6 8.4z"/><path d="M7.6 11.2c0-1.2 2-2.1 4.4-2.1s4.4.9 4.4 2.1v3.6c0 1.2-2 2.1-4.4 2.1s-4.4-.9-4.4-2.1z"/></g>' + S + '<path d="M1.9 4.4c0 1.2 2.1 2.1 4.6 2.1M7.9 11.2c0 1.1 1.9 1.9 4.1 1.9s4.1-.8 4.1-1.9"/></g>'],
   "checkpoint.svg": ["host", "Checkpoints on or off", '<g fill="@H"><rect x="3" y="1.6" width="1.9" height="14.8" rx=".9"/><path d="M5.6 2.6h9.6l-2.2 3.4 2.2 3.4H5.6z"/></g>' + S + '<path d="M8.6 4.4h3.4"/></g>'],
   "integration.svg": ["host", "Integration Services — was a gear", '<g fill="@H"><rect x="6" y="1.4" width="1.8" height="4" rx=".9"/><rect x="10.2" y="1.4" width="1.8" height="4" rx=".9"/><path d="M3.8 5.6h10.4v3.2a5.2 5.2 0 0 1-10.4 0z"/><rect x="8.1" y="13.6" width="1.8" height="2.8" rx=".9"/></g>' + S + '<path d="M6.4 8.2h5.2"/></g>'],
+  "stop.svg": ["deploy", "Stop - a square: it aborts a running job", '<g fill="@H"><rect x="3.2" y="3.2" width="11.6" height="11.6" rx="1.6"/></g>'],
+  "deploy.svg": ["deploy", "Deploy - a play arrow: it starts the build", '<g fill="@H"><path d="M4.8 2.6v12.8a1 1 0 0 0 1.53.85l10.2-6.4a1 1 0 0 0 0-1.7L6.33 1.75A1 1 0 0 0 4.8 2.6z"/></g>'],
   "start-action.svg": ["host", "Automatic start action", '<g fill="@H"><rect x="1.8" y="1.8" width="14.4" height="14.4" rx="2.4"/></g>' + S + '<path d="M7.4 6.4l4.6 2.6-4.6 2.6z"/><path d="M6 13.6h6"/></g>'],
   "first-boot.svg": ["host", "What happens on first boot", '<g fill="@H"><circle cx="9" cy="9" r="7.2"/></g>' + S + '<path d="M9 4.8v4.4l3 1.9"/></g>'],
   "session-host.svg": ["work", "An RDS session host — screen plus its users", '<g fill="@H"><rect x="1.6" y="2.6" width="14.8" height="10.4" rx="1.4"/><rect x="6.4" y="14.8" width="5.2" height="1.6" rx=".8"/></g>' + S + '<circle cx="6.8" cy="7" r="1.5"/><path d="M4.3 11.2c0-1.5 1.1-2.4 2.5-2.4s2.5.9 2.5 2.4"/><circle cx="11.8" cy="7.6" r="1.1"/><path d="M10.4 11.2c0-1.2.7-1.9 1.6-1.9s1.6.7 1.6 1.9"/></g>'],
@@ -110,6 +112,8 @@ const FRESH = {
   "os-client.svg": ["host", "Windows client — one screen on a laptop base, in the blue band", '<g fill="@H"><rect x="2.2" y="1.8" width="13.6" height="9.2" rx="1.3"/><path d="M1 12.4h16l-1.2 3.2H2.2z"/></g>' + S + '<rect x="4.2" y="3.8" width="9.6" height="5.2" rx=".7"/><path d="M6.4 14h5.2"/></g>'],
   "os-window.svg": ["studio", "The OS itself, as a plain window", '<g fill="@H"><rect x="1.6" y="2.2" width="14.8" height="13.6" rx="1.4"/></g>' + S + '<path d="M1.6 5.8h14.8M9 5.8v10M12.6 4h1.4"/></g>'],
   "trash.svg": ["studio", "Remove \u2014 was a stroked outline bin from the old icon set", '<g fill="@H"><rect x="6.4" y="1.2" width="5.2" height="2.8" rx="1.1"/><rect x="2.2" y="3.4" width="13.6" height="2.4" rx="1.2"/><path d="M4 6.8h10l-.7 8.2a1.6 1.6 0 0 1-1.6 1.4H6.3a1.6 1.6 0 0 1-1.6-1.4z"/></g>' + S + '<path d="M7.4 9.2v4.2M10.6 9.2v4.2"/></g>'],
+  "log.svg": ["host", "A job's log - lines of output", '<g fill="@H"><rect x="2" y="2" width="14" height="14" rx="1.6"/></g>' + S + '<path d="M5 6h8M5 9h8M5 12h5"/></g>'],
+  "cis-rules.svg": ["ident", "A benchmark's rules - a page of checked lines", '<g fill="@H"><rect x="2.6" y="1.6" width="12.8" height="14.8" rx="1.4"/></g>' + S + '<path d="M5.4 5.6l.9.9 1.5-1.6M9.6 5.8h3M5.4 9.2l.9.9 1.5-1.6M9.6 9.4h3M5.4 12.8h7.2"/></g>'],
   "validate.svg": ["deploy", "Preflight — was the magnifier", '<g fill="@H"><rect x="2.6" y="2.2" width="12.8" height="14" rx="1.4"/><rect x="6.4" y="1" width="5.2" height="2.6" rx="1.1"/></g>' + S + '<path d="M5.8 8.4l1.8 1.8 3.6-3.8M5.8 12.8h6.4"/></g>']
 };
 
@@ -373,31 +377,66 @@ const LOCALE_CATALOG = {
   "pt-PT": "Portuguese (Portugal)",
   "sv-SE": "Swedish (Sweden)"
 };
-/* group = nav headline the blade sits under; order here is the order in the sidebar. */
+/* group = nav headline the blade sits under; order here is the order in the sidebar.
+   Images (New-Vhdx - golds and the media they are baked from), VM (Build-Vms - designing
+   VMs and building them), and Activity - the jobs. Studio settings sit under the Dashboard. */
 const BLADES = [
-  { id: "overview",   group: "Studio",     label: "Overview",            icon: "overview.svg", desc: "How the whole pipeline fits together, start here." },
-  { id: "general",    group: "Studio",     label: "General Settings",    icon: "settings.svg", desc: "Naming, local accounts, where VMs go, Windows (WinPE, virtio-win), the studio's name and certificate." },
-  { id: "cluster",    group: "Host",       label: "Cluster",             icon: "servers.svg",  desc: "The Proxmox VE cluster: nodes, storage, what runs where.", server: true },
-  { id: "networks",   group: "Host",       label: "Networks",            icon: "vnet.svg",     desc: "Reusable subnets on a bridge or SDN VNet: VLAN, gateway, DNS. Bind VMs to one and IPs get range-checked." },
-  { id: "golds",      group: "Host",       label: "Golds",               icon: "gold-image.svg", desc: "Gold images: Linux from its publisher, Windows from an ISO - baked once, parked as templates.", server: true },
-  { id: "servers",    group: "Workloads",  label: "Virtual machines",    icon: "vm.svg",       desc: "The VMs themselves: start from a template, then image, CPU/memory, disks, adapters, roles, local account." },
-  { id: "domainjoin", group: "Identity",   label: "Domain Join",         icon: "identity.svg", desc: "Join accounts defined once, then attached to VMs — one per tier or OU, with a target OU per machine." },
-  { id: "azurearc",   group: "Identity",   label: "Azure Arc",           icon: "arc.svg",      desc: "Arc landing zones — subscription, tenant, resource group, region, credentials." },
-  { id: "review",     group: "Deploy",     label: "Review and validate", icon: "search.svg",   desc: "Every consistency check, against the cluster as it is, plus the lab-wide summary." },
-  { id: "vmoverview", group: "Deploy",     label: "VM overview",         icon: "vm-overview.svg", desc: "Every VM's FQDN, address, sign-in and connect commands, with the rest of its settings underneath." },
-  { id: "passwords",  group: "Deploy",     label: "Passwords",           icon: "key.svg",     desc: "The local account passwords this studio generates, in one place — reveal, copy, regenerate." },
-  { id: "deploy",     group: "Deploy",     label: "Deploy",              icon: "first-boot.svg", desc: "Build the lab on Proxmox VE: what exists, what gets built, and the jobs doing it.", server: true },
-  { id: "jobs",       group: "Deploy",     label: "Jobs",                icon: "update.svg",   desc: "Every bake and build, with its log and progress.", server: true }
+  { id: "dashboard",  group: "",              scope: "studio", label: "Dashboard",          icon: "overview.svg",   desc: "What runs and what ran, the designed VMs, and the system - cluster, storage, media, golds - at a glance.", server: true },
+  { id: "studio",     group: "",              scope: "studio", label: "Studio settings",    icon: "certificate.svg", desc: "The studio's own DNS name, certificate, time format and confirmations.", server: true },
+  { id: "media",      group: "Images",        scope: "studio", label: "Media",              icon: "iso-media.svg",  desc: "What Windows golds are baked from - the ISOs and their editions, WinPE, virtio-win - and where bakes run.", server: true },
+  { id: "winmedia",   group: "Images",        scope: "studio", label: "Windows media",      icon: "download.svg",   desc: "Install ISOs built from Microsoft's own update files - every supported Windows, patched to its newest build, Insider and vNext too.", server: true },
+  { id: "golds",      group: "Images",        scope: "studio", label: "Golds",              icon: "gold-image.svg", desc: "Gold images: Linux from its publisher, Windows from an ISO - baked once, parked as templates, cloned for every VM.", server: true },
+  { id: "general",    group: "VMs",           scope: "lab",    label: "VM settings",        icon: "settings.svg",   desc: "Naming, the local account generator and where new VMs go." },
+  { id: "networks",   group: "VMs",           scope: "lab",    label: "Networks",           icon: "vnet.svg",       desc: "Reusable subnets on a bridge or SDN VNet: VLAN, gateway, DNS. Bind VMs to one and IPs get range-checked." },
+  { id: "servers",    group: "VMs",           scope: "lab",    label: "Virtual machines",   icon: "vm.svg",         desc: "The VMs themselves: start from a template, then gold, CPU/memory, disks, adapters, roles, local account." },
+  { id: "licenses",   group: "VMs",           scope: "lab",    label: "Windows licenses",   icon: "key.svg",        desc: "A product key per Windows gold image - installed and activated on every VM built from it." },
+  { id: "domainjoin", group: "VMs",           scope: "lab",    label: "Domain Join",        icon: "identity.svg",   desc: "Join accounts defined once, then attached to VMs — one per tier or OU, with a target OU per machine." },
+  { id: "azurearc",   group: "VMs",           scope: "lab",    label: "Azure Arc",          icon: "arc.svg",        desc: "Arc landing zones — subscription, tenant, resource group, region, credentials." },
+  { id: "deploy",     group: "VMs",           scope: "lab",    subhead: "Build", label: "Deploy",             icon: "deploy.svg",     desc: "Preflight, then build: every check, the design against what exists, and what gets built.", server: true },
+  { id: "access",     group: "VMs",           scope: "lab",    label: "Connect",            icon: "vm-overview.svg", desc: "Every VM's address, sign-in and connect commands, its live state, and the passwords and SSH keys." },
+  { id: "jobs",       group: "Activity",      scope: "studio", label: "Jobs",               icon: "update.svg",     desc: "Every bake and build, with its log and progress.", server: true },
 ];
+/* Blades that were merged or renamed - old links and saved states land on their new home. */
+const BLADE_ALIASES = { overview: "dashboard", cluster: "dashboard", review: "deploy", vmoverview: "access", passwords: "access", export: "deploy" };
+function resolveBladeId(id) {
+  const to = BLADE_ALIASES[id] || id;
+  return BLADES.some(b => b.id === to) ? to : "dashboard";
+}
+/* Every blade's title: icon, name and the one-line description underneath - in place of a
+   hero banner per blade. */
+function bladeTitle(id, labelOverride) {
+  const b = BLADES.find(x => x.id === id) || { icon: "overview.svg", label: id, desc: "" };
+  // The title alone: what a blade is about shows in what it shows. (desc stays in the
+  // registry as each blade's one-line summary for the code.)
+  return `<div class="blade-titles"><div class="page-title"><img src="${iconSrc(b.icon)}" alt=""> ${esc(labelOverride || b.label)}</div></div>`;
+}
 
 const PREFIX_OPTIONS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
-/* themes.js — Hyper-V VM Studio, six themes (three families x dark/light).
+/* themes.js — PVE VM Studio, six themes (three families x dark/light).
    Replaces ALACRITTY_THEMES. Vitrine dark is the default.
 
    Every key here is consumed either as a CSS custom property (applyTheme) or as an icon
    band hue (see icons.js). Nothing else in the studio may invent a colour. */
 
 const FAMILIES = [
+  {
+    id: "proxmox", name: "Proxmox",
+    note: "Proxmox VE's own colours: its graphite panels, its orange for what you act on, its blue for the hosts - the studio as part of the cluster it builds on.",
+    dark: {
+      bg: "#181818", elevated: "#222222", subtle: "#1d1d1d", hover: "#2d2d2d",
+      fg: "#ececec", muted: "#9c9c9c", border: "#333333", borderStrong: "#474747", divider: "#2a2a2a",
+      accent: "#e57000", accentHover: "#ff8a1e", accentSoft: "#3a230d", accentBorder: "#7d4512", accentFg: "#1a0f05",
+      success: "#6cc04a", danger: "#f2555a", warn: "#f0b33a",
+      bands: { studio: "#9c9c9c", host: "#4ba3e3", work: "#6cc04a", ident: "#b38ae6", deploy: "#e57000", linux: "#e3d36c" }
+    },
+    light: {
+      bg: "#f1f1f1", elevated: "#ffffff", subtle: "#f8f8f8", hover: "#e9edf2",
+      fg: "#1e1e1e", muted: "#5f5f5f", border: "#d3d3d3", borderStrong: "#b5b5b5", divider: "#e5e5e5",
+      accent: "#b85700", accentHover: "#9a4900", accentSoft: "#fbe7d5", accentBorder: "#ecbb8c", accentFg: "#ffffff",
+      success: "#2f7d32", danger: "#c4302b", warn: "#8a5d00",
+      bands: { studio: "#5f5f5f", host: "#2a74b3", work: "#2f7d32", ident: "#7a46b8", deploy: "#b85700", linux: "#786610" }
+    }
+  },
   {
     id: "vitrine", name: "Vitrine",
     note: "Near-black, cool, violet accent. The default \u2014 highest contrast of the three, and the one that photographs best.",
@@ -459,7 +498,7 @@ const FAMILIES = [
    (see icons.js ROLES) because they all live on one card and must stay scannable. */
 const BAND_LABEL = { studio: "Studio", host: "Host", work: "Workloads", ident: "Identity", deploy: "Deploy" };
 
-const THEME_DEFAULT = "kaido";
+const THEME_DEFAULT = "proxmox";
 const THEME_MODE_DEFAULT = "dark";
 
 /* Flat lookup: "vitrine_dark" -> theme object, for the appearance picker. */
@@ -673,7 +712,7 @@ const IMAGE_CATALOG = [
     kind: "desktop",
     edition: "Datacenter",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
   },
   {
     id: "ws2016-datacenter-core",
@@ -682,7 +721,7 @@ const IMAGE_CATALOG = [
     kind: "core",
     edition: "Datacenter",
     experience: "Core",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
   },
   {
     id: "ws2016-standard-desktop",
@@ -691,7 +730,7 @@ const IMAGE_CATALOG = [
     kind: "desktop",
     edition: "Standard",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
   },
   {
     id: "ws2016-standard-core",
@@ -700,7 +739,7 @@ const IMAGE_CATALOG = [
     kind: "core",
     edition: "Standard",
     experience: "Core",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
   },
   {
     id: "ws2019-datacenter-desktop",
@@ -709,7 +748,7 @@ const IMAGE_CATALOG = [
     kind: "desktop",
     edition: "Datacenter",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
   },
   {
     id: "ws2019-datacenter-core",
@@ -718,7 +757,7 @@ const IMAGE_CATALOG = [
     kind: "core",
     edition: "Datacenter",
     experience: "Core",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
   },
   {
     id: "ws2019-standard-desktop",
@@ -727,7 +766,7 @@ const IMAGE_CATALOG = [
     kind: "desktop",
     edition: "Standard",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
   },
   {
     id: "ws2019-standard-core",
@@ -736,7 +775,7 @@ const IMAGE_CATALOG = [
     kind: "core",
     edition: "Standard",
     experience: "Core",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
   },
   {
     id: "ws2022-datacenter-desktop",
@@ -745,7 +784,7 @@ const IMAGE_CATALOG = [
     kind: "desktop",
     edition: "Datacenter",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
   },
   {
     id: "ws2022-datacenter-core",
@@ -754,7 +793,7 @@ const IMAGE_CATALOG = [
     kind: "core",
     edition: "Datacenter",
     experience: "Core",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
   },
   {
     id: "ws2022-standard-desktop",
@@ -763,7 +802,7 @@ const IMAGE_CATALOG = [
     kind: "desktop",
     edition: "Standard",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
   },
   {
     id: "ws2022-standard-core",
@@ -772,7 +811,7 @@ const IMAGE_CATALOG = [
     kind: "core",
     edition: "Standard",
     experience: "Core",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
   },
   {
     id: "ws2025-datacenter-desktop",
@@ -781,7 +820,7 @@ const IMAGE_CATALOG = [
     kind: "desktop",
     edition: "Datacenter",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
   },
   {
     id: "ws2025-datacenter-core",
@@ -790,7 +829,7 @@ const IMAGE_CATALOG = [
     kind: "core",
     edition: "Datacenter",
     experience: "Core",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
   },
   {
     id: "ws2025-standard-desktop",
@@ -799,7 +838,7 @@ const IMAGE_CATALOG = [
     kind: "desktop",
     edition: "Standard",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
   },
   {
     id: "ws2025-standard-core",
@@ -808,7 +847,7 @@ const IMAGE_CATALOG = [
     kind: "core",
     edition: "Standard",
     experience: "Core",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
   },
   {
     /* Its own SKU next to Standard and Datacenter, built by New-Vhdx.ps1 as a
@@ -821,7 +860,7 @@ const IMAGE_CATALOG = [
     kind: "desktop",
     edition: "Datacenter: Azure Edition",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
   },
   {
     id: "ws2025-datacenter-az-core",
@@ -830,7 +869,7 @@ const IMAGE_CATALOG = [
     kind: "core",
     edition: "Datacenter: Azure Edition",
     experience: "Core",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
   },
   {
     id: "w11-enterprise",
@@ -839,7 +878,7 @@ const IMAGE_CATALOG = [
     kind: "client",
     edition: "",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
   },
   {
     /* N editions ship without Media Player and the related components. Same image
@@ -851,7 +890,7 @@ const IMAGE_CATALOG = [
     kind: "client",
     edition: "",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
   },
   {
     /* Multi-session is its own SKU, licensed for Azure Virtual Desktop, and its WIM
@@ -863,7 +902,7 @@ const IMAGE_CATALOG = [
     kind: "client",
     edition: "",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
   },
   {
     id: "w11-pro",
@@ -872,7 +911,7 @@ const IMAGE_CATALOG = [
     kind: "client",
     edition: "",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
   },
   {
     id: "w11-pro-n",
@@ -881,7 +920,7 @@ const IMAGE_CATALOG = [
     kind: "client",
     edition: "",
     experience: "DesktopExperience",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 8, cpuCount: 4 }
   },
   {
     /* The media still calls the image "Azure Stack HCI"; New-Vhdx.ps1 slugs it to
@@ -896,7 +935,7 @@ const IMAGE_CATALOG = [
     experience: "Core",
     noServerRoles: true,
     requiresNestedVirt: true,
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 16, cpuCount: 8, nestedVirtualization: true }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: true, startAfterCreate: true, memoryGB: 16, cpuCount: 8, nestedVirtualization: true }
   },
   /* ---- Linux ----------------------------------------------------------------
      Built by New-Vhdx.ps1 from a distribution cloud image rather than from an ISO,
@@ -929,7 +968,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     id: "ubuntu2404",
@@ -942,7 +981,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     /* Debian ships no grub-pc in any trixie cloud variant, so it is UEFI only - there
@@ -957,7 +996,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     id: "debian12",
@@ -975,7 +1014,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     /* Fedora and Rocky ship a Microsoft-signed shim, so the same Secure Boot
@@ -997,7 +1036,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     id: "fedora43",
@@ -1011,7 +1050,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     id: "rocky10",
@@ -1024,7 +1063,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     id: "rocky9",
@@ -1037,7 +1076,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     id: "alma10",
@@ -1050,7 +1089,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     id: "alma9",
@@ -1063,7 +1102,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     id: "oracle10",
@@ -1076,7 +1115,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     id: "oracle9",
@@ -1089,7 +1128,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     id: "leap16",
@@ -1107,7 +1146,7 @@ const IMAGE_CATALOG = [
     noServerRoles: true,
     /* openSUSE ships a Microsoft-signed shim, so Secure Boot stays on like Fedora. */
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   },
   {
     /* Secure Boot OFF, and not as a preference. Arch ships no Microsoft-signed shim,
@@ -1140,7 +1179,7 @@ const IMAGE_CATALOG = [
     experience: "",
     noServerRoles: true,
     secureBootTemplate: "MicrosoftUEFICertificateAuthority",
-    defaults: { useDifferencingDisk: true, enableSecureBoot: false, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
+    defaults: { useDifferencingDisk: false, enableSecureBoot: false, enableVtpm: false, startAfterCreate: true, memoryGB: 2, cpuCount: 2 }
   }
 ];
 
@@ -1398,7 +1437,7 @@ const FEATURE_CATALOG = [
   { id: "SNMP-Service", label: "SNMP Service", icon: "monitor.svg", info: "Installs SNMP Service (SNMP-Service)." },
   { id: "Containers", label: "Containers", icon: "code.svg", info: "Installs Containers feature (Containers) for Windows containers host support." },
   { id: "Telnet-Client", label: "Telnet Client", icon: "powershell.svg", info: "Installs Telnet Client (Telnet-Client)." },
-  { id: "NET-Framework-Core", label: ".NET Framework 3.5", icon: "code.svg", info: "Installs .NET Framework 3.5 (NET-Framework-Core). Payload is not in the image — set SxS source path in General Settings (ISO sources\\sxs).", postConfig: "Requires SxS source path" }
+  { id: "NET-Framework-Core", label: ".NET Framework 3.5", icon: "code.svg", info: "Installs .NET Framework 3.5 (NET-Framework-Core). Payload is not in the image — set SxS source path in VM settings (ISO sources\\sxs).", postConfig: "Requires SxS source path" }
 ];
 
 /** Server-side RSAT (Remote Server Administration Tools) — Install-WindowsFeature, same tree shape as roles. */
@@ -1697,7 +1736,7 @@ const RSAT_PRESETS = {
    only — image, sizing, roles. Name, addressing and credentials are per VM and never touched,
    so applying one to a VM that is already half configured cannot lose an IP or a password.
    Sizing is only set where a role has a reason to differ from the image default - everything
-   else inherits whatever the image profile in General Settings says.
+   else inherits whatever the image profile in VM settings says.
    `name` seeds the VM name; a taken one rolls to the next free number (dc-01 -> dc-02). */
 const VM_TEMPLATES = {
   // AD DS forces builtInAdminOnly on by itself (see isBuiltInAdminOnly), so no template
@@ -2157,6 +2196,23 @@ function templateImageId(t, release, edition) {
   const wanted = `ws${release}-${String(edition).toLowerCase()}-${own.kind}`;
   return IMAGE_CATALOG.some(i => i.id === wanted) ? wanted : t.imageId;
 }
+/* The image a new VM or a template lands on, moved to one that has a gold when the asked
+   one has none: same kind (Core, Desktop, Client, Linux), the same edition first, then the
+   newest release. Nothing moves while the golds are unknown or none fits. */
+function preferGoldImage(id) {
+  if (!goldsLoaded() || goldOf(id)) return id;
+  const want = findImage(id);
+  const fits = IMAGE_CATALOG.filter(i => i.kind === want.kind && isLinuxImage(i) === isLinuxImage(want) && goldOf(i.id));
+  fits.sort((a, b) => (b.edition === want.edition) - (a.edition === want.edition) || String(b.id).localeCompare(String(a.id)));
+  return fits.length ? fits[0].id : id;
+}
+/* Whether any Windows Server gold exists for a release + edition - the template picker
+   dims the switches that would land on nothing. */
+function templateScopeHasGold(release, edition) {
+  if (!goldsLoaded()) return true;
+  const prefix = `ws${release}-${String(edition).toLowerCase()}-`;
+  return readyGolds().some(g => String(g.image_id).startsWith(prefix));
+}
 /** Same, resolved against the current picker selection. */
 function templateImage(t) {
   return findImage(templateImageId(t, state.templateRelease, state.templateEdition));
@@ -2177,7 +2233,7 @@ function vmTemplateTitle(t, img) {
    release, edition (Datacenter or Standard) and installation option, all spelled out. The
    installation option is tinted rather than given an icon of its own: Core and Desktop are
    words, not pictures, and the row already leads with the role's icon. Sizing a template
-   does not pin follows the image profile from General Settings, so it is read from there
+   does not pin follows the image profile from VM settings, so it is read from there
    rather than shown as blank. */
 function vmTemplateSpecHtml(t) {
   if (!t) return "";
@@ -3057,7 +3113,7 @@ function defaultImageProfiles() {
 }
 
 const state = {
-  blade: "overview",
+  blade: "dashboard",
   themeId: DEFAULT_THEME_ID,
   stateModalMode: "save",
   defaults: {
@@ -3075,6 +3131,7 @@ const state = {
   },
   domainJoinAccounts: [],
   azureArcPrincipals: [],
+  windowsLicenses: [],
   networks: [],
   servers: [],
   vhdSets: [],
@@ -3141,7 +3198,9 @@ function applyImageProfile(server, imageId) {
   const isClient = img.kind === "client";
   server.imageId = normalized;
   server.experience = img.experience;
-  server.useDifferencingDisk = !!p.useDifferencingDisk;
+  // Never inherited: a linked clone is chosen on the card itself, every time.
+  server.useDifferencingDisk = false;
+  server.linkedCloneChosen = false;
   server.enableSecureBoot = !!p.enableSecureBoot;
   server.enableVtpm = !!p.enableVtpm;
   server.startAfterCreate = !!p.startAfterCreate;
@@ -3194,7 +3253,9 @@ function applyVmTemplate(server, templateId) {
   if (!server || !t) return false;
   server.templateId = templateId;
   if (t.name) server.name = nextFreeServerName(t.name, server);
-  applyImageProfile(server, templateImageId(t, state.templateRelease, state.templateEdition));
+  applyImageProfile(server, preferGoldImage(templateImageId(t, state.templateRelease, state.templateEdition)));
+  server.goldLanguage = "";
+  server.goldId = "";
   server.imageSource = "catalog";
   server.imageHint = "";
   if (t.memoryGB != null) server.memoryGB = t.memoryGB;
@@ -3312,7 +3373,7 @@ function createServer(name) {
   const s = {
     _id: uid("s"),
     name: (name || "").toLowerCase(),
-    imageId: "ws2025-datacenter-desktop",
+    imageId: preferGoldImage("ws2025-datacenter-desktop"),
     imageSource: "catalog",
     imageHint: "",
     // Studio-only: which VM_TEMPLATES entry this VM started from. Never written to config.json.
@@ -3324,7 +3385,7 @@ function createServer(name) {
     vlanId: null,
     nicName: "",
     nics: [],
-    useDifferencingDisk: true,
+    useDifferencingDisk: false,
     enableSecureBoot: true,
     enableVtpm: false,
     startAfterCreate: true,
@@ -3395,7 +3456,7 @@ function generateLocalPassword(length) {
   return chars.join("");
 }
 
-/* The generator length picked in General Settings. Anything outside the offered set —
+/* The generator length picked in VM settings. Anything outside the offered set —
    an old state token, a hand-edited import — heals to 32, the length every password
    used before the picker existed. */
 const PASSWORD_LENGTHS = [16, 32, 64];
@@ -3732,7 +3793,7 @@ function namingConfig() {
   if (n.fqdnOverrideEnabled) out.fqdn = namingFqdnOverride();
   return out;
 }
-/* The fixed suffix typed in General Settings › Naming, "" while the toggle is off or the
+/* The fixed suffix typed in VM settings › Naming, "" while the toggle is off or the
    box is empty. */
 function namingFqdnOverride() {
   const n = namingDefaults();
@@ -3834,7 +3895,8 @@ function buildConfig() {
       memoryGB: Number(s.memoryGB) || 4,
       cpuCount: Number(s.cpuCount) || 2,
       vlanId: s.vlanId === "" || s.vlanId == null ? null : Number(s.vlanId),
-      useDifferencingDisk: !!s.useDifferencingDisk,
+      useDifferencingDisk: !!s.useDifferencingDisk && !!s.linkedCloneChosen,
+      linkedCloneChosen: !!s.linkedCloneChosen,
       enableSecureBoot: effectiveSecureBoot(s),
       enableVtpm: !!s.enableVtpm,
       startAfterCreate: !!s.startAfterCreate,
@@ -4042,7 +4104,7 @@ function sampleConfigDocument() {
         memoryGB: 4,
         cpuCount: 4,
         vlanId: null,
-        useDifferencingDisk: true,
+        useDifferencingDisk: false,
         enableSecureBoot: true,
         enableVtpm: false,
         startAfterCreate: true,
@@ -4068,7 +4130,7 @@ function sampleConfigDocument() {
         memoryGB: 8,
         cpuCount: 4,
         vlanId: 20,
-        useDifferencingDisk: true,
+        useDifferencingDisk: false,
         enableSecureBoot: true,
         enableVtpm: false,
         startAfterCreate: true,
@@ -4094,7 +4156,7 @@ function sampleConfigDocument() {
         memoryGB: 4,
         cpuCount: 2,
         vlanId: null,
-        useDifferencingDisk: true,
+        useDifferencingDisk: false,
         enableSecureBoot: true,
         enableVtpm: false,
         startAfterCreate: true,
@@ -4140,6 +4202,9 @@ function applyConfigDocument(parsed, opts) {
       if (!state.azureArcPrincipals.some(x => x.id === a.id)) state.azureArcPrincipals.push(a);
     });
   }
+  /* [diff] Proxmox VE has no "host Azure context": that was az login on the Hyper-V host,
+     and here nothing runs on a host. A principal from a Hyper-V token signs in as itself. */
+  (state.azureArcPrincipals || []).forEach(a => { a.authMode = "servicePrincipal"; });
   // Keep catalogs object linked to live arrays for normalizeServerIdentityRefs mutations
   catalogs.accounts = state.domainJoinAccounts;
   catalogs.principals = state.azureArcPrincipals;
@@ -4242,6 +4307,7 @@ function encodeState() {
     defaults: state.defaults,
     domainJoinAccounts: state.domainJoinAccounts.map(({ _id, ...rest }) => rest),
     azureArcPrincipals: state.azureArcPrincipals.map(({ _id, ...rest }) => rest),
+    windowsLicenses: (state.windowsLicenses || []).map(({ _id, ...rest }) => rest),
     networks: (state.networks || []).map(({ _id, ...rest }) => rest),
     servers: state.servers.map(({ _id, ...rest }) => rest),
     vhdSets: state.vhdSets.map(({ _id, ...rest }) => rest)
@@ -4279,6 +4345,10 @@ function decodeState(text) {
   const catalogs = migrateLegacyIdentityCatalogs(parsed);
   state.domainJoinAccounts = catalogs.accounts;
   state.azureArcPrincipals = catalogs.principals;
+  state.windowsLicenses = (Array.isArray(parsed.windowsLicenses) ? parsed.windowsLicenses : []).map(w => createWindowsLicense(w));
+  /* [diff] Proxmox VE has no "host Azure context": that was az login on the Hyper-V host,
+     and here nothing runs on a host. A principal from a Hyper-V token signs in as itself. */
+  (state.azureArcPrincipals || []).forEach(a => { a.authMode = "servicePrincipal"; });
   catalogs.accounts = state.domainJoinAccounts;
   catalogs.principals = state.azureArcPrincipals;
   state.networks = (parsed.networks || []).map(net => ensureCatalogStableId(Object.assign(createNetwork(), net, { _id: uid("net") }), "net"));
@@ -4647,7 +4717,7 @@ function addGroupChip(key, text) {
 }
 
 function trashIcon() {
-  return `<img class="glyph" src="${iconSrcDanger("trash.svg")}" width="16" height="16" alt="" aria-hidden="true">`;
+  return `<img class="glyph glyph-trash" src="${iconSrcDanger("trash.svg")}" width="16" height="16" alt="" aria-hidden="true">`;
 }
 function pencilIcon() {
   return `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.3 2.3l2.4 2.4M12.1 1.5a1.2 1.2 0 011.7 0l.7.7a1.2 1.2 0 010 1.7L5.6 12.8 2.5 13.5l.7-3.1z"/></svg>`;
@@ -4689,7 +4759,8 @@ function diskNameCell(opts) {
       </span>
     </div>`;
 }
-const DIFF_DISK_TIP = "Creates a small child VHDX linked to the gold parent (lab/VDI). Saves space, but the gold image must stay read-only and available — if the parent is moved or lost, every child breaks. Leave off for a full independent copy of the gold disk.";
+/* PVE's differencing disk. Never on by default: a production VM must not hang off its gold. */
+const LINKED_CLONE_TIP = "Not for production. A linked clone is PVE's differencing disk: the VM's disk is a thin snapshot on the gold's base disk. It deploys in seconds and takes almost no space, but the VM depends on its gold for good - the gold cannot be removed while the clone exists, the clone stays on the gold's storage, and a damaged gold disk breaks every clone. Lab use only. Off: a full, independent copy of the gold disk.";
 const REMOVE_APPS_TIP = "Offline-removes built-in Windows 11 provisioned apps from this VM's own disk before first boot — every app individually tickable below, all ticked by default. A short protected list (Store, Terminal, Notepad, Photos, ...) is never offered and never touched. Windows 11 client images only — off by default.";
 
 /** Mirrors Build-Vms.ps1 Remove-OfflineProvisionedApps' $targetApps, one row per
@@ -4876,219 +4947,61 @@ function reviewErrorCount() {
 }
 
 function navBadge(id) {
-  if (id === "networks" && state.networks.length) return `<span class="nav-badge">${state.networks.length}</span>`;
-  if (id === "cluster") {
-    const c = state.defaults.cluster || {};
-    if (!c.enabled) return "";
-    const nodes = serversForCluster().length;
-    return nodes ? `<span class="nav-badge ok">${nodes}</span>` : `<span class="nav-badge err">0</span>`;
+  /* What the server knows (golds, jobs) comes from server.js's cluster cache. */
+  const srv = typeof cluster !== "undefined" ? cluster : null;
+  if (id === "golds" && srv) {
+    const baking = srv.golds.filter(g => g.status === "baking").length;
+    if (baking) return `<span class="nav-badge">${baking} baking</span>`;
+    const ready = srv.golds.filter(g => g.status === "ready").length;
+    return ready ? `<span class="nav-badge ok">${ready}</span>` : `<span class="nav-badge err">0</span>`;
   }
+  if (id === "media" && srv && srv.winpe === false) return `<span class="nav-badge err">!</span>`;
+  if (id === "jobs" && srv) {
+    const running = (srv.jobs || []).filter(j => j.status === "running" || j.status === "queued").length;
+    return running ? `<span class="nav-badge">${running}</span>` : "";
+  }
+  if (id === "networks" && state.networks.length) return `<span class="nav-badge ok">${state.networks.length}</span>`;
   if (id === "domainjoin" && state.domainJoinAccounts.length) return `<span class="nav-badge">${state.domainJoinAccounts.length}</span>`;
   if (id === "azurearc" && state.azureArcPrincipals.length) return `<span class="nav-badge">${state.azureArcPrincipals.length}</span>`;
-  if (id === "servers") return `<span class="nav-badge ${state.servers.length ? "ok" : ""}">${state.servers.length}</span>`;
-  if (id === "vhdsets" && state.vhdSets.length) return `<span class="nav-badge">${state.vhdSets.length}</span>`;
-  if (id === "review") {
-    const errors = reviewErrorCount();
-    return errors ? `<span class="nav-badge err">${errors}</span>` : `<span class="nav-badge ok">OK</span>`;
+  if (id === "licenses" && (state.windowsLicenses || []).length) {
+    const bad = state.windowsLicenses.filter(w => !w.imageId || !productKeyOk(w.productKey)).length;
+    return bad ? `<span class="nav-badge err" title="${bad} licence(s) without an image or a valid key">${state.windowsLicenses.length}</span>`
+      : `<span class="nav-badge">${state.windowsLicenses.length}</span>`;
   }
-  if (id === "passwords") {
-    const rows = credentialRows();
-    if (!rows.length) return "";
-    const missing = rows.filter(r => !r.value).length;
-    return missing ? `<span class="nav-badge err">${missing}</span>` : `<span class="nav-badge">${rows.length}</span>`;
+  if (id === "servers") {
+    const noGold = goldsLoaded() ? state.servers.filter(s => s.imageSource === "custom" || !goldFor(s)).length : 0;
+    return noGold ? `<span class="nav-badge err" title="${noGold} VM(s) without a gold">${state.servers.length}</span>`
+      : `<span class="nav-badge ${state.servers.length ? "ok" : "muted"}">${state.servers.length}</span>`;
+  }
+  if (id === "deploy") {
+    const errors = reviewErrorCount();
+    return errors ? `<span class="nav-badge err">${errors}</span>` : state.servers.length ? `<span class="nav-badge ok">OK</span>` : "";
+  }
+  if (id === "access") {
+    const missing = credentialRows().filter(r => !r.value).length;
+    return missing ? `<span class="nav-badge err" title="${missing} account(s) without a password">${missing}</span>` : "";
   }
   return "";
 }
 
 function renderNav() {
-  let lastGroup = "";
-  document.getElementById("nav").innerHTML = BLADES.map(b => {
+  let lastGroup = null;
+  const nav = document.getElementById("nav");
+  const html = BLADES.map(b => {
     let head = "";
     if (b.group !== lastGroup) {
       lastGroup = b.group;
-      head = `<div class="nav-group">${esc(b.group)}</div>`;
+      if (b.group) head = `<div class="nav-group">${esc(b.group)}</div>`;
     }
+    /* subhead: the designing blades above, building and connecting below. */
+    if (b.subhead) head += `<div class="nav-group nav-subgroup">${esc(b.subhead)}</div>`;
     return `${head}
     <button class="nav-item ${state.blade === b.id ? "active" : ""}" data-blade="${b.id}">
       <img src="${iconSrc(b.icon)}" alt=""><span class="nav-label">${esc(b.label)}</span>${navBadge(b.id)}
     </button>`;
   }).join("");
-}
-
-/* Pipeline strip on the Overview blade. `here` marks the stage the studio itself covers. */
-const OVERVIEW_FLOW = [
-  { icon: "iso-media.svg",   title: "ISO or cloud image", sub: "A Windows ISO in a PVE storage, Linux from its publisher" },
-  { icon: "gold-image.svg",  title: "Golds",              sub: "Baked once by the server, parked as templates" },
-  { icon: "overview.svg",    title: "This studio",        sub: "Design the VMs in the browser", here: true },
-  { icon: "first-boot.svg",  title: "Deploy",             sub: "Linked clones, a seed for the first boot" },
-  { icon: "update.svg",      title: "Jobs",               sub: "Every build with its log and progress" },
-  { icon: "vm.svg",          title: "Running VMs",        sub: "Named, addressed, joined, signed in" }
-];
-
-function overviewStep(num, icon, title, badge, bodyHtml) {
-  return `
-    <div class="step">
-      <div class="step-rail"><div class="step-num">${num}</div></div>
-      <div class="step-body">
-        <div class="step-title"><img src="${iconSrc(icon)}" alt="">${title}${badge ? ` <span class="pill tag">${badge}</span>` : ""}</div>
-        ${bodyHtml}
-      </div>
-    </div>`;
-}
-
-function renderOverview() {
-  const core = state.servers.filter(s => findImage(s.imageId).kind === "core").length;
-  const client = state.servers.filter(s => findImage(s.imageId).kind === "client").length;
-  const linux = state.servers.filter(s => isLinuxServer(s)).length;
-  const desktop = state.servers.length - core - client - linux;
-  const errors = reviewErrorCount();
-
-  return `
-    <div class="blade-toolbar">
-      <div class="page-title"><img src="${iconSrc("overview.svg")}"> Overview</div>
-    </div>
-
-    <div class="hero">
-      <div class="hero-icon"><img src="${iconSrc("mark.svg")}" alt=""></div>
-      <div class="hero-body">
-        <h2>Create Proxmox VE VMs here</h2>
-        <p>Design your machines in the blades on the left - the studio keeps the lab on the server as you go - then
-        <strong>Deploy</strong> builds them on the cluster from the golds, each VM as a job you can follow.</p>
-      </div>
-    </div>
-
-    <div class="chips">
-      <span class="pill">Virtual machines: ${state.servers.length}</span>
-      <span class="pill">Desktop: ${desktop}</span>
-      <span class="pill">Core: ${core}</span>
-      <span class="pill">Client: ${client}</span>
-      <span class="pill">Linux: ${linux}</span>
-      <span class="pill">Data disks: ${state.servers.reduce((n, s) => n + (s.additionalDisks || []).length, 0)}</span>
-      <span class="pill">Networks: ${(state.networks || []).length}</span>
-      <span class="pill">Domain Join: ${state.domainJoinAccounts.length}</span>
-      <span class="pill">Azure Arc: ${state.azureArcPrincipals.length}</span>
-      <span class="pill status ${errors ? "off" : "on"}">${errors ? errors + " error(s)" : "No errors"}</span>
-    </div>
-
-    ${gsCard("ov-flow", "overview.svg", "The pipeline", "Where this studio sits", `
-      <div class="flow">
-        ${OVERVIEW_FLOW.map(n => `
-          <div class="flow-node ${n.here ? "here" : ""}">
-            <img src="${iconSrc(n.icon)}" alt="">
-            <div class="fn-title">${esc(n.title)}</div>
-            <div class="fn-sub">${esc(n.sub)}</div>
-          </div>`).join("")}
-      </div>
-      <div class="tip-box"><img src="${iconSrc("help.svg")}" alt="">
-        <div>A gold is baked once per image and reused by every VM built from it. Baking is slow; building a VM from a gold
-        takes seconds for Linux and minutes for Windows - it is a linked clone, the Hyper-V studio's differencing disk.</div>
-      </div>
-    `, "", true)}
-
-    ${gsCard("ov-howto", "validate.svg", "How to use this studio", "End to end, in order", `
-      <div class="steps">
-
-        ${overviewStep(1, "gold-image.svg", "Bake the golds", "Golds", `
-          <p>A gold is one prepared image per Linux distribution or Windows edition - a PVE template in the pool
-          <code>vm-studio</code>, IDs from 9000. Every VM you build later is a clone of one.</p>
-          <ul>
-            <li><strong>Linux</strong> - pick the distribution; PVE downloads the cloud image itself and checks its checksum,
-            the studio bakes updates, packages, region and features into it and seals it.</li>
-            <li><strong>Windows</strong> - upload the ISO into a PVE storage (ISO Images → Upload), pick it and an edition.
-            The bake is New-Vhdx.ps1's: WinPE applies the image, audit mode installs the virtio drivers and guest agent,
-            sysprep generalizes, WinPE sets region, policies and the KMS client key offline. It boots a WinPE the studio
-            distils from a Windows ISO once - General Settings → Windows.</li>
-          </ul>
-          <div class="row"><button class="btn" type="button" data-goto="golds"><img src="${iconSrc("gold-image.svg")}" alt=""> Open Golds</button></div>
-        `)}
-
-        ${overviewStep(2, "settings.svg", "Set the defaults", "General Settings", `
-          <p>Naming, the local account generator, and the studio's own parts: the WinPE and virtio-win release Windows golds
-          get, the studio's DNS name and its certificate (Let's Encrypt renews itself).</p>
-          <div class="row"><button class="btn" type="button" data-goto="general"><img src="${iconSrc("settings.svg")}" alt=""> Open General Settings</button></div>
-        `)}
-
-        ${overviewStep(3, "vnet.svg", "Describe your networks once", "Recommended", `
-          <p>The blade lists the cluster's <strong>bridges and VNets</strong> - read from PVE, nothing to type. Below them, a
-          network is a subnet: bridge, VLAN, prefix, gateway and DNS servers. Attach a VM to one and the studio fills in its
-          bridge, gateway and DNS, and warns if the IP you type falls outside the usable range.</p>
-          <div class="row"><button class="btn" type="button" data-goto="networks"><img src="${iconSrc("vnet.svg")}" alt=""> Open Networks</button></div>
-        `)}
-
-        ${overviewStep(4, "vm.svg", "Add the virtual machines", "The main event", `
-          <p>One card per VM, and everything that VM needs is on it. The fastest start is the <strong>Template</strong> section
-          at the top: Domain Controller, File Server, Root CA, Print Server... fill in a name, an image, sizing and the matching
-          roles in one go. Everything stays editable afterwards.</p>
-          <ul>
-            <li><strong>Identity</strong> - the name (15 characters for Windows) and the image; it builds from that image's
-            newest gold.</li>
-            <li><strong>Local admin</strong> - a local account with a generated password, or built-in Administrator only.</li>
-            <li><strong>CPU / RAM</strong>, <strong>Network</strong> (one card per adapter, a bridge and VLAN each),
-            <strong>Disks</strong> (data disks lettered from D: upwards).</li>
-            <li><strong>Roles &amp; features</strong> - Windows roles, features and RSAT tools, installed at first boot.</li>
-          </ul>
-          <div class="row"><button class="btn" type="button" data-goto="servers"><img src="${iconSrc("vm.svg")}" alt=""> Open Virtual machines</button></div>
-        `)}
-
-        ${overviewStep(5, "identity.svg", "Join a domain, onboard to Arc", "Optional", `
-          <p>Define a join account once under <strong>Domain Join</strong> and attach it to the VMs that need it, with a target
-          OU per machine. Linux VMs join through realmd and sssd. <strong>Azure Arc</strong> works the same way with a service
-          principal.</p>
-          <div class="row"><button class="btn" type="button" data-goto="domainjoin"><img src="${iconSrc("identity.svg")}" alt=""> Open Domain Join</button></div>
-        `)}
-
-        ${overviewStep(6, "search.svg", "Check your work", "Review and validate", `
-          <p>Every check runs as you type, against the cluster as it is: names, bridges, IPs inside their subnets, credentials,
-          identity references. The nav badge counts the errors; Deploy refuses while there are any.</p>
-          <div class="row"><button class="btn" type="button" data-goto="review"><img src="${iconSrc("search.svg")}" alt=""> Open Review</button></div>
-        `)}
-
-        ${overviewStep(7, "first-boot.svg", "Deploy", "What Build-Vms.ps1 did", `
-          <p><strong>Deploy</strong> lists the lab's VMs against what exists and builds the ones that do not: a linked clone of
-          the gold, the hardware, a seed CD for the first boot (cloud-init for Linux, the answer file for Windows), then the
-          seed goes - it holds the passwords. VMs that exist are left alone.</p>
-          <div class="row"><button class="btn" type="button" data-goto="deploy"><img src="${iconSrc("first-boot.svg")}" alt=""> Open Deploy</button></div>
-        `)}
-
-        ${overviewStep(8, "update.svg", "Follow it", "Jobs", `
-          <p>Every bake and build is a job with its own log - the PowerShell studio's tags and colours - and the progress bar
-          while it runs. Logs stay after the job ends.</p>
-        `)}
-
-        ${overviewStep(9, "vm-overview.svg", "Sign in", "VM overview · Passwords", `
-          <p>The VM overview has every VM's address, sign-in and the SSH / RDP lines; Passwords has the generated
-          credentials in one place.</p>
-        `)}
-
-      </div>
-    `, "", false)}
-
-    ${gsCard("ov-blades", "overview.svg", "Blade guide", "What each page on the left is for", `
-      <div class="guide">
-        ${BLADES.map(b => `
-          <button class="guide-item" type="button" data-goto="${esc(b.id)}">
-            <img src="${iconSrc(b.icon)}" alt="">
-            <span>
-              <span class="guide-name">${esc(b.label)}</span>
-              <span class="guide-desc">${esc(b.desc || "")}</span>
-            </span>
-          </button>`).join("")}
-      </div>
-    `, "", false)}
-
-    ${gsCard("ov-ssh", "keys.svg", "Using the SSH keys", "Lock the key file down, then connect - Linux, macOS, Windows", renderSshKeyHowto(), "", false)}
-
-    ${gsCard("ov-state", "save.svg", "Labs", "Saved on the server as you go", `
-      <p style="margin:0 0 10px; color:var(--fg-muted); line-height:1.6">A lab is one design - its VMs, networks, identity
-      and defaults. The studio saves it a second after every change (the badge next to its name in the top bar says so) and
-      keeps as many labs as you like: the lab menu switches between them and creates new ones.</p>
-      <ul style="margin:0; padding-left:18px; line-height:1.8; color:var(--fg-muted)">
-        <li><strong style="color:var(--fg)">Two people, one lab</strong> - whoever saves second is told, and reloads; nothing is overwritten silently.</li>
-        <li><strong style="color:var(--fg)">Import token</strong> - takes over a design from the Hyper-V VM Studio (its <code>HVSS1.</code> state token).</li>
-      </ul>
-      <div class="warn-box" style="margin:12px 0 0">Passwords, join credentials and Arc secrets are part of the lab and live in the
-      studio's database on its container. Keep the container as private as the Proxmox VE hosts themselves.</div>
-    `, "", false)}`;
+  // Polls redraw the nav for its badges; an unchanged nav is left alone (hover, focus).
+  if (nav._html !== html) { nav.innerHTML = html; nav._html = html; }
 }
 
 /* How to use a downloaded key, per client OS. OpenSSH refuses a private key anyone else
@@ -5230,7 +5143,7 @@ function renderGeneral() {
 
   return `
     <div class="blade-toolbar">
-      <div class="page-title"><img src="${iconSrc("settings.svg")}"> General Settings</div>
+      ${bladeTitle("general")}
     </div>
 
     ${gsCard("gs-username", "users.svg", "Local username theme", esc(themeLabel), `
@@ -5283,7 +5196,7 @@ function renderGeneral() {
         ${toggle(`data-nm="vmNameIncludeFqdn"`, "PVE VM name includes the FQDN", nm.vmNameIncludeFqdn, false,
           nm.vmNameIncludeFqdn ? "The VM's name in Proxmox VE becomes <code>computerName.domain</code>." : "The VM keeps the short computer name in Proxmox VE.")}
         ${toggle(`data-nm="fqdnOverrideEnabled"`, `Use one fixed FQDN for every VM ${infoTip("Fixed FQDN",
-          "A domain the build creates rather than joins — the first DC of a fresh forest — has no Domain Join account to read a suffix from, so the VM names would fall back to the short name. Typing the domain here gives every VM in this lab the same suffix, whether it joins the domain or builds it.")}`,
+          "A domain the build creates rather than joins — the first DC of a fresh forest — has no Domain Join account to read a suffix from, so the VM names would fall back to the short name. Typing the domain here gives every VM the same suffix, whether it joins the domain or builds it.")}`,
           nm.fqdnOverrideEnabled, !nm.vmNameIncludeFqdn,
           !nm.vmNameIncludeFqdn ? "Needs the PVE VM name toggle above."
             : (nm.fqdnOverrideEnabled ? "Overrides the Domain Join suffix on every VM, joined or not." : "Off — each VM uses its own Domain Join domain."))}
@@ -5294,7 +5207,7 @@ function renderGeneral() {
           <input data-nm="fqdn" value="${esc(nm.fqdn)}" spellcheck="false"
                  placeholder="ad.example.invalid"
                  class="${inv("d:namingFqdn")}"${invAria("d:namingFqdn")}>
-          <span class="hint">Used for every VM in this lab — the domain a fresh DC builds, not one it joins.</span>`)}
+          <span class="hint">Used for every VM — the domain a fresh DC builds, not one it joins.</span>`)}
       </div>` : ""}
       <p class="hint" style="margin:14px 0 8px"><code>${esc(namingExample.short)}</code> with the suffix <code>${esc(namingExample.domain)}</code> is built as:</p>
       ${namingTree}`, "", false)}
@@ -5313,7 +5226,6 @@ function renderGeneral() {
           </div>
           <div class="section-body">
             <div class="toggle-grid" style="margin-top:12px">
-              ${toggleWithWarn(`data-ip="${esc(img.id)}" data-k="useDifferencingDisk"`, "Differencing disk", p.useDifferencingDisk, DIFF_DISK_TIP)}
               ${toggle(`data-ip="${esc(img.id)}" data-k="enableSecureBoot"`, "Secure Boot", p.enableSecureBoot)}
               ${toggle(`data-ip="${esc(img.id)}" data-k="enableVtpm"`, "vTPM (Win11)", p.enableVtpm)}
               ${toggle(`data-ip="${esc(img.id)}" data-k="startAfterCreate"`, "Start after create", p.startAfterCreate)}
@@ -5331,7 +5243,7 @@ function renderNetworksBlade() {
   const switches = state.defaults.availableSwitches || [];
   return `
     <div class="blade-toolbar">
-      <div class="page-title"><img src="${iconSrc("vnet.svg")}"> Networks</div>
+      ${bladeTitle("networks")}
       ${(state.networks || []).length ? `<div class="row">
         <button class="btn primary" type="button" id="addNetwork"><img src="${iconSrcOnAccent("vnet.svg")}" alt=""> Add network</button>
       </div>` : ""}
@@ -5341,8 +5253,20 @@ function renderNetworksBlade() {
       switches.length ? `${switches.length} in the cluster` : "none found", `
       <p class="hint" style="margin-bottom:10px">Read from the cluster: every node's Linux bridges and OVS bridges, and the SDN VNets.
       They are managed in Proxmox VE (a node's System → Network, Datacenter → SDN); networks and VMs pick from this list.</p>
-      ${switches.length ? `<div class="chips">${switches.map(sw => `<span class="pill"><img src="${iconSrc("vlan.svg")}" alt=""> ${esc(sw)}</span>`).join("")}</div>`
-        : `<div class="req-box">${SVG_ALERT}<div><strong>No bridge found.</strong> Every VM attaches to a bridge or VNet - PVE creates <code>vmbr0</code> at install.</div></div>`}`, "", true,
+      ${switches.length ? (() => {
+        /* The same table the Cluster blade shows: every bridge per node, then the VNets. */
+        const inv = typeof cluster !== "undefined" && cluster.inventory;
+        const rows = inv
+          ? inv.nodes.flatMap(nd => (nd.bridges || []).map(b => `<tr><td><div class="name-cell"><img src="${iconSrc("vlan.svg")}" alt=""><b>${esc(b.iface)}</b></div></td>
+              <td>${esc(nd.node)}</td><td class="mono">${esc(b.cidr || "")}</td>
+              <td><span class="pill status ${b.bridge_vlan_aware === 1 ? "on" : "off"}">${b.bridge_vlan_aware === 1 ? "yes" : "no"}</span></td>
+              <td class="muted">${esc(b.comments || "")}</td></tr>`))
+            .concat((inv.vnets || []).map(v => `<tr><td><div class="name-cell"><img src="${iconSrc("vnet.svg")}" alt=""><b>${esc(v.vnet)}</b></div></td>
+              <td class="muted">SDN zone ${esc(v.zone || "")}</td><td></td><td class="muted">${v.tag ? "tag " + esc(v.tag) : ""}</td><td class="muted">${esc(v.alias || "")}</td></tr>`)).join("")
+          : switches.map(sw => `<tr><td><div class="name-cell"><img src="${iconSrc("vlan.svg")}" alt=""><b>${esc(sw)}</b></div></td><td></td><td></td><td></td><td></td></tr>`).join("");
+        return `<div class="table-wrap"><table class="data"><thead><tr><th>Bridge / VNet</th><th>Where</th><th>Address</th><th>VLAN aware</th><th>Comment</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      })()
+        : `<div class="req-box">${SVG_ALERT}<div><strong>No bridge found.</strong> Every VM attaches to a bridge or VNet - PVE creates <code>vmbr0</code> at install.</div></div>`}`, "", !switches.length,
       switches.length ? "" : `<span class="pill status off">Required</span>`)}
 
     <div class="card-stack">
@@ -6067,8 +5991,34 @@ function serverNameTaken(s) {
   return state.servers.some(o => o !== s && String(o.name || "").trim().toLowerCase() === name);
 }
 
+/* PVE's resource pools as a choice - on the Deploy blade's plan, where a VM's placement is
+   decided: None, every pool (its comment beside it), a pool the design names that PVE does
+   not have (yet), and "New pool..." - a name and comment row whose Create makes it in PVE
+   (server.js). */
+function poolPicker(s) {
+  const pools = (typeof cluster !== "undefined" && cluster.pools) || [];
+  const cur = s.pvePool || "";
+  const known = pools.some(p => p.id === cur);
+  const opts = [`<option value="" ${cur ? "" : "selected"}>None</option>`]
+    .concat(pools.map(p => `<option value="${esc(p.id)}" ${p.id === cur ? "selected" : ""}>${esc(p.id)}${p.comment ? " - " + esc(p.comment) : ""}</option>`))
+    .concat(cur && !known ? [`<option value="${esc(cur)}" selected>${esc(cur)} (not in PVE yet - made at build)</option>`] : [])
+    .concat([`<option value="__new__" ${s._poolNew ? "selected" : ""}>New pool…</option>`]);
+  return `<select data-pool-for="${esc(s._id)}">${opts.join("")}</select>` + (s._poolNew ? `
+    <div class="pool-new">
+      <input data-pool-name="${esc(s._id)}" placeholder="Name - prod, sql, lab-a" spellcheck="false" autocomplete="off">
+      <input data-pool-comment="${esc(s._id)}" placeholder="Comment (optional)" autocomplete="off">
+      <button class="btn sm primary" type="button" data-pool-create="${esc(s._id)}"><img src="${iconSrcOnAccent("servers.svg")}" alt=""> Create</button>
+      <button class="btn sm ghost" type="button" data-pool-cancel="${esc(s._id)}">Cancel</button>
+    </div>` : "");
+}
+
 function renderServerCard(s) {
   const open = !!state.expanded[s._id];
+  /* Built: the card is the record of what was built - read-only, and it leaves the view
+     with "Clear from view". The VM itself is the user's from here on, in Proxmox VE. */
+  const builtVm = typeof liveVm === "function" ? liveVm(s) : null;
+  const built = builtVm && builtVm.status === "ready" ? builtVm : null;
+  const clash = !built && typeof vmNameClash === "function" ? vmNameClash(s) : null;
   const img = findImage(s.imageId);
   const isCustomImage = s.imageSource === "custom";
   const displayImageLabel = isCustomImage
@@ -6131,10 +6081,18 @@ function renderServerCard(s) {
         <span class="pill role ${pillClass}">${esc(img.kind)}</span>
         <span class="card-ip${String(s.ipAddress || "").trim() ? "" : " is-none"}" style="--ip-col:${ipColumnWidth(state.servers)}ch">${esc(s.ipAddress || "no IP")}</span>
         ${psObjectButton("vm", s._id)}
-        <button class="btn icon danger-text" type="button" title="Remove VM" aria-label="Remove VM" data-del="${esc(s._id)}">${trashIcon()}</button>
+        ${built
+          ? `<span class="pill status ok" title="VM ${esc(built.vmid)} on ${esc(built.node)}">built</span>
+             <button class="btn icon sm danger-text" type="button" data-clear-vm="${esc(s._id)}" title="Clear from view - takes this VM out of the studio's view; the VM in Proxmox VE is not touched" aria-label="Clear from view">${trashIcon()}</button>`
+          : `${clash ? `<span class="pill status warn" title="${esc(clash.what)} ${esc(clash.vmid)} on ${esc(clash.node)} has this name">name in use</span>` : ""}<button class="btn icon danger-text" type="button" title="Remove from the design" aria-label="Remove from the design" data-del="${esc(s._id)}">${trashIcon()}</button>`}
       </div>
     </div>
     <div class="card-body">
+      ${built ? `<div class="built-banner"><img src="${iconSrc("first-boot.svg")}" alt=""><div><b>Built</b> as VM ${esc(built.vmid)} on ${esc(built.node)}${built.ip ? " · " + esc(built.ip) : ""}.
+        This card is the record of what was built - it is read-only, changes here would not reach the VM. Manage the VM in Proxmox VE.</div></div>` : ""}
+      ${clash ? `<div class="built-banner clash">${warnIconSvg("clash-icon")}<div><b>Name already in use.</b> ${esc(clash.what)} ${esc(clash.vmid)} on ${esc(clash.node)} is called ${esc(String(s.name).toLowerCase())}${clash.rec ? ", built by the studio from another card" : " in Proxmox VE"}.
+        Give this VM another computer name - the studio never builds over an existing VM.</div>${clash.rec ? `<button class="btn sm ghost" type="button" data-clear-record="${esc(clash.rec.id)}" title="Takes the old record out of the studio's view - the VM in Proxmox VE is not touched">Clear old record</button>` : ""}</div>` : ""}
+      <fieldset class="built-lock" ${built ? "disabled" : ""}>
       <div class="section collapsible ${templateOpen ? "" : "collapsed"}">
         <div class="section-head" data-nested="${esc(s._id)}-template">
           <span class="section-chevron">${chevron()}</span>
@@ -6158,7 +6116,7 @@ function renderServerCard(s) {
               </button>
               ${tplOpen ? `<div class="picker-list" role="listbox">
                 <div class="picker-scope">
-                  <span class="seg" role="group" aria-label="Windows release">${TEMPLATE_RELEASES.map(r => `<button type="button" class="${state.templateRelease === r ? "on" : ""}" data-template-release="${r}" aria-pressed="${state.templateRelease === r ? "true" : "false"}">${r}</button>`).join("")}</span>
+                  <span class="seg" role="group" aria-label="Windows release">${TEMPLATE_RELEASES.map(r => `<button type="button" class="${state.templateRelease === r ? "on" : ""}${templateScopeHasGold(r, state.templateEdition) ? "" : " no-gold"}" title="${templateScopeHasGold(r, state.templateEdition) ? "" : "No " + r + " " + esc(state.templateEdition) + " gold yet - templates fall back to a gold that exists"}" data-template-release="${r}" aria-pressed="${state.templateRelease === r ? "true" : "false"}">${r}</button>`).join("")}</span>
                   <span class="seg" role="group" aria-label="Windows edition">${TEMPLATE_EDITIONS.map(e => `<button type="button" class="${state.templateEdition === e ? "on" : ""}" data-template-edition="${esc(e)}" aria-pressed="${state.templateEdition === e ? "true" : "false"}">${esc(e)}</button>`).join("")}</span>
                 </div>
                 <button type="button" role="option" aria-selected="${appliedTemplate ? "false" : "true"}" class="${appliedTemplate ? "" : "selected"}" data-template-pick="${esc(s._id)}" data-template-id="">
@@ -6209,45 +6167,53 @@ function renderServerCard(s) {
                   <span class="netbios-count ${over ? "over" : ""}" data-netbios-count="1">${nameLen} / ${NETBIOS_MAX}</span>
                 </div>`;
               })())}
-              ${field("Image", (() => {
+              ${field("Gold", (() => {
                 const pickerOpen = state.imagePickerOpen === s._id;
-                const isCustom = isCustomImage;
+                const current = goldFor(s);
+                const groups = goldPickerGroups();
+                const isSel = e => !isCustomImage && (e.pin ? s.goldId === e.pin
+                  : !s.goldId && e.img.id === s.imageId && (!e.multi || goldLang(e.gold).toLowerCase() === String(s.goldLanguage || goldLang(current)).toLowerCase()));
                 return `<div class="picker ${pickerOpen ? "open" : ""}">
                 <button type="button" class="picker-btn" data-image-picker-toggle="${esc(s._id)}" aria-expanded="${pickerOpen ? "true" : "false"}">
                   <img src="${displayImageIconSrc}" alt="">
-                  <span class="picker-label">${esc(displayImageLabel)}</span>
+                  <span class="picker-label">${esc(displayImageLabel)}${s.goldLanguage ? ` · ${esc(s.goldLanguage)}` : ""}</span>
+                  ${s.goldId ? `<span class="pill status warn" title="Pinned to gold ${esc(s.goldId)} - rebakes are not picked up">pinned</span>` : ""}
+                  ${goldsLoaded() && !current ? `<span class="pill status off">no gold</span>` : ""}
                   <span class="picker-chevron">${chevron()}</span>
                 </button>
                 ${pickerOpen ? `<div class="picker-list" role="listbox">
-                  ${imagePickerGroups().map(rel => `
+                  ${goldsLoaded() && !current ? `
+                    <div class="opt-group" role="presentation">Current - no gold</div>
+                    <button type="button" role="option" aria-selected="true" class="selected" data-image-picker-toggle="${esc(s._id)}">
+                      <img src="${displayImageIconSrc}" alt="">
+                      <span class="opt-body"><span class="opt-label">${esc(displayImageLabel)}${s.goldLanguage ? ` · ${esc(s.goldLanguage)}` : ""}</span>
+                        <span class="opt-meta">${isCustomImage ? "a Hyper-V custom VHDX - Proxmox VE builds from golds only" : "no ready gold - bake one, or pick a gold below"}</span></span>
+                      <span class="pill status off">no gold</span>
+                    </button>` : ""}
+                  ${!goldsLoaded() ? `<div class="opt-empty hint">Reading the golds…</div>`
+                    : !groups.length ? `<div class="opt-empty hint">No gold is ready yet. A VM builds from a gold - bake one first.</div>`
+                    : groups.map(rel => `
                     <div class="opt-group" role="presentation">${esc(rel.label)}</div>
                     ${rel.groups.map(g => `
                       ${g.label ? `<div class="opt-sub" role="presentation">${esc(g.label)}</div>` : ""}
-                      ${g.images.map(i => `
-                    <button type="button" role="option" aria-selected="${!isCustom && i.id===s.imageId?"true":"false"}" class="${!isCustom && i.id===s.imageId?"selected":""} ${g.label ? "indented" : ""}" data-image-pick="${esc(s._id)}" data-image-id="${esc(i.id)}">
-                      <img src="${imageIconSrc(i)}" alt="">
+                      ${g.entries.map(e => `
+                    <button type="button" role="option" aria-selected="${isSel(e) ? "true" : "false"}" class="${isSel(e) ? "selected" : ""} ${g.label ? "indented" : ""}${e.pin ? " opt-pin" : ""}" data-image-pick="${esc(s._id)}" data-image-id="${esc(e.img.id)}" data-gold-lang="${e.multi && !e.pin ? esc(e.lang) : ""}" data-gold-pin="${esc(e.pin)}">
+                      ${e.pin ? `<span class="opt-pin-id mono">${esc(goldShortId(e.gold))}</span>` : `<img src="${imageIconSrc(e.img)}" alt="">`}
                       <span class="opt-body">
-                        <span class="opt-label">${esc(i.label)}</span>
-                        <span class="opt-meta">${esc(i.id)}</span>
+                        <span class="opt-label">${e.pin ? esc(goldManifest(e.gold).label || "pin this gold") : esc(e.img.label) + `<span class="opt-tag">newest${e.multi ? " " + esc(e.lang || "image default") : ""}</span>`}</span>
+                        <span class="opt-meta">${esc(goldMetaLine(e.gold))}${e.pin ? "" : " · " + esc(goldShortId(e.gold))}</span>
                       </span>
-                      ${goldBadge(i.id)}
                     </button>`).join("")}`).join("")}`).join("")}
-                  <div class="opt-group" role="presentation">Custom</div>
-                  <button type="button" role="option" aria-selected="${isCustom?"true":"false"}" class="${isCustom?"selected":""}" data-image-pick="${esc(s._id)}" data-image-id="__custom__">
-                    <img src="${iconSrcBand("shared-gallery.svg", "deploy")}" alt="">
-                    <span class="opt-body">
-                      <span class="opt-label">Custom gold image</span>
-                      <span class="opt-meta">Match by filename hint under the gold VHDX directory</span>
-                    </span>
-                  </button>
+                  <button type="button" class="opt-footer" data-goto="golds"><img src="${iconSrc("gold-image.svg")}" alt=""> Bake another gold…</button>
                 </div>` : ""}
               </div>
-              <span class="hint">${isCustom ? "Enter the gold filename hint on the right" : esc(img.id)}</span>`;
+              <span class="hint">${current ? `${esc(current.name)} · ${esc(goldMetaLine(current))}${s.goldId ? " · pinned" : " · follows rebakes"}` : goldsLoaded() ? (s.goldId ? `Pinned gold ${esc(s.goldId)} is gone - pick another` : "Bake a gold for this image under Golds") : esc(img.id)}</span>`;
               })())}
               ${isCustomImage
                 ? field("Custom image hint", `<input data-s="${esc(s._id)}" data-k="imageHint" value="${esc(s.imageHint||"")}" placeholder="only for custom gold names" class="${inv(`s:${s._id}:imageHint`)}"${invAria(`s:${s._id}:imageHint`)}>
                   <span class="hint">Partial or full gold filename — used instead of catalog imageId matching</span>`)
                 : ""}
+
           </div>
         </div>
       </div>
@@ -6282,7 +6248,7 @@ function renderServerCard(s) {
               })() + `
                 <span class="hint">${adminOnly
                   ? "The built-in account — nothing is provisioned. Your own name is kept and comes back if you switch this off."
-                  : "Theme from General Settings · " + esc((USERNAME_THEMES[state.usernameTheme]||{}).label || state.usernameTheme)}</span>`)}
+                  : "Theme from VM settings · " + esc((USERNAME_THEMES[state.usernameTheme]||{}).label || state.usernameTheme)}</span>`)}
               ${field(adminOnly ? "Administrator password" : "Local password", (() => {
                 /* Same reveal map as the Passwords blade, but its own key — revealing here
                    must not silently unmask the same secret over there. Unlocking the pencil
@@ -6298,7 +6264,7 @@ function renderServerCard(s) {
                 <button class="btn icon" type="button" data-name-edit="pw:${esc(s._id)}"
                   title="${pwUnlocked ? "Done" : "Edit password"}" aria-label="${pwUnlocked ? "Done" : "Edit password"}">${pwUnlocked ? checkIcon() : pencilIcon()}</button>
               </div>
-                <span class="hint">${passwordLength()} chars · length set in General Settings</span>`;
+                <span class="hint">${passwordLength()} chars · length set in VM settings</span>`;
               })())}
           </div>
           ${!isLinux ? "" : `
@@ -6391,7 +6357,7 @@ function renderServerCard(s) {
                 <span class="disk-drive">${isLinuxServer(s) ? "system" : "C:"}</span>
                 <input type="number" min="1" data-s="${esc(s._id)}" data-k="osDiskGB" value="${esc(s.osDiskGB || "")}" placeholder="gold's" aria-label="OS disk size GB"
                        title="Blank keeps the gold's size (Linux 32-40 GB, Windows 64 GB). A disk only grows.">
-                <span class="disk-muted">${s.useDifferencingDisk === false ? "Full copy" : "Linked clone"}</span>
+                <span class="disk-muted">${s.useDifferencingDisk === true ? "Linked clone" : "Full copy"}</span>
                 <span class="disk-muted" title="The OS volume comes formatted in the gold">—</span>
                 <span class="disk-muted" title="The OS volume comes formatted in the gold">—</span>
                 <span></span>
@@ -6498,8 +6464,8 @@ function renderServerCard(s) {
                 ${list.map(v => `<option value="${esc(v)}" ${s[key] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}
               </select>`;
             return `<div class="grid-2" style="margin-top:12px">
-              ${field(fieldLabel("servers.svg", "Node"), sel("pveNode", nodes, `General Settings (${state.defaults.pveNode || "the gold's node"})`))}
-              ${field(fieldLabel("disk.svg", "Storage for a full copy"), sel("pveStorage", storages, `General Settings (${state.defaults.pveStorage || "the gold's storage"})`))}
+              ${field(fieldLabel("servers.svg", "Node"), sel("pveNode", nodes, `VM settings (${state.defaults.pveNode || "the gold's node"})`))}
+              ${field(fieldLabel("disk.svg", "Storage for a full copy"), sel("pveStorage", storages, `VM settings (${state.defaults.pveStorage || "the gold's storage"})`))}
             </div>
             <p class="hint" style="margin-top:8px">A linked clone stays on the gold's storage; running on another node needs that storage shared.</p>`;
           })()}
@@ -6510,11 +6476,11 @@ function renderServerCard(s) {
         <div class="section-head" data-nested="${esc(s._id)}-boot">
           <span class="section-chevron">${chevron()}</span>
           <img src="${iconSrc("secure-boot.svg")}"> Boot / disk
-          <span class="section-meta">${s.useDifferencingDisk === false ? "Full copy" : "Linked clone"}${effectiveSecureBoot(s) ? " · Secure Boot" : ""}${!isLinux && s.enableVtpm ? " · vTPM" : ""}</span>
+          <span class="section-meta">${s.useDifferencingDisk === true ? "Linked clone" : "Full copy"}${effectiveSecureBoot(s) ? " · Secure Boot" : ""}${!isLinux && s.enableVtpm ? " · vTPM" : ""}</span>
         </div>
         <div class="section-body">
           <div class="toggle-grid" style="margin-top:12px">
-            ${toggle(`data-s="${esc(s._id)}" data-k="useDifferencingDisk"`, "Linked clone", s.useDifferencingDisk !== false, false, "seconds and almost no space; off: a full, independent copy")}
+            ${toggleWithWarn(`data-s="${esc(s._id)}" data-k="useDifferencingDisk"`, "Linked clone", s.useDifferencingDisk === true, LINKED_CLONE_TIP)}
             ${imageRefusesSecureBoot(img)
               ? toggle(`data-s="${esc(s._id)}" data-k="enableSecureBoot"`, "Secure Boot", false, true, "not possible on this image")
               : toggle(`data-s="${esc(s._id)}" data-k="enableSecureBoot"`, "Secure Boot", s.enableSecureBoot)}
@@ -6559,21 +6525,79 @@ function renderServerCard(s) {
           into the first boot. Time comes from the guest's own NTP / domain hierarchy, as it should.</p>
         </div>
       </div>
+      </fieldset>
     </div>
   </article>`;
 }
 
-/* PVE VM Studio: whether an image has a gold to build from - on the image picker and on
-   the card. `cluster` is server.js's view of the golds. */
-function goldOf(imageId) {
-  const golds = (typeof cluster !== "undefined" && cluster.golds) || [];
-  return golds.filter(g => g.status === "ready" && g.image_id === imageId)
-    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0] || null;
+/* PVE VM Studio: the golds a VM can build from. `cluster` is server.js's view of them;
+   until it has been read once, nothing is claimed either way. A design names an image and,
+   when that image has golds in more than one language, a language - it always builds from
+   the newest ready gold that matches, so a rebake is picked up without touching the VM. */
+function goldsLoaded() { return typeof cluster !== "undefined" && cluster.at > 0; }
+function readyGolds() { return ((typeof cluster !== "undefined" && cluster.golds) || []).filter(g => g.status === "ready"); }
+function goldLang(g) { return String((g && g.language) || ""); }
+/* Newest first, as Build-Vms orders one image's golds: highest build, then latest bake. */
+function compareGolds(a, b) {
+  const va = a.build_version || [0, 0], vb = b.build_version || [0, 0];
+  for (let i = 0; i < Math.max(va.length, vb.length); i++) {
+    const d = (vb[i] || 0) - (va[i] || 0);
+    if (d) return d;
+  }
+  return String(b.created_at).localeCompare(String(a.created_at));
 }
-function goldBadge(imageId) {
-  return goldOf(imageId)
-    ? `<span class="pill status on" title="A gold is ready - VMs build from it">gold</span>`
-    : `<span class="pill" title="No gold yet - bake one under Golds">no gold</span>`;
+function goldsOfImage(imageId, lang) {
+  const l = String(lang || "").toLowerCase();
+  return readyGolds().filter(g => g.image_id === imageId && (!l || goldLang(g).toLowerCase() === l)).sort(compareGolds);
+}
+function goldOf(imageId, lang) { return goldsOfImage(imageId, lang)[0] || null; }
+/* A pinned gold id wins (Build-Vms' -GoldId), then the language, then the newest. */
+function goldFor(s) {
+  if (!s) return null;
+  if (s.goldId) return readyGolds().find(g => g.id === s.goldId) || null;
+  return goldOf(s.imageId, s.goldLanguage);
+}
+function goldLanguages(imageId) {
+  return [...new Set(readyGolds().filter(g => g.image_id === imageId).map(goldLang))].sort();
+}
+function goldManifest(g) { try { return JSON.parse(g.manifest || "{}"); } catch { return {}; } }
+/* The short id Build-Vms shows: the sidecar's id (pve-<id>), or the template name for a
+   gold from before schema 2. */
+function goldShortId(g) { const m = goldManifest(g); return m.id || g.id.slice(0, 8); }
+function goldBuildLabel(g) {
+  const m = goldManifest(g);
+  const b = String(g.build_full || m.build || m.distroVersion || "");
+  return b ? b.replace(/^10\.0\./, "") : "";
+}
+function goldAge(iso) {
+  if (!iso) return "";
+  const d = Math.floor((Date.now() - new Date(iso)) / 86400000);
+  return d < 1 ? "today" : d === 1 ? "1 day old" : d < 60 ? `${d} days old` : `${Math.floor(d / 30)} months old`;
+}
+/* "de-de · 26100.4061 · 64 GB · 3 days old" - Build-Vms' picker columns in one line. */
+function goldMetaLine(g) {
+  const m = goldManifest(g);
+  return [goldLang(g) || "image default", goldBuildLabel(g) || (m.kernel ? "kernel " + m.kernel : ""),
+    m.diskSizeGB ? m.diskSizeGB + " GB" : "", goldAge(g.created_at)].filter(Boolean).join(" · ");
+}
+/* The picker's entries: one per image and language that has a ready gold, in the
+   catalog's release / edition order. */
+function goldPickerGroups() {
+  return imagePickerGroups().map(rel => ({
+    label: rel.label,
+    groups: rel.groups.map(g => ({
+      label: g.label,
+      entries: g.images.flatMap(img => {
+        const langs = goldLanguages(img.id);
+        const all = goldsOfImage(img.id);
+        /* "Newest" rows follow rebakes; with more than one gold, every gold is listed too,
+           to pin - Build-Vms' picker steps through all of them. */
+        const follow = langs.map(lang => ({ img, lang, multi: langs.length > 1, gold: goldOf(img.id, langs.length > 1 ? lang : ""), pin: "" }));
+        const pins = all.length > 1 ? all.map(gold => ({ img, lang: goldLang(gold), multi: langs.length > 1, gold, pin: gold.id })) : [];
+        return follow.concat(pins);
+      })
+    })).filter(g => g.entries.length)
+  })).filter(rel => rel.groups.length);
 }
 
 function renderServers() {
@@ -6588,7 +6612,7 @@ function renderServers() {
     </div>`;
   return `
     <div class="blade-toolbar">
-      <div class="page-title"><img src="${iconSrc("vm.svg")}"> Virtual machines</div>
+      ${bladeTitle("servers")}
       ${state.servers.length ? `<div class="row">
         <button class="btn" type="button" id="importServers"><img src="${iconSrc("download.svg")}"> Import JSON</button>
         <button class="btn primary" type="button" id="addServer"><img src="${iconSrcOnAccent("vm.svg")}"> Add virtual machine</button>
@@ -6605,7 +6629,7 @@ function renderDomainJoinBlade() {
   const accountCount = (state.domainJoinAccounts || []).length;
   return `
     <div class="blade-toolbar">
-      <div class="page-title"><img src="${iconSrc("identity.svg")}"> Domain Join</div>
+      ${bladeTitle("domainjoin")}
       ${allOn || !accountCount ? "" : `<div class="row">
         <button class="btn primary" type="button" id="addDomainJoinAccount"><img src="${iconSrcOnAccent("identity.svg")}"> Add join account</button>
       </div>`}
@@ -6680,12 +6704,102 @@ function renderDomainJoinBlade() {
     </div>`;
 }
 
+/* Windows licenses: one product key per Windows gold image. Every VM built from that image's
+   gold gets it at first boot (SetupComplete: slmgr /ipk, then /ato) instead of the gold's KMS
+   client key. Bound to the image, not a gold id - a rebake keeps the key. */
+function createWindowsLicense(partial) {
+  return ensureCatalogStableId(Object.assign({ _id: uid("wl"), id: "", imageId: "", productKey: "" }, partial || {}, { _id: uid("wl") }), "wl");
+}
+/* The VMs a licence is attached to - picked like Domain Join's, one licence per VM. */
+function serversForLicense(w) {
+  return state.servers.filter(s => s.windowsLicense && s.windowsLicense.licenseId === w.id);
+}
+function detachLicense(s) { s.windowsLicense = { licenseId: "" }; }
+function productKeyOk(k) { return /^[A-Za-z0-9]{5}(-[A-Za-z0-9]{5}){4}$/.test(String(k || "").trim()); }
+/* One choice per Windows image that has a ready gold: its newest gold names it. */
+function windowsGoldChoices() {
+  const ids = [...new Set(readyGolds().map(g => g.image_id))].filter(id => { const img = findImage(id); return img && img.id === id && !isLinuxImage(img); });
+  return ids.map(id => {
+    const g = goldOf(id);
+    return { imageId: id, label: `${findImage(id).label} · ${goldMetaLine(g)}` };
+  }).sort((a, b) => a.label.localeCompare(b.label));
+}
+function renderLicensesBlade() {
+  const list = state.windowsLicenses || [];
+  const addBtn = `<button class="btn primary" type="button" id="addWindowsLicense"><img src="${iconSrcOnAccent("key.svg")}"> Add licence</button>`;
+  return `
+    <div class="blade-toolbar">
+      ${bladeTitle("licenses")}
+      ${list.length ? `<div class="row">${addBtn}</div>` : ""}
+    </div>
+    <div class="card-stack">
+      ${list.map(w => {
+        const open = state.expanded[w._id] !== false;
+        const img = w.imageId ? findImage(w.imageId) : null;
+        const vms = serversForLicense(w);
+        const keyUnlocked = !!state.nameEdit[`wlkey:${w._id}`];
+        const keyBad = !!w.productKey && !productKeyOk(w.productKey);
+        return `
+        <article class="card collapsible ${open ? "" : "collapsed"}" data-wl-card="${esc(w._id)}">
+          <div class="card-head" data-toggle="${esc(w._id)}">
+            <div class="card-lead">
+              <span class="card-chevron">${chevron()}</span>
+              <div class="card-icon"><img src="${img ? imageIconSrc(img) : iconSrc("key.svg")}"></div>
+              <div>
+                <div class="card-title">${img ? esc(img.label) : "Pick a gold"}</div>
+                <div class="card-meta">${w.productKey ? (productKeyOk(w.productKey) ? "key set" : "key not valid") : "no key"} · ${vms.length} VM(s) attached</div>
+              </div>
+            </div>
+            <div class="card-actions">
+              <button class="btn icon danger-text" type="button" title="Remove licence" aria-label="Remove licence" data-del-wl="${esc(w._id)}">${trashIcon()}</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="grid-2">
+              ${field(`<span class="field-label">Gold ${infoTip("Gold", "The Windows golds baked under Golds. The key belongs to the gold's image (edition and experience), so a rebake of it - a newer build, another language - keeps the key.")}</span>`, (() => {
+                const golds = windowsGoldChoices();
+                const known = golds.some(c => c.imageId === w.imageId);
+                return `<select data-wl="${esc(w._id)}" data-wk="imageId" class="${w.imageId ? "" : "is-invalid"}"${golds.length || w.imageId ? "" : " disabled"}>
+                <option value="">${golds.length ? "Pick a gold" : "No Windows gold yet - bake one under Golds"}</option>
+                ${golds.map(c => `<option value="${esc(c.imageId)}"${c.imageId === w.imageId ? " selected" : ""}>${esc(c.label)}</option>`).join("")}
+                ${w.imageId && !known ? `<option value="${esc(w.imageId)}" selected>${esc(findImage(w.imageId).label)} - no gold baked now</option>` : ""}
+              </select>`;
+              })())}
+              ${field(`<span class="field-label">Product key ${infoTip("Product key", "Installed over the gold's KMS client key on every VM built from this image, then activated online at first boot (slmgr /ipk, then /ato). A failed activation is logged in C:\\Windows\\Temp\\pvs-firstboot.log and does not hold the VM up. MAK, retail or a KMS host key - the key must match the image's edition.")}</span>`,
+                `<div class="edit-field">
+                <input class="mono keep-border key-input${keyBad ? " is-invalid" : ""}" data-wl="${esc(w._id)}" data-wk="productKey" data-name-input="wlkey:${esc(w._id)}" value="${esc(w.productKey || "")}" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" spellcheck="false" autocomplete="off" maxlength="29"${keyUnlocked ? "" : " readonly"}>
+                <button class="btn icon" type="button" data-name-edit="wlkey:${esc(w._id)}"
+                  title="${keyUnlocked ? "Done" : "Edit the key"}" aria-label="${keyUnlocked ? "Done" : "Edit the key"}">${keyUnlocked ? checkIcon() : pencilIcon()}</button>
+              </div>`)}
+            </div>
+            <div class="section-head" style="margin:14px 0 6px">Attach virtual machines</div>
+            <button type="button" class="btn field" data-open-wl-picker="${esc(w._id)}"${w.imageId ? "" : " disabled title=\"Pick the gold first\""}>
+              <img src="${iconSrc("vm.svg")}"> Choose virtual machines…
+            </button>
+            ${vms.length ? `
+            <div class="cl-grid attach" style="margin-top:10px">
+              <div class="cl-grid-head"><div>Virtual machine</div><div>Gold</div><div></div><div></div></div>
+              ${vms.map(s => {
+                const fits = normalizeImageId(s.imageId) === w.imageId;
+                return `<div class="cl-row">${vmGridCell(s)}
+                <div>${fits ? `<span class="hint">${esc(findImage(s.imageId).label)}</span>` : `<span class="pill status warn" title="Builds from ${esc(findImage(s.imageId).label)} - this key is not used">other gold</span>`}</div><div></div>
+                <div class="cl-detach"><button class="btn icon danger-text" type="button" title="Detach ${esc(serverDisplayName(s))}" aria-label="Detach ${esc(serverDisplayName(s))}" data-wl-detach="${esc(s._id)}">${trashIcon()}</button></div>
+              </div>`;
+              }).join("")}
+            </div>` : `<p class="hint" style="margin:10px 0 0">No VMs attached - this key goes nowhere.</p>`}
+          </div>
+        </article>`;
+      }).join("") || `<div class="empty-state"><div class="ue-icon"><img src="${iconSrc("key.svg")}"></div><h3>No Windows licences yet</h3><p>Add a product key for a Windows gold image; its VMs get it at first boot.</p>
+        <div class="ue-actions">${addBtn}</div></div>`}
+    </div>`;
+}
+
 function renderAzureArcBlade() {
   const allOn = !!state.defaults.azureArcAllVms;
   const principalCount = (state.azureArcPrincipals || []).length;
   return `
     <div class="blade-toolbar">
-      <div class="page-title"><img src="${iconSrc("arc.svg")}"> Azure Arc</div>
+      ${bladeTitle("azurearc")}
       ${allOn || !principalCount ? "" : `<div class="row">
         <button class="btn primary" type="button" id="addAzureArcPrincipal"><img src="${iconSrcOnAccent("arc.svg")}"> Add Arc principal</button>
       </div>`}
@@ -6728,15 +6842,9 @@ function renderAzureArcBlade() {
                   ${pickerOpen ? `<div class="region-list">${regionMatches.map(r => `
                     <button type="button" data-arc-region="${esc(r.id)}" data-arc-region-for="${esc(a._id)}"><span>${esc(r.label)}</span><span class="r-id">${esc(r.id)}</span></button>`).join("") || `<button type="button" disabled>No matches</button>`}</div>` : ""}
                 </div>`)}
-              ${field("Auth mode", `<select data-arcp="${esc(a._id)}" data-ak="authMode">
-                <option value="servicePrincipal" ${a.authMode!=="hostContext"?"selected":""}>Service principal</option>
-                <option value="hostContext" ${a.authMode==="hostContext"?"selected":""}>Host Azure context</option>
-              </select>`)}
-              ${a.authMode !== "hostContext" ? `
-                ${field("Service principal App ID", `<input data-arcp="${esc(a._id)}" data-ak="servicePrincipalAppId" value="${esc(a.servicePrincipalAppId||"")}" placeholder="Application (client) ID" autocomplete="off" class="${inv(`arc:${a._id}:servicePrincipalAppId`)}"${invAria(`arc:${a._id}:servicePrincipalAppId`)}>`)}
-                ${field("Service principal secret", `<input type="password" data-arcp="${esc(a._id)}" data-ak="servicePrincipalSecret" value="${esc(a.servicePrincipalSecret||"")}" placeholder="Client secret" autocomplete="new-password" class="${inv(`arc:${a._id}:servicePrincipalSecret`)}"${invAria(`arc:${a._id}:servicePrincipalSecret`)}>
-                  <span class="hint">Optional in export — can also pass <code>-ArcServicePrincipalPath</code> at build time</span>`)}
-              ` : `<p class="hint" style="align-self:end;padding-bottom:8px">Host must be signed in (<code>Connect-AzAccount</code>) when Build-Vms runs.</p>`}
+              ${field("Service principal App ID", `<input data-arcp="${esc(a._id)}" data-ak="servicePrincipalAppId" value="${esc(a.servicePrincipalAppId||"")}" placeholder="Application (client) ID" autocomplete="off" class="${inv(`arc:${a._id}:servicePrincipalAppId`)}"${invAria(`arc:${a._id}:servicePrincipalAppId`)}>`)}
+              ${field("Service principal secret", `<input type="password" data-arcp="${esc(a._id)}" data-ak="servicePrincipalSecret" value="${esc(a.servicePrincipalSecret||"")}" placeholder="Client secret" autocomplete="new-password" class="${inv(`arc:${a._id}:servicePrincipalSecret`)}"${invAria(`arc:${a._id}:servicePrincipalSecret`)}>
+                <span class="hint">Stored in the studio; each VM gets it on its seed and the seed is deleted after the first boot.</span>`)}
             </div>
             <div class="section-head" style="margin:14px 0 6px">Attach virtual machines</div>
             ${ai === 0 ? `<div class="toggle-grid" style="grid-template-columns:1fr;margin-bottom:10px">
@@ -6847,7 +6955,7 @@ function renderClusterBlade() {
     ${toggle(`data-sp="auto"`, "Automatic placement across storage volumes", storagePlacementActive(), false,
       storagePlacementActive()
         ? "Build-Vms.ps1 places each VM on the volume with the most usable space at its turn — Azure Local style. Per-VM custom paths still win."
-        : "Off — every VM uses the global VM/VHD path pair from General Settings.")}
+        : "Off — every VM uses the global VM/VHD path pair from VM settings.")}
     ${storagePlacementActive() ? `
     <p class="hint" style="margin:10px 0">One row per Cluster Shared Volume (e.g. <code>C:\\ClusterStorage\\Volume1\\VMs</code> + <code>…\\VHDs</code>). Both paths are required on every volume. Every path must be reachable from all cluster nodes, and the gold VHDX directory too when differencing disks are used.</p>
     ${storagePlacement().volumes.map((v, i) => `
@@ -7027,7 +7135,7 @@ function serverFolderName(s) {
   const domain = namingSuffixForServer(s);
   return (domain && namingDefaults().folderIncludeFqdn) ? `${short}.${domain}` : short;
 }
-/** "" when neither a per-VM override nor a General Settings default is set. */
+/** "" when neither a per-VM override nor a VM settings default is set. */
 function serverVmRootPath(s) {
   if (serverUsesCustomPaths(s) && String(s.vmPath || "").trim()) return String(s.vmPath).trim();
   return String(state.defaults.vmPath || "").trim();
@@ -7049,7 +7157,7 @@ function patchServerPathsMeta(s) {
   if (!meta) return;
   meta.textContent = serverUsesCustomPaths(s)
     ? `VM ${String(s.vmPath || "").trim() || "host default"} · VHD ${String(s.vhdPath || "").trim() || "follows VM path"}`
-    : "Host defaults from General Settings";
+    : "Host defaults from VM settings";
 }
 
 /** Refresh the generated disk file names after a rename. Renamed files are left alone. */
@@ -7082,7 +7190,7 @@ const SHOW_LOCALE_CARD = false;
 const NO_PATHS_NOTE = `<div class="name-tree"><div class="name-tree-note" style="margin:0">
   No <strong>VM path</strong> or <strong>VHD path</strong> set anywhere. Build-Vms.ps1 reads the host's
   own defaults with <code>Get-VMHost</code> and builds there — this page cannot know what they are.
-  Set the paths in General Settings, or a per-VM path under <em>Storage paths</em>, to see the layout here.
+  Set the paths in VM settings, or a per-VM path under <em>Storage paths</em>, to see the layout here.
 </div></div>`;
 
 /* One machine's placement, as a flat read-only summary rather than the expandable
@@ -7240,17 +7348,17 @@ function validate() {
     err("The cluster has no bridge or VNet — every VM needs one to attach to.", "Networks › Bridges and VNets", "switches");
   }
   if (!String(d.locale || "").trim()) {
-    warn("No locale set — guests fall back to the image default.", "General Settings › Regional");
+    warn("No locale set — guests fall back to the image default.", "VM settings › Regional");
   }
   const nmValidate = namingDefaults();
   if (nmValidate.fqdnOverrideEnabled) {
     const fixed = nmValidate.fqdn.replace(/\.+$/, "");
     if (!fixed) {
-      err("Fixed FQDN is on but empty — either type the domain or turn the toggle off.", "General Settings › Naming", "d:namingFqdn");
+      err("Fixed FQDN is on but empty — either type the domain or turn the toggle off.", "VM settings › Naming", "d:namingFqdn");
     } else if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i.test(fixed)) {
-      err(`Fixed FQDN "${fixed}" is not a DNS name — labels are letters, digits and hyphens, separated by dots.`, "General Settings › Naming", "d:namingFqdn");
+      err(`Fixed FQDN "${fixed}" is not a DNS name — labels are letters, digits and hyphens, separated by dots.`, "VM settings › Naming", "d:namingFqdn");
     } else if (fixed.indexOf(".") === -1) {
-      warn(`Fixed FQDN "${fixed}" is a single label — Hyper-V names and folders get "${fixed}" appended with no dotted suffix.`, "General Settings › Naming");
+      warn(`Fixed FQDN "${fixed}" is a single label — Hyper-V names and folders get "${fixed}" appended with no dotted suffix.`, "VM settings › Naming");
     }
   }
   if (storagePlacementActive()) {
@@ -7436,7 +7544,7 @@ function validate() {
     info("Windows VMs join their domain deferred: GuestProvision registers the join at first boot, it runs five minutes later and restarts the VM. A specialize-time join needs the answer file before specialize, which a cloned gold does not read.", "Domain Join");
   }
   if (!state.servers.length) {
-    err("No virtual machines defined — there is nothing to deploy.", "Virtual machines");
+    info("No virtual machines designed yet - nothing to deploy.", "Virtual machines");
   }
 
   const nameSeen = new Map();
@@ -7454,6 +7562,8 @@ function validate() {
         err(`VM name "${name}" contains characters Windows will not accept — use letters, digits and hyphens.`, `Virtual machines › ${label}`, `s:${s._id}:name`);
       }
       if (nameSeen.has(name)) err(`Duplicate VM name "${name}" — VM and disk file names would collide.`, `Virtual machines › ${label}`, `s:${s._id}:name`);
+      const clash = typeof vmNameClash === "function" ? vmNameClash(s) : null;
+      if (clash) err(`Name "${name}" is already in use — ${clash.what} ${clash.vmid} on ${clash.node} has it. Pick another computer name.`, `Virtual machines › ${label}`, `s:${s._id}:name`);
       nameSeen.set(name, true);
     }
 
@@ -7561,7 +7671,7 @@ function validate() {
 
     const features = (s.windowsFeatures || []).filter(Boolean);
     if (features.indexOf("NET-Framework-Core") !== -1 && !String(d.sxsSourcePath || "").trim()) {
-      warn(`${label} installs .NET Framework 3.5 but no SxS source path is set — the payload is not in the image.`, "General Settings › Paths");
+      warn(`${label} installs .NET Framework 3.5 but no SxS source path is set — the payload is not in the image.`, "VM settings › Paths");
     }
     if (features.length && img.kind === "client") {
       warn(`${label} is a client image — server roles and features are ignored.`, `Virtual machines › ${label}`);
@@ -7609,11 +7719,21 @@ function validate() {
 
     /* Per-VM paths and renamed disk files */
     if (serverUsesCustomPaths(s) && !String(s.vmPath || "").trim() && !String(s.vhdPath || "").trim()) {
-      info(`${label} has custom paths switched on but both fields are empty — it falls back to the General Settings paths.`, `Virtual machines › ${label}`);
+      info(`${label} has custom paths switched on but both fields are empty — it falls back to the VM settings paths.`, `Virtual machines › ${label}`);
     }
-    if (s.imageSource !== "custom" && typeof cluster !== "undefined" && cluster.golds && !goldOf(s.imageId)) {
-      warn(`${label} builds from ${findImage(s.imageId).label}, which has no gold yet — bake one under Golds before deploying.`,
-        `Golds`);
+    if (s.imageSource === "custom") {
+      err(`${label} uses a custom Hyper-V image — Proxmox VE builds from golds only. Pick a gold on its card.`, `Virtual machines › ${label}`);
+    } else if (goldsLoaded() && !goldFor(s)) {
+      err(s.goldId
+        ? `${label} is pinned to gold ${s.goldId}, which is gone — pick another gold on its card.`
+        : `${label} builds from ${findImage(s.imageId).label}${s.goldLanguage ? " (" + s.goldLanguage + ")" : ""}, which has no ready gold — bake one under Golds, or pick another gold.`,
+        `Virtual machines › ${label}`);
+    } else if (goldsLoaded()) {
+      /* What the gold's sidecar says (Build-Vms' preflight). */
+      const g = goldFor(s), m = goldManifest(g);
+      if (m.evaluation) warn(`${label} builds from ${g.name}, an evaluation image — 180 days, and no KMS activation.`, `Virtual machines › ${label}`);
+      if (m.generalized === false) warn(`${label} builds from ${g.name}, which is not generalized — every VM from it shares its SID and identity.`, `Virtual machines › ${label}`);
+      if (m.requiresTpm && !s.enableVtpm) info(`${label}: ${g.name} needs a TPM — the VM gets a vTPM from the gold's sidecar.`, `Virtual machines › ${label}`);
     }
     lintPath(s.vmPath, `${label} VM path`, `Virtual machines › ${label}`, `s:${s._id}:vmPath`);
     lintPath(s.vhdPath, `${label} VHD path`, `Virtual machines › ${label}`, `s:${s._id}:vhdPath`);
@@ -7705,63 +7825,39 @@ function reviewClusterRows() {
     </div>` : "");
 }
 
-function renderReview() {
+/* Review and validate lives on the Deploy blade now (server.js): the preflight card is
+   every finding, the summary cards the design at a glance. Both read the design only - the
+   cluster side (golds, names, storages) is checked by Deploy itself. */
+function reviewIssueListHtml(issues) {
+  return issues.length
+    ? `<div class="issue-list">${issues.map(i => `
+        <div class="issue ${i.level}">${i.level === "error" ? SVG_ALERT : SVG_INFO}
+          <div class="issue-text">${esc(i.text)}<span class="issue-where">${esc(i.where)}</span></div>
+        </div>`).join("")}</div>`
+    : `<p class="hint">Nothing to flag. The design is internally consistent — Deploy still checks the cluster itself (golds, names, storages) before it builds anything.</p>`;
+}
+
+function reviewPreflightCard() {
   const issues = validate();
-  const errors = issues.filter(i => i.level === "error");
-  const warnings = issues.filter(i => i.level === "warn");
-  const notes = issues.filter(i => i.level === "info");
+  const errors = issues.filter(i => i.level === "error").length;
+  const warnings = issues.filter(i => i.level === "warn").length;
+  const meta = issues.length ? `${errors} error(s) · ${warnings} warning(s)${issues.length - errors - warnings ? ` · ${issues.length - errors - warnings} note(s)` : ""}` : "No findings";
+  return gsCard("rev-issues", "search.svg", "Preflight", meta, reviewIssueListHtml(issues), "", errors > 0);
+}
+
+function reviewSummaryCards() {
   const cfg = buildConfig();
-
-  const totalCpu = state.servers.reduce((n, s) => n + (Number(s.cpuCount) || 0), 0);
-  const totalMem = state.servers.reduce((n, s) => n + (Number(s.memoryGB) || 0), 0);
-  const dataGb = state.servers.reduce((n, s) => n + (s.additionalDisks || []).reduce((m, d) => m + (Number(d.sizeGB) || 0), 0), 0);
-  const setGb = state.vhdSets.reduce((n, v) => n + (Number(v.sizeGB) || 0), 0);
-
   return `
-    <div class="blade-toolbar">
-      <div class="page-title"><img src="${iconSrc("search.svg")}"> Review and validate</div>
-      <div class="row">
-        <button class="btn primary" type="button" data-goto="export"><img src="${iconSrcOnAccent("export.svg")}"> Go to Export</button>
-      </div>
-    </div>
-    <div class="chips">
-      <span class="pill status ${errors.length ? "off" : "on"}">${errors.length} error(s)</span>
-      <span class="pill status ${warnings.length ? "warn" : "on"}">${warnings.length} warning(s)</span>
-      ${notes.length ? `<span class="pill">${notes.length} note(s)</span>` : ""}
-      <span class="pill">Virtual machines: ${state.servers.length}</span>
-      <span class="pill">Total vCPU: ${totalCpu}</span>
-      <span class="pill">Total memory: ${totalMem} GB</span>
-      <span class="pill">Data disks: ${dataGb} GB</span>
-      <span class="pill">VHD Sets: ${setGb} GB</span>
-    </div>
-
-    ${gsCard("rev-issues", "search.svg", "Validation", issues.length ? `${issues.length} finding(s)` : "No findings", `
-      ${issues.length
-        ? `<div class="issue-list">${issues.map(i => `
-            <div class="issue ${i.level}">${i.level === "error" ? SVG_ALERT : SVG_INFO}
-              <div class="issue-text">${esc(i.text)}<span class="issue-where">${esc(i.where)}</span></div>
-            </div>`).join("")}</div>`
-        : `<p class="hint">Nothing to flag. The configuration is internally consistent — Deploy still checks the cluster itself (golds, names, storages) before it builds anything.</p>`}
-    `, "", true)}
-
-    ${state.servers.length ? `
-      <div class="card ov-pointer">
-        <img src="${iconSrc("vm-overview.svg")}" alt="">
-        <div><strong>${state.servers.length} virtual machine(s)</strong>
-          <div class="hint">Each VM's address, FQDN, sign-in, hardware, storage and identity is on the VM overview blade.</div></div>
-        <button class="btn" type="button" data-goto="vmoverview"><img src="${iconSrc("vm-overview.svg")}" alt=""> Open VM overview</button>
-      </div>` : ""}
-
     ${gsCard("rev-files", "storage.svg", "Placement", "Where each VM goes on the cluster", `
       <div class="table-wrap"><table class="data"><thead><tr><th>VM</th><th>Image</th><th>Disk</th><th>Node</th><th>Storage</th></tr></thead><tbody>
       ${state.servers.map(s => `<tr><td><b>${esc(s.name || "(no name)")}</b></td><td>${esc(findImage(s.imageId).label)}</td>
-        <td>${s.useDifferencingDisk === false ? "Full copy" : "Linked clone"}${s.osDiskGB ? " · " + esc(s.osDiskGB) + " GB" : ""}</td>
+        <td>${s.useDifferencingDisk === true ? "Linked clone" : "Full copy"}${s.osDiskGB ? " · " + esc(s.osDiskGB) + " GB" : ""}</td>
         <td class="mono">${esc(s.pveNode || state.defaults.pveNode || "the gold's")}</td>
-        <td class="mono">${esc(s.useDifferencingDisk === false ? (s.pveStorage || state.defaults.pveStorage || "the gold's") : "the gold's")}</td></tr>`).join("")}
+        <td class="mono">${esc(s.useDifferencingDisk === true ? "the gold's" : (s.pveStorage || state.defaults.pveStorage || "the gold's"))}</td></tr>`).join("")}
       </tbody></table></div>
     `, "", false)}
 
-    ${gsCard("rev-general", "settings.svg", "General Settings", "Placement, naming, accounts", reviewGeneralRows(), "", false)}
+    ${gsCard("rev-general", "settings.svg", "VM settings", "Placement, naming, accounts", reviewGeneralRows(), "", false)}
 
     ${gsCard("rev-networks", "vnet.svg", "Networks", `${state.networks.length} defined`,
       state.networks.length
@@ -7796,17 +7892,7 @@ function renderReview() {
             (p.authMode === "hostContext" ? "" : kvRow("Application ID", p.servicePrincipalAppId) + kvRow("Secret", p.servicePrincipalSecret ? "Set" : "")) +
             kvRow("Used by", (azureArcAllVmsPrincipal() ? "Every VM in this config" : serversForArcPrincipal(p.id).map(serverDisplayName).join(", ")))
           )).join("")
-        : `<p class="hint">No Arc principals — nothing gets onboarded to Azure Arc.</p>`, "", false)}
-
-    ${gsCard("rev-vhdsets", "disk-pool.svg", "VHD Sets", `${state.vhdSets.length} shared disk(s)`,
-      (cfg.vhdSets || []).length
-        ? (cfg.vhdSets || []).map(v => kvGrid(
-            kvRow("File", v.name + ".vhds") +
-            kvRow("Size / type", `${v.sizeGB} GB ${v.type}`) +
-            kvRow("Attached to", (v.attachTo || []).join(", ")) +
-            kvRow("Path override", v.path)
-          )).join("")
-        : `<p class="hint">No VHD Sets defined.</p>`, "", false)}`;
+        : `<p class="hint">No Arc principals — nothing gets onboarded to Azure Arc.</p>`, "", false)}`;
 }
 
 /* ---------------------------[ Blade: Passwords ]---------------------------
@@ -7918,38 +8004,36 @@ function renderPasswords() {
 
   return `
     <div class="blade-toolbar">
-      <div class="page-title"><img src="${iconSrc("key.svg")}"> Passwords</div>
+      ${bladeTitle("access")}
       <div class="row">
         <button class="btn" type="button" id="sshDownloadAll"${sshRows.some(r => r.priv) ? "" : " disabled"}
           title="${sshRows.some(r => r.priv) ? "Every private key this tab holds, in one ssh-keys.zip" : "No private key in this tab - generate a pair first"}">${downloadIcon()} Download SSH keys</button>
         <button class="btn" type="button" id="pwToggleAll"${rows.length ? "" : " disabled"}>${anyHidden ? eyeIcon() + " Reveal all" : eyeOffIcon() + " Hide all"}</button>
-        <button class="btn primary" type="button" data-goto="export"><img src="${iconSrcOnAccent("export.svg")}"> Go to Export</button>
       </div>
     </div>
+    ${accessTabs("passwords")}
     <div class="chips">
-      <span class="pill">${rows.length} account(s)</span>
+      <span class="pill">${rows.length} account(s)${infoTip("Passwords",
+        `Generated passwords are ${passwordLength()} characters (set in VM settings) with upper case, lower case, a number and a special character, and no ambiguous I/l/1 or O/0. Names and passwords are edited on the Virtual machines blade - this page only reads them back.`)}</span>
       <span class="pill status ${missing ? "off" : "on"}">${missing} without a password</span>
       ${sshRows.length ? `<span class="pill">${sshRows.filter(r => r.pub).length} of ${sshRows.length} Linux VM(s) with an SSH key</span>` : ""}
     </div>
 
-    <div class="warn-box">These are the real passwords. They are part of the lab in the studio's database, and each VM's
+    <div class="warn-box">These are the real passwords. They are part of the design in the studio's database, and each VM's
     seed carries its own only until its first boot is done - then the seed is deleted. Copy works while a row is masked —
     a secret never has to be on screen to reach the clipboard.</div>
 
     ${rows.length
-      ? `<div class="card"><div class="pw-list">${rows.map(renderPasswordRow).join("")}</div></div>
-         <p class="hint" style="margin-top:14px">Generated passwords are ${passwordLength()} characters (set in General Settings) with
-         upper case, lower case, a number and a special character, and no ambiguous <code>I/l/1</code> or <code>O/0</code>. Editing a
-         name or password is still done on the Virtual machines blade — this page only reads them back.</p>`
+      ? `<div class="card"><div class="pw-list">${rows.map(renderPasswordRow).join("")}</div></div>`
       : `<div class="card"><p class="hint" style="margin:0">No virtual machines yet. Add one and its local account appears here with a generated password.</p></div>`}
 
     ${sshRows.length ? `
-      <div class="pw-section"><img src="${iconSrc("keys.svg")}" alt=""> SSH keys</div>
+      <div class="pw-section"><img src="${iconSrc("keys.svg")}" alt=""> SSH keys${infoTip("SSH keys",
+        "Ed25519, one pair per VM. Only the public key goes into the design and the VM. Generating a new pair replaces the VM's key; the downloaded file is <vm>_id_ed25519 - chmod 600 it.")}</div>
       ${sshPending ? `<div class="warn-box">${sshPending} private key(s) not downloaded yet. They are held in this tab and nowhere else — not in
-      the lab, not on the server — so after a reload only the public halves remain.</div>` : ""}
-      <div class="card"><div class="pw-list">${sshRows.map(renderSshKeyRow).join("")}</div></div>
-      <p class="hint" style="margin-top:14px">Ed25519, one pair per VM. Only the public key goes into the lab and the VM.
-      Generating a new pair replaces the VM's key; the downloaded file is <code>&lt;vm&gt;_id_ed25519</code> — <code>chmod 600</code> it.</p>` : ""}`;
+      the design, not on the server — so after a reload only the public halves remain.</div>` : ""}
+      <div class="card"><div class="pw-list">${sshRows.map(renderSshKeyRow).join("")}</div></div>` : ""}
+    ${sshRows.length ? gsCard("ov-ssh", "keys.svg", "Using the SSH keys", "Lock the key file down, then connect - Linux, macOS, Windows", renderSshKeyHowto(), "", false) : ""}`;
 }
 
 /* ---------------------------[ Blade: VM overview ]---------------------------
@@ -8136,10 +8220,12 @@ function renderOverviewCard(s) {
       <span class="card-chevron ov-chev">${chevron()}</span>
       <div class="ov-badge"><img src="${iconSrcBand("vm.svg", band)}" alt=""></div>
       <div class="ov-id">
-        <div class="ov-title"><span class="ov-name">${esc(serverDisplayName(s))}</span><span class="pill role ${pillClass}">${esc(img.kind)}</span>${ovStatusPills(s)}</div>
+        <div class="ov-title"><span class="ov-name">${esc(serverDisplayName(s))}</span><span class="pill role ${pillClass}">${esc(img.kind)}</span>${liveVmPills(s)}${ovStatusPills(s)}</div>
         <div class="ov-os"><img src="${imageIconSrc(img)}" alt="">${esc(img.label)}<span class="ov-sep">·</span>${Number(s.cpuCount) || 0} vCPU · ${Number(s.memoryGB) || 0} GB</div>
       </div>
       <div class="ov-connect">
+        ${(() => { const v = liveVm(s); const url = v && v.status === "ready" ? pveConsoleUrl(v) : "";
+          return url ? `<a class="btn" href="${esc(url)}" target="_blank" rel="noopener" title="Proxmox VE console on ${esc(v.node)}"><img src="${iconSrc("rdp.svg")}" alt=""> Console</a>` : ""; })()}
         ${cmds.map(c => `<button class="btn${c.primary ? " primary" : ""}" type="button" ${c.rdp
           ? `data-ov-rdp="${esc(s._id)}" title="Download ${esc(ovRdpFileName(s))}"`
           : `data-ov-copy="${esc(c.cmd)}" title="Copy: ${esc(c.cmd)}"`}>
@@ -8150,18 +8236,20 @@ function renderOverviewCard(s) {
     <section class="ov-reach">
       <div><div class="ov-label"><img src="${iconSrc("dns.svg")}" alt="">FQDN</div>
         <div class="ov-val">${ovCopy(ovFqdn(s))}</div>
-        <div class="ov-sub">${domain ? (isAdDomainController(s) ? "domain controller for " + esc(domain) : dj ? "registered in DNS on domain join" : "fixed FQDN from General Settings") : isAdDomainController(s) ? "no suffix · set a fixed FQDN in General Settings" : "no domain · name resolves locally only"}</div></div>
+        <div class="ov-sub">${domain ? (isAdDomainController(s) ? "domain controller for " + esc(domain) : dj ? "registered in DNS on domain join" : "fixed FQDN from VM settings") : isAdDomainController(s) ? "no suffix · set a fixed FQDN in VM settings" : "no domain · name resolves locally only"}</div></div>
       <div><div class="ov-label"><img src="${iconSrc("static-ip.svg")}" alt="">IPv4</div>
         ${ip
           ? `<div class="ov-val ov-ip">${ovCopy(ip, `${esc(ip)}<span class="ov-pre">/${prefix}</span>`)}</div>
              <div class="ov-sub">${esc(effectiveNicName(s, 0))} · ${net ? "from " + esc(networkName(net)) : "static"}</div>`
-          : `<div class="ov-val ov-dhcp">DHCP</div><div class="ov-sub">see Deploy after the first boot</div>`}</div>
+          : liveVm(s) && liveVm(s).ip
+            ? `<div class="ov-val ov-ip">${ovCopy(liveVm(s).ip)}</div><div class="ov-sub">DHCP · reported by the guest agent</div>`
+            : `<div class="ov-val ov-dhcp">DHCP</div><div class="ov-sub">shown here once the VM is built and its agent reports</div>`}</div>
       <div><div class="ov-label"><img src="${iconSrc("gateway.svg")}" alt="">Gateway · DNS</div>
         <div class="ov-val">${gw ? ovCopy(gw) : ovOff(ip ? "none" : "from DHCP")}</div>
         <div class="ov-sub">dns ${dns.length ? esc(dns.join(", ")) : (ip ? "none" : "from DHCP")}</div></div>
       <div><div class="ov-label"><img src="${iconSrc("users.svg")}" alt="">Sign in</div>
         <div class="ov-val">${user ? ovCopy(user) : ovOff("not set")}</div>
-        <button class="btn ov-pw" type="button" data-ov-pw="${esc(s._id)}" title="Reveal or copy it on the Passwords blade">Password <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8h10.5M9 4l4 4-4 4"/></svg></button></div>
+        <button class="btn ov-pw" type="button" data-ov-pw="${esc(s._id)}" title="Reveal or copy it on the Passwords tab">Password <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8h10.5M9 4l4 4-4 4"/></svg></button></div>
     </section>
 
     <section class="ov-details">
@@ -8216,6 +8304,60 @@ function renderOverviewCard(s) {
   </article>`;
 }
 
+/* ---------------------------[ Blade: Access ]---------------------------
+   VM overview and Passwords, one blade with two tabs: how to reach each VM - its address,
+   sign-in, connect lines and, once built, its live state from Proxmox VE - and the secrets
+   to do it with. */
+function accessTabs(active) {
+  const tabs = [["machines", "vm-overview.svg", "Machines"], ["passwords", "key.svg", "Passwords and keys"]];
+  return `<div class="blade-tabs" role="tablist">${tabs.map(([id, icon, label]) =>
+    `<button type="button" role="tab" class="blade-tab${active === id ? " on" : ""}" aria-selected="${active === id}" data-access-tab="${id}"><img src="${iconSrc(icon)}" alt="">${label}</button>`).join("")}</div>`;
+}
+function renderAccess() {
+  return state.accessTab === "passwords" ? renderPasswords() : renderVmOverview();
+}
+/* What the studio built from this card, as server.js last read it (/vms). A record belongs to
+   the card it was built from - a new card with the same name is a name clash, not that VM. */
+function liveVm(s) {
+  const vms = (typeof cluster !== "undefined" && cluster.vms) || [];
+  if (!s) return null;
+  const own = vms.find(v => v.card && v.card === s._id);
+  if (own) return own;
+  // A record whose card is no longer in the design (an older copy of the design, an imported
+  // one) belongs to the card that has its name - as the deploy plan already reads it.
+  const name = String(s.name || "").trim().toLowerCase();
+  return (name && vms.find(v => v.name === name && v.status !== "failed" && !(state.servers || []).some(x => x._id === v.card))) || null;
+}
+/* Another VM already carries this card's name: one the studio built from another card (or
+   before cards were recorded), or any guest in Proxmox VE. Deploy refuses it too. */
+function vmNameClash(s) {
+  if (typeof cluster === "undefined") return null;
+  const name = String((s && s.name) || "").trim().toLowerCase();
+  if (!name) return null;
+  const mine = liveVm(s);
+  const rec = (cluster.vms || []).find(v => v.name === name && v.status !== "failed" && v !== mine);
+  if (rec) return { rec, vmid: rec.vmid, node: rec.node, what: "VM" };
+  const g = ((cluster.inventory && cluster.inventory.guests) || [])
+    .find(g => String(g.name || "").toLowerCase() === name && !(mine && mine.vmid === g.vmid));
+  return g ? { vmid: g.vmid, node: g.node, what: g.type === "lxc" ? "CT" : "VM" } : null;
+}
+function liveVmPills(s) {
+  const v = liveVm(s);
+  if (typeof cluster === "undefined" || !cluster.vms) return "";
+  if (!v && vmNameClash(s)) return `<span class="pill status warn" title="Another VM has this name - rename the card">name in use</span>`;
+  if (!v) return `<span class="pill" title="Not on the cluster yet - Deploy builds it">not built</span>`;
+  if (v.status !== "ready") return `<span class="pill status ${{ building: "run", failed: "bad" }[v.status] || "idle"}">${esc(v.status)}</span>`;
+  return `<span class="pill status ${v.power === "running" ? "ok" : "idle"}" title="${esc(v.node)} · VMID ${esc(v.vmid)}">${esc(v.power || "unknown")}</span>`;
+}
+/* Proxmox VE's own noVNC console for a built VM, on the node it runs on. */
+function pveConsoleUrl(v) {
+  const inv = typeof cluster !== "undefined" && cluster.inventory;
+  const node = inv && inv.nodes.find(n => n.node === v.node);
+  if (!node || !node.ip || v.vmid == null) return "";
+  const q = new URLSearchParams({ console: "kvm", novnc: "1", vmid: String(v.vmid), vmname: v.name, node: v.node, resize: "off", cmd: "" });
+  return `https://${node.ip.includes(":") ? "[" + node.ip + "]" : node.ip}:8006/?${q}`;
+}
+
 function renderVmOverview() {
   const servers = state.servers;
   const linux = servers.filter(isLinuxServer).length;
@@ -8226,16 +8368,16 @@ function renderVmOverview() {
 
   return `
     <div class="blade-toolbar">
-      <div class="page-title"><img src="${iconSrc("vm-overview.svg")}"> VM overview</div>
+      ${bladeTitle("access")}
       <div class="row">
         <input class="ov-search" id="ovFilter" type="search" value="${esc(ovFilter)}" placeholder="Filter by name, IP, OS…"
                spellcheck="false" autocomplete="off" aria-label="Filter virtual machines" style="background-image:url('${iconSrc("search.svg")}')">
         <div class="ov-seg" role="group" aria-label="Card density">
           <button class="btn${ovCompact ? "" : " on"}" type="button" data-ov-mode="full">Detailed</button><button class="btn${ovCompact ? " on" : ""}" type="button" data-ov-mode="compact">Compact</button>
         </div>
-        <button class="btn primary" type="button" data-goto="export"><img src="${iconSrcOnAccent("export.svg")}"> Go to Export</button>
       </div>
     </div>
+    ${accessTabs("machines")}
     <div class="chips">
       <span class="pill">${servers.length} VM(s)</span>
       ${servers.length - linux ? `<span class="pill"><img src="${iconSrcBand("vm.svg", "work")}" alt="">${servers.length - linux} Windows</span>` : ""}
@@ -8255,11 +8397,12 @@ function renderVmOverview() {
 function highlightJson(json) {
   const safe = String(json).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   return safe.replace(
-    /("(?:\\.|[^\\"])*"\s*:?)|\b(true|false)\b|\b(null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
-    (m, str, bool, nul, num) => {
-      if (str) return `<span class="${/:\s*$/.test(str) ? "jkey" : "jstr"}">${str}</span>`;
+    /("(?:\\.|[^\\"])*")(\s*:)?|\b(true|false)\b|\b(null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|([{}\[\],])/g,
+    (m, str, colon, bool, nul, num, punct) => {
+      if (str) return colon ? `<span class="jkey">${str}</span><span class="jpunct">${colon}</span>` : `<span class="jstr">${str}</span>`;
       if (bool) return `<span class="jbool">${m}</span>`;
       if (nul) return `<span class="jnull">${m}</span>`;
+      if (punct) return `<span class="jpunct">${m}</span>`;
       return `<span class="jnum">${m}</span>`;
     });
 }
@@ -8328,7 +8471,23 @@ function restoreFocus(snap) {
   }
 }
 
+/* A linked clone only where someone switched it on, on that card. Designs saved while it was
+   a default (Hyper-V's differencing disk was) carry true without the choice: a full copy. */
+function noDefaultLinkedClones() {
+  for (const s of state.servers || []) {
+    if (s.useDifferencingDisk && !s.linkedCloneChosen) s.useDifferencingDisk = false;
+  }
+  for (const p of Object.values((state.defaults && state.defaults.imageProfiles) || {})) {
+    if (p) p.useDifferencingDisk = false;
+  }
+}
+
 function render() {
+  noDefaultLinkedClones();
+  /* Merged blades: an old id lands on its new home, on the matching tab. */
+  if (state.blade === "passwords") state.accessTab = "passwords";
+  else if (state.blade === "vmoverview") state.accessTab = "machines";
+  state.blade = resolveBladeId(state.blade);
   const focusSnapshot = captureFocus();
   hideFloatingTip();
   refreshValidation();
@@ -8344,18 +8503,13 @@ function renderBlade() {
   /* The blades that read the cluster render asynchronously (server.js). */
   const blade = BLADES.find(b => b.id === state.blade);
   if (blade && blade.server) { renderServerBlade(state.blade, main); return; }
-  if (state.blade === "overview") main.innerHTML = renderOverview();
-  else if (state.blade === "general") main.innerHTML = renderGeneral();
+  if (state.blade === "general") main.innerHTML = renderGeneral();
   else if (state.blade === "networks") main.innerHTML = renderNetworksBlade();
-  else if (state.blade === "cluster") main.innerHTML = renderClusterBlade();
   else if (state.blade === "domainjoin") main.innerHTML = renderDomainJoinBlade();
   else if (state.blade === "azurearc") main.innerHTML = renderAzureArcBlade();
+  else if (state.blade === "licenses") main.innerHTML = renderLicensesBlade();
   else if (state.blade === "servers") main.innerHTML = renderServers();
-  else if (state.blade === "vhdsets") main.innerHTML = renderVhdSets();
-  else if (state.blade === "review") main.innerHTML = renderReview();
-  else if (state.blade === "passwords") main.innerHTML = renderPasswords();
-  else if (state.blade === "vmoverview") main.innerHTML = renderVmOverview();
-  else main.innerHTML = renderOverview();
+  else if (state.blade === "access") main.innerHTML = renderAccess();
 }
 
 function addAvailableSwitchFromInput() {
@@ -8431,6 +8585,7 @@ document.getElementById("main").addEventListener("click", e => {
   const goto = e.target.closest("[data-goto]");
   if (goto) {
     state.blade = goto.getAttribute("data-goto");
+    state.imagePickerOpen = null;
     document.getElementById("main").scrollTop = 0;
     render();
     return;
@@ -8638,6 +8793,14 @@ document.getElementById("main").addEventListener("click", e => {
     }
     return;
   }
+  const openWl = e.target.closest("[data-open-wl-picker]");
+  if (openWl) { openMemberPicker("license", openWl.getAttribute("data-open-wl-picker")); return; }
+  const wlDetach = e.target.closest("[data-wl-detach]");
+  if (wlDetach) {
+    const s = state.servers.find(x => x._id === wlDetach.getAttribute("data-wl-detach"));
+    if (s) { detachLicense(s); render(); toast(`${serverDisplayName(s)} detached`); }
+    return;
+  }
   const djDetach = e.target.closest("[data-dj-detach]");
   if (djDetach) {
     const s = state.servers.find(x => x._id === djDetach.getAttribute("data-dj-detach"));
@@ -8773,15 +8936,17 @@ document.getElementById("main").addEventListener("click", e => {
     const imageId = imagePick.getAttribute("data-image-id");
     const s = state.servers.find(x => x._id === sid);
     if (s && imageId) {
-      if (imageId === "__custom__") {
-        s.imageSource = "custom";
-        s.imageHint = s.imageHint || "";
-      } else {
-        s.imageSource = "catalog";
-        s.imageHint = "";
+      s.imageSource = "catalog";
+      s.imageHint = "";
+      if (s.imageId !== imageId) {
         applyImageProfile(s, imageId);
         sanitizeServerFeaturesForImage(s);
       }
+      /* A language only when the image has golds in more than one - otherwise the VM
+         follows whatever its image's newest gold speaks. */
+      s.goldLanguage = imagePick.getAttribute("data-gold-lang") || "";
+      /* A pinned row pins that gold (Build-Vms' -GoldId); a newest row lets go of a pin. */
+      s.goldId = imagePick.getAttribute("data-gold-pin") || "";
       state.imagePickerOpen = null;
       render();
     }
@@ -8803,6 +8968,25 @@ document.getElementById("main").addEventListener("click", e => {
     ensureCatalogStableId(a, "dja");
     state.domainJoinAccounts.push(a);
     state.expanded[a._id] = true;
+    render();
+    return;
+  }
+  if (e.target.id === "addWindowsLicense" || e.target.closest("#addWindowsLicense")) {
+    const w = createWindowsLicense({});
+    state.windowsLicenses = state.windowsLicenses || [];
+    state.windowsLicenses.push(w);
+    state.expanded[w._id] = true;
+    state.nameEdit[`wlkey:${w._id}`] = true;
+    render();
+    return;
+  }
+  const delWl = e.target.closest("[data-del-wl]");
+  if (delWl) {
+    e.stopPropagation();
+    const id = delWl.getAttribute("data-del-wl");
+    const gone = (state.windowsLicenses || []).find(w => w._id === id);
+    if (gone) serversForLicense(gone).forEach(detachLicense);
+    state.windowsLicenses = (state.windowsLicenses || []).filter(w => w._id !== id);
     render();
     return;
   }
@@ -9177,7 +9361,8 @@ document.getElementById("main").addEventListener("click", e => {
     return;
   }
   const toggle = e.target.closest("[data-toggle]");
-  if (toggle && !e.target.closest("[data-del]") && !e.target.closest("[data-del-vs]")) {
+  // A control inside a card head does its own job, it does not fold the card.
+  if (toggle && !e.target.closest("[data-del], [data-del-vs], button, input, select, textarea, a")) {
     const id = toggle.getAttribute("data-toggle");
     // Flip what is actually on screen, not state.expanded[id] — a card that opens by
     // default has no entry yet, and !undefined would re-open it on the first click.
@@ -9247,7 +9432,8 @@ document.getElementById("main").addEventListener("click", e => {
   const ovPw = e.target.closest("[data-ov-pw]");
   if (ovPw) {
     const sid = ovPw.getAttribute("data-ov-pw");
-    state.blade = "passwords";
+    state.blade = "access";
+    state.accessTab = "passwords";
     render();
     const row = document.querySelector(`[data-pw-row="${CSS.escape(sid)}"]`);
     if (row) {
@@ -9262,6 +9448,12 @@ document.getElementById("main").addEventListener("click", e => {
   if (ovCollapse) {
     const sid = ovCollapse.getAttribute("data-ov-collapse");
     ovExpanded[sid] = !ovExpanded[sid];
+    render();
+    return;
+  }
+  const accessTab = e.target.closest("[data-access-tab]");
+  if (accessTab) {
+    state.accessTab = accessTab.getAttribute("data-access-tab");
     render();
     return;
   }
@@ -9356,6 +9548,24 @@ document.getElementById("main").addEventListener("input", e => {
     return;
   }
 
+  const wlId = e.target.getAttribute("data-wl");
+  if (wlId) {
+    const w = (state.windowsLicenses || []).find(x => x._id === wlId);
+    const wk = e.target.getAttribute("data-wk");
+    if (w && wk === "imageId") {
+      w.imageId = e.target.value;
+      serversForLicense(w).filter(s => normalizeImageId(s.imageId) !== w.imageId).forEach(detachLicense);
+      render();
+    }
+    if (w && wk === "productKey") {
+      const v = e.target.value.toUpperCase();
+      w.productKey = v;
+      if (e.target.value !== v) e.target.value = v;
+      e.target.classList.toggle("is-invalid", !!v && !productKeyOk(v));
+      renderNav();
+    }
+    return;
+  }
   const djaId = e.target.getAttribute("data-dja");
   if (djaId) {
     const a = state.domainJoinAccounts.find(x => x._id === djaId);
@@ -9564,7 +9774,9 @@ document.getElementById("main").addEventListener("input", e => {
   // Re-renders (the "Automatic" note follows the value) — the change handler owns it.
   if (k === "djDeferred") return;
   if (k === "useDifferencingDisk" || k === "enableSecureBoot" || k === "enableVtpm" || k === "startAfterCreate") {
-    s[k] = e.target.checked; return;
+    s[k] = e.target.checked;
+    if (k === "useDifferencingDisk") s.linkedCloneChosen = e.target.checked;
+    return;
   }
   // Both re-render (warning banner / delay fields appear) — the change handler owns them.
   if (k === "nestedVirtualization" || k === "automaticStartEnabled" || k === "automaticStartAction") return;
@@ -9904,7 +10116,7 @@ document.getElementById("main").addEventListener("change", e => {
       }
       else if (["useDifferencingDisk","enableSecureBoot","enableVtpm","startAfterCreate"].includes(k)) {
         s[k] = e.target.checked;
-        if (k === "useDifferencingDisk") scheduleRender();
+        if (k === "useDifferencingDisk") { s.linkedCloneChosen = e.target.checked; scheduleRender(); }
       }
       else if (k === "prefixLength") s.prefixLength = Number(e.target.value) || 24;
       else if (k === "switchName" || k === "experience") s[k] = e.target.value;
@@ -10296,6 +10508,11 @@ function openMemberPicker(mode, targetId) {
     ensureCatalogStableId(a, "arc");
     selected = serversForArcPrincipal(a.id).map(s => s.name);
     title = "Azure Arc · " + azureArcPrincipalTitle(a);
+  } else if (mode === "license") {
+    const w = (state.windowsLicenses || []).find(x => x._id === targetId);
+    if (!w) return;
+    selected = serversForLicense(w).map(s => s.name);
+    title = "Windows licence · " + (w.imageId ? findImage(w.imageId).label : "no gold");
   } else if (mode === "cluster") {
     const c = clusterSettings();
     selected = serversForCluster().map(s => s.name);
@@ -10317,6 +10534,8 @@ function openMemberPicker(mode, targetId) {
     ? "Select virtual machines to attach. A VM can belong to only one network."
     : mode === "cluster"
     ? "Select the virtual machines to add to the host failover cluster."
+    : mode === "license"
+    ? "Select the VMs that get this key. A VM has one licence; VMs built from another gold are greyed out."
     : "Select virtual machines to attach. A VM can belong to only one account/principal.";
   document.getElementById("memberPickerFilter").value = "";
   renderMemberPickerList();
@@ -10367,6 +10586,11 @@ function memberPickerVeto(ctx, server) {
   if (ctx.mode === "domainJoin") {
     return imageRefusesDomainJoin(img) ? "realmd and adcli are not packaged for " + (img.label || "this distribution") : "";
   }
+  if (ctx.mode === "license") {
+    const w = (state.windowsLicenses || []).find(x => x._id === ctx.targetId);
+    if (!w || !w.imageId) return "Pick the licence's gold first";
+    return normalizeImageId(server && server.imageId) === w.imageId ? "" : "Builds from " + (img.label || "another image") + " - not this licence's gold";
+  }
   if (ctx.mode !== "azureArc") return "";
   if (imageRefusesAzureArc(img)) return img.noAzureArcReason || ("Azure Arc has no agent for " + (img.label || "this distribution"));
   const a = state.azureArcPrincipals.find(x => x._id === ctx.targetId);
@@ -10412,6 +10636,16 @@ function applyMemberPicker() {
         } else if (s.azureArc && s.azureArc.principalId === a.id) {
           s.azureArc = { enabled: false, principalId: "" };
         }
+      });
+    }
+  } else if (ctx.mode === "license") {
+    const w = (state.windowsLicenses || []).find(x => x._id === ctx.targetId);
+    if (w) {
+      const selected = new Set(ctx.selected);
+      state.servers.forEach(s => {
+        if (!s.name) return;
+        if (selected.has(s.name)) s.windowsLicense = { licenseId: w.id };
+        else if (s.windowsLicense && s.windowsLicense.licenseId === w.id) detachLicense(s);
       });
     }
   } else if (ctx.mode === "cluster") {

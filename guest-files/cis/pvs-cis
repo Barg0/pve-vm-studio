@@ -1,0 +1,189 @@
+#!/bin/bash
+# pvs-cis - applies and checks a CIS Benchmark inside the guest (PVE VM Studio).
+#
+#   pvs-cis fix   --level 1|2 [--exceptions FILE] [--only ID,ID]
+#   pvs-cis check --level 1|2 [--exceptions FILE] [--only ID,ID] [--json FILE]
+#   pvs-cis list
+#
+# The benchmark is picked by /etc/os-release. Exceptions: one "ID<TAB>reason" per line -
+# fix leaves those rules alone, check still runs them and reports "exception".
+set -u
+LIB=${PVS_CIS_LIB:-/usr/local/lib/pvs-cis}
+# shellcheck source=lib.sh
+. "$LIB/lib.sh"
+# shellcheck disable=SC1091
+. /etc/os-release
+
+BENCH_DIR=""
+for d in "$LIB"/*/; do
+    [ -f "$d/bench.conf" ] || continue
+    # DISTRO: one or more ID-VERSION_ID patterns (Enterprise Linux has minor versions: rocky-9.*).
+    # shellcheck disable=SC2254
+    if (. "$d/bench.conf"; set -f; for p in $DISTRO; do case ${PVS_CIS_DISTRO:-$ID-$VERSION_ID} in $p) exit 0 ;; esac; done; exit 1); then BENCH_DIR=$d; fi
+done
+[ -n "$BENCH_DIR" ] || { echo "pvs-cis: no benchmark for $ID $VERSION_ID" >&2; exit 2; }
+# BENCHMARK, VERSION, DISTRO, FAMILY; MAP when the map is shared (Alma, Oracle and Rocky 9
+# are one text: el9/map.tsv).
+MAP=""
+# shellcheck disable=SC1091
+. "$BENCH_DIR/bench.conf"
+MAP_FILE=$BENCH_DIR/map.tsv
+[ -z "$MAP" ] || MAP_FILE=$LIB/$MAP/map.tsv
+
+# The family's rules are keyed by what they check (rule <key> "<title>"); the benchmark's
+# map.tsv says which of them it has, under which number, at which level - the numbers move
+# between benchmark versions, the checks do not.
+declare -A K_TITLE
+rule() { K_TITLE[$1]=$2; }
+# FAMILY may name several folders: later ones add rules and redefine the functions that
+# differ (el on top of deb: dnf, SELinux, firewalld, authselect).
+for fam in ${FAMILY:?bench.conf sets FAMILY}; do
+    for f in "$LIB/$fam"/[0-9]*.sh; do
+        [ -f "$f" ] || continue
+        # shellcheck disable=SC1090
+        . "$f"
+    done
+done
+RULES=()
+declare -A R_LEVEL R_KIND R_TITLE R_KEY
+while IFS=$'\t' read -r id lvl kind key; do
+    case $id in ''|'#'*) continue ;; esac
+    RULES+=("$id")
+    R_LEVEL[$id]=$lvl
+    R_KIND[$id]=$kind
+    R_KEY[$id]=$key
+    R_TITLE[$id]=${K_TITLE[$key]:-$key}
+done < "$MAP_FILE"
+
+cmd=${1:-}
+shift || true
+LEVEL=1
+EXC_FILE=""
+ONLY=""
+JSON=""
+while [ $# -gt 0 ]; do
+    case $1 in
+        --level) LEVEL=$2; shift 2 ;;
+        --exceptions) EXC_FILE=$2; shift 2 ;;
+        --only) ONLY=",$2,"; shift 2 ;;
+        --json) JSON=$2; shift 2 ;;
+        *) echo "pvs-cis: unknown option $1" >&2; exit 2 ;;
+    esac
+done
+declare -A EXC
+# The benchmark's own (exceptions.default beside bench.conf: what the studio deviates from on
+# purpose, with the reason - e.g. HMAC-SHA1 kept for Kerberos on Leap), then the bake's.
+for ef in "$BENCH_DIR/exceptions.default" "$EXC_FILE"; do
+    [ -n "$ef" ] && [ -f "$ef" ] || continue
+    while IFS=$'\t' read -r id why; do
+        case $id in ''|'#'*) continue ;; esac
+        EXC[$id]=${why:-no reason given}
+    done < "$ef"
+done
+
+# The functions of a recommendation: check_<key>/fix_<key>, dashes as underscores.
+fname() { local k=${R_KEY[$1]}; echo "${k//-/_}"; }
+
+# The rules of the profile, in file order.
+selected() {
+    local id
+    for id in "${RULES[@]}"; do
+        [ "${R_LEVEL[$id]}" -le "$LEVEL" ] || continue
+        [ -z "$ONLY" ] || [[ "$ONLY" == *",$id,"* ]] || continue
+        echo "$id"
+    done
+}
+
+# JSON string: backslash, quote, newline, tab; other control characters dropped.
+js() {
+    local s=$1
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\t'/\\t}
+    s=${s//$'\r'/}
+    s=${s//$'\n'/\\n}
+    printf '"%s"' "$(printf '%s' "$s" | tr -d '\000-\010\013\014\016-\037')"
+}
+
+do_fix() {
+    local id f out rc ok=0 failed=0 none=0
+    for id in $(selected); do
+        f=fix_$(fname "$id")
+        if [ -n "${EXC[$id]+x}" ]; then
+            echo "CIS-FIX $id exception"
+            continue
+        fi
+        if ! declare -F "$f" >/dev/null; then
+            none=$((none + 1))
+            continue
+        fi
+        out=$( ("$f") 2>&1 )
+        rc=$?
+        if [ $rc -eq 0 ]; then
+            ok=$((ok + 1))
+        else
+            failed=$((failed + 1))
+            echo "CIS-FIX-FAILED $id rc=$rc ${R_TITLE[$id]}"
+            [ -n "$out" ] && printf '%s\n' "$out" | tail -n 5 | sed 's/^/  | /'
+        fi
+    done
+    echo "CIS-FIX-DONE level $LEVEL: $ok applied, $failed failed, $none without a fix"
+}
+
+do_check() {
+    local id f out rc status pass=0 fail=0 na=0 review=0 exc=0 err=0 first=1 tmp
+    tmp=$(mktemp)
+    for id in $(selected); do
+        f=check_$(fname "$id")
+        if declare -F "$f" >/dev/null; then
+            out=$( ("$f") 2>&1 )
+            rc=$?
+        else
+            out="no check for this rule"
+            rc=9
+        fi
+        case $rc in
+            0) status=pass ;;
+            1) status=fail ;;
+            2) status=na ;;
+            3) status=review ;;
+            *) status=error ;;
+        esac
+        if [ -n "${EXC[$id]+x}" ] && [ "$status" != pass ] && [ "$status" != na ]; then status=exception; fi
+        case $status in
+            pass) pass=$((pass + 1)) ;; fail) fail=$((fail + 1)) ;; na) na=$((na + 1)) ;;
+            review) review=$((review + 1)) ;; exception) exc=$((exc + 1)) ;; *) err=$((err + 1)) ;;
+        esac
+        [ "$status" = pass ] || echo "CIS-$status $id ${R_TITLE[$id]}" >&2
+        out=${out:0:2000}
+        {
+            [ $first -eq 1 ] || printf ',\n'
+            first=0
+            printf '  {"id":%s,"key":%s,"level":%s,"kind":%s,"title":%s,"status":%s,"evidence":%s' \
+                "$(js "$id")" "$(js "${R_KEY[$id]}")" "${R_LEVEL[$id]}" "$(js "${R_KIND[$id]}")" "$(js "${R_TITLE[$id]}")" "$(js "$status")" "$(js "$out")"
+            [ -n "${EXC[$id]+x}" ] && printf ',"reason":%s' "$(js "${EXC[$id]}")"
+            printf '}'
+        } >> "$tmp"
+    done
+    local summary
+    summary=$(printf '"pass":%d,"fail":%d,"na":%d,"review":%d,"exception":%d,"error":%d' $pass $fail $na $review $exc $err)
+    if [ -n "$JSON" ]; then
+        {
+            printf '{"benchmark":%s,"version":%s,"distro":%s,"level":%s,"profile":%s,"checked":%s,"host":%s,\n' \
+                "$(js "$BENCHMARK")" "$(js "$VERSION")" "$(js "$DISTRO")" "$LEVEL" "$(js "level${LEVEL}_server")" \
+                "$(js "$(date -u +%Y-%m-%dT%H:%M:%SZ)")" "$(js "$(hostname)")"
+            printf ' "counts":{%s},\n "results":[\n' "$summary"
+            cat "$tmp"
+            printf '\n]}\n'
+        } > "$JSON"
+    fi
+    rm -f "$tmp"
+    echo "CIS-CHECK-DONE level $LEVEL: $pass pass, $fail fail, $na n/a, $review review, $exc exception, $err error"
+}
+
+case $cmd in
+    fix) do_fix ;;
+    check) do_check ;;
+    list) for id in "${RULES[@]}"; do printf '%s\tL%s\t%s\t%s\t%s\n' "$id" "${R_LEVEL[$id]}" "${R_KIND[$id]}" "${R_TITLE[$id]}" "${R_KEY[$id]}"; done ;;
+    *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac

@@ -1,0 +1,11 @@
+[Unit]
+Description=PVE VM Studio: CIS check and seal of the gold (bake only, runs once)
+After=multi-user.target cloud-final.service qemu-guest-agent.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=0
+ExecStart=/bin/bash /usr/local/lib/pvs-cis/bake/finish.sh
+
+[Install]
+WantedBy=multi-user.target

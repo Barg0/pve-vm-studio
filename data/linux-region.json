@@ -2,8 +2,8 @@
   "about": "Linux golds in New-Vhdx.ps1. 'defaults' is only where the four region menus open - every value can still be picked in the menu. 'keyboards' maps a locale tag to the keyboard the gold gets: 'x11' is the XKB layout (Debian and Ubuntu write it to /etc/default/keyboard), 'x11Variant' an optional XKB variant, and 'console' the console keymap names to try in order on every other family - the first one the image has wins (localectl list-keymaps). A tag not listed here falls back to its region part, lower case (de-DE -> de).",
   "defaults": {
     "language": "en-US",
-    "locale": "de-DE",
-    "keyboard": "de-DE",
+    "locale": "en-US",
+    "keyboard": "en-US",
     "timeZone": ""
   },
   "keyboards": {

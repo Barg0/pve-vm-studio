@@ -52,6 +52,19 @@
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
+  /* One scrollbar for the whole studio, in the theme: a slim rounded thumb in the strong
+     border colour on a clear track, brighter under the pointer. Browsers that take the
+     ::-webkit-scrollbar parts get the rounded thumb; the rest get scrollbar-color. */
+  @supports not selector(::-webkit-scrollbar) {
+    * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+  }
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; border: 3px solid transparent; background-clip: padding-box; min-height: 36px; }
+  ::-webkit-scrollbar-thumb:hover { background-color: var(--fg-muted); }
+  ::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
+  a { color: var(--accent); }
+  a:hover { color: var(--accent-hover, var(--accent)); }
   body { font-family: var(--font); font-size: 13px; color: var(--fg); background: var(--bg); overflow: hidden; }
   button, input, select, textarea { font-family: inherit; color: inherit; }
   .topbar {
@@ -89,6 +102,10 @@
   .nav-badge.err {
     background: color-mix(in srgb, var(--danger) 22%, transparent);
     color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  }
+  .nav-badge.muted {
+    background: color-mix(in srgb, var(--fg-muted) 14%, transparent);
+    color: var(--fg-muted); border-color: color-mix(in srgb, var(--fg-muted) 35%, var(--border));
   }
   .nav-badge.ok {
     background: color-mix(in srgb, var(--success) 20%, transparent);
@@ -243,13 +260,14 @@
   .section.collapsible > .section-body { padding: 0 12px 14px; border-top: 1px solid var(--divider); }
   /* A body that opens straight onto a control needs the gap its first child would
      otherwise have carried itself. */
-  .section.collapsible > .section-body > .toggle:first-child { margin-top: 12px; }
+  .section.collapsible > .section-body > :is(.toggle, .grid-1, .grid-2, .grid-3, .kv-grid, .toggle-grid, label.field):first-child { margin-top: 12px; }
 
   .grid-1 { display: grid; grid-template-columns: 1fr; gap: 12px; }
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
   label.field { display: flex; flex-direction: column; gap: 3px; color: var(--fg-muted); font-size: 12px; }
-  .field-label { display: flex; align-items: center; gap: 6px; }
+  /* min-height = the (i) tip's height: a label with a tip sits as high as one without. */
+  .field-label { display: flex; align-items: center; gap: 6px; min-height: 18px; }
   .field-label img { width: 14px; height: 14px; flex-shrink: 0; }
   input, select, textarea {
     background: var(--bg); border: 1px solid var(--input-border); border-radius: var(--radius);
@@ -302,6 +320,9 @@
   input::-moz-placeholder, textarea::-moz-placeholder {
     color: var(--fg-muted); opacity: .38; font-style: italic;
   }
+  /* A product key is caps only, so the text gets a pixel more room above than below -
+     otherwise it floats high in the box (no descenders to balance it). */
+  input.key-input { font-size: 13px; letter-spacing: .04em; padding: 8px 9px 6px; }
   textarea { min-height: 200px; font-family: var(--mono); font-size: 12px; width: 100%; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   /* Settings-row toggle - ported verbatim from windows-feature-toolbox
@@ -774,14 +795,19 @@
     height: calc(100vh - 306px); min-height: 360px; resize: vertical; overflow: auto;
     margin: 0; padding: 14px 16px; line-height: 1.5;
     font-family: var(--mono); font-size: 12px; tab-size: 2;
-    color: var(--fg-muted); background: var(--bg);
+    color: var(--ps-fg); background: var(--ps-editor-bg);
     border: none; border-radius: var(--radius-lg); white-space: pre;
   }
-  .json-card #jsonPreview .jkey  { color: var(--accent); }
-  .json-card #jsonPreview .jstr  { color: var(--success); }
-  .json-card #jsonPreview .jnum  { color: var(--warn); }
-  .json-card #jsonPreview .jbool { color: var(--danger-text); }
-  .json-card #jsonPreview .jnull { color: var(--danger-text); opacity: .75; }
+  /* Code as Visual Studio colours it, in the theme's own code palette (--ps-*, set by
+     applyTheme): keys like parameters, strings, numbers, keywords - every JSON and code
+     block in the studio shares these. */
+  .jkey  { color: var(--ps-param); }
+  .jstr  { color: var(--ps-string); }
+  .jnum  { color: var(--ps-number); }
+  .jbool, .jnull { color: var(--ps-keyword); }
+  .jpunct { color: var(--ps-operator); }
+  .code-block { margin: 0; padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; line-height: 1.5; tab-size: 2;
+    color: var(--ps-fg); background: var(--ps-editor-bg); border: 1px solid var(--ps-gutter-border); border-radius: var(--radius-lg); overflow: auto; }
 
   /* ---- Overview blade: hero, pipeline strip, numbered steps, blade guide ---- */
   .hero {
@@ -1540,8 +1566,10 @@
     text-align: left; cursor: pointer;
     background: var(--bg); color: var(--fg);
     border: 1px solid var(--input-border); border-radius: var(--radius);
-    padding: 7px 10px; min-height: 34px;
+    padding: 0 10px; height: 32px; /* the inputs' height - side by side they line up */
   }
+  .picker-btn .picker-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .picker-btn .pill { height: 22px; }
   .picker-btn:hover { background: var(--bg-hover); }
   .picker.open .picker-btn {
     border-color: var(--accent);

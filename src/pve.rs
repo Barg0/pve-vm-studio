@@ -30,7 +30,7 @@ pub struct Pve {
 }
 
 /// What POST /access/ticket hands back for a user.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Ticket {
     pub username: String,
     pub ticket: String,
@@ -566,6 +566,8 @@ pub struct Resource {
     pub plugintype: Option<String>,
     pub sdn: Option<String>,
     pub tags: Option<String>,
+    /// The resource pool a guest belongs to.
+    pub pool: Option<String>,
     pub cpu: Option<f64>,
     pub maxcpu: Option<f64>,
     pub mem: Option<u64>,
@@ -633,6 +635,11 @@ pub struct VmStatus {
 impl Pve {
     pub async fn version(&self) -> Result<Version> {
         self.get("/version").await
+    }
+
+    /// The cluster's storage definitions (type, content, sparse, preallocation...).
+    pub async fn storage_configs(&self) -> Result<Vec<Value>> {
+        self.get("/storage").await
     }
 
     pub async fn resources(&self) -> Result<Vec<Resource>> {

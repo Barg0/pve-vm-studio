@@ -1,0 +1,6 @@
+[Unit]
+Description=PVE VM Studio: install a requested update (checks the release's SHA256SUMS itself)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/pve-vm-studio/pvs-update.sh

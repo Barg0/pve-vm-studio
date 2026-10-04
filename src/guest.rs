@@ -18,6 +18,10 @@ pub struct DomainJoin {
     pub sudo_groups: Vec<String>,
     #[serde(default)]
     pub login_groups: Vec<String>,
+    /// Windows: "specialize" joins from the answer file, "deferred" from GuestProvision's
+    /// task after first boot (Build-Vms' domainJoin.mode).
+    #[serde(default)]
+    pub mode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +130,8 @@ pub fn linux_join_commands(dj: &DomainJoin, family: &str) -> Vec<String> {
     if family == "suse" {
         c.push(r#"[ -f /etc/nsswitch.conf ] || cp /usr/etc/nsswitch.conf /etc/nsswitch.conf; sed -i -E '/^(passwd|group):/{/[[:space:]]sss([[:space:]]|$)/!s/$/ sss/}' /etc/nsswitch.conf; grep -E '^(passwd|group):.*sss' /etc/nsswitch.conf >/dev/null && echo NSS-SSS-OK || echo NSS-SSS-MISSING"#.into());
         c.push("pam-config --add --sss --mkhomedir --mkhomedir-umask=0077 && echo MKHOMEDIR-OK || echo MKHOMEDIR-FAILED".into());
+        // pam-config drops use_authtok off pam_pwhistory when it rewrites (a CIS gold has it).
+        c.push(r#"f=/etc/pam.d/common-password; grep -Eq '^password\s.*pam_pwhistory\.so' $f && ! grep -Eq 'pam_pwhistory\.so.*use_authtok' $f && pam-config -a --pwhistory --pwhistory-use_authtok; true"#.into());
     } else if family == "rhel" {
         c.push("sed -i 's/^#*HOME_MODE.*/HOME_MODE\\t0700/' /etc/login.defs; grep -q '^HOME_MODE' /etc/login.defs || printf 'HOME_MODE\\t0700\\n' >> /etc/login.defs; systemctl enable --now oddjobd; authselect select sssd with-mkhomedir --force && echo MKHOMEDIR-OK || echo MKHOMEDIR-FAILED".into());
     } else {
@@ -226,6 +232,7 @@ mod tests {
             ou: String::new(),
             sudo_groups: vec!["Domain Admins".into()],
             login_groups: vec![],
+            mode: String::new(),
         };
         let c = linux_join_commands(&dj, "debian");
         assert!(c.iter().any(|l| l.contains("realm join --install=/ --unattended --user='Administrator' 'ad.example'")));

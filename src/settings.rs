@@ -62,8 +62,10 @@ impl Default for BakeSettings {
             vlan: None,
             cpu: "host".into(),
             cpu_windows: "x86-64-v2-AES".into(),
-            memory_mb: 2048,
-            cores: 2,
+            // New-Vhdx's bake VMs get 4 GB; the Windows bake raised anything smaller to it anyway.
+            memory_mb: 4096,
+            // New-Vhdx gives every bake VM 4 vCPUs.
+            cores: 4,
             timeout_min: 60,
         }
     }
@@ -118,19 +120,22 @@ impl BakeSettings {
                     .ok_or_else(|| anyhow!("storage {wanted} on {node} does not hold '{content}'"));
             }
             let mut fit: Vec<&&Resource> = storages.iter().filter(|s| s.has_content(content)).collect();
-            // Shared storage first (one gold for every node), then the most free space.
+            // Shared storage first (one gold for every node), then a storage of its own over
+            // `local` - the node's root disk, which also carries PVE itself - then the preferred
+            // names, then the most free space.
             fit.sort_by_key(|s| {
                 let free = s.maxdisk.unwrap_or(0).saturating_sub(s.disk.unwrap_or(0));
+                let root = s.storage.as_deref() == Some("local");
                 let preferred = prefer.iter().position(|p| s.storage.as_deref() == Some(*p)).unwrap_or(99);
-                (std::cmp::Reverse(s.shared.unwrap_or(0)), preferred, std::cmp::Reverse(free))
+                (std::cmp::Reverse(s.shared.unwrap_or(0)), root, preferred, std::cmp::Reverse(free))
             });
             fit.first()
                 .and_then(|s| s.storage.clone())
                 .ok_or_else(|| anyhow!("no storage on {node} holds '{content}' - enable it under Datacenter → Storage"))
         };
         let disk_storage = pick(&self.disk_storage, "images", &["local-lvm", "local-zfs"])?;
-        let import_storage = pick(&self.import_storage, "import", &["local"])?;
-        let iso_storage = pick(&self.iso_storage, "iso", &["local"])?;
+        let import_storage = pick(&self.import_storage, "import", &[])?;
+        let iso_storage = pick(&self.iso_storage, "iso", &[])?;
 
         let bridges = pve.bridges(&node).await?;
         let bridge = if self.bridge.is_empty() {
@@ -160,5 +165,54 @@ impl BakeSettings {
             cores: self.cores.max(1),
             timeout_min: self.timeout_min.max(10),
         })
+    }
+}
+
+/// Whether a storage allocates a disk up front ("thick") or on write ("thin") - New-Vhdx's
+/// Fixed/Dynamic. On PVE it is the storage's property, never the disk's: LVM-thin and Ceph
+/// are thin, plain LVM thick, ZFS thick unless the storage is `sparse`, directory-like
+/// storages thick only with `preallocation` full or falloc.
+pub fn provisioning(cfg: &serde_json::Value) -> &'static str {
+    let flag = |k: &str| cfg[k].as_u64() == Some(1) || cfg[k].as_str() == Some("1");
+    match cfg["type"].as_str().unwrap_or("") {
+        "lvm" => "thick",
+        "zfspool" => if flag("sparse") { "thin" } else { "thick" },
+        "dir" | "nfs" | "cifs" | "glusterfs" | "btrfs" => match cfg["preallocation"].as_str() {
+            Some("full" | "falloc") => "thick",
+            _ => "thin",
+        },
+        _ => "thin",
+    }
+}
+
+/// The storages on a node that hold VM disks, each with its provisioning - what the bake
+/// form offers as Thin and Thick.
+pub async fn disk_storages(pve: &Pve, node: &str) -> Result<Vec<serde_json::Value>> {
+    let configs = pve.storage_configs().await?;
+    let res = pve.resources().await?;
+    Ok(res
+        .iter()
+        .filter(|r| r.kind == "storage" && r.node.as_deref() == Some(node) && r.has_content("images") && r.status.as_deref() == Some("available"))
+        .filter_map(|r| {
+            let name = r.storage.clone()?;
+            let cfg = configs.iter().find(|c| c["storage"].as_str() == Some(name.as_str()))?;
+            Some(serde_json::json!({
+                "storage": name, "type": cfg["type"], "shared": r.shared == Some(1),
+                "provisioning": provisioning(cfg), "free": r.maxdisk.unwrap_or(0).saturating_sub(r.disk.unwrap_or(0)),
+            }))
+        })
+        .collect())
+}
+
+impl Placement {
+    /// One bake's own disk storage (the form's Thin / Thick), checked against the node.
+    pub async fn with_disk_storage(mut self, pve: &Pve, wanted: Option<&str>) -> Result<Self> {
+        if let Some(w) = wanted.filter(|w| !w.is_empty()) {
+            if !disk_storages(pve, &self.node).await?.iter().any(|s| s["storage"].as_str() == Some(w)) {
+                bail!("storage {w} does not hold VM disks on {}", self.node);
+            }
+            self.disk_storage = w.to_owned();
+        }
+        Ok(self)
     }
 }

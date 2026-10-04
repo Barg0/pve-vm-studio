@@ -1,0 +1,8 @@
+[Unit]
+Description=PVE VM Studio: watch for an update request
+
+[Path]
+PathExists=/var/lib/pve-vm-studio/update/request
+
+[Install]
+WantedBy=multi-user.target

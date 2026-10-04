@@ -22,7 +22,36 @@ pub struct BakeOptions {
     pub updates: bool,
     /// None keeps the image's own region (en_US, UTC, us keyboard as shipped).
     pub region: Option<Region>,
+    /// The system disk in GiB (New-Vhdx's -VhdSizeGB); None = the catalog's size.
+    #[serde(default)]
+    pub disk_gb: Option<u32>,
+    /// This bake's disk storage - its provisioning is the gold's thin or thick; None = the
+    /// bake settings' storage.
+    #[serde(default)]
+    pub disk_storage: Option<String>,
+    /// CIS hardening (docs/cis-benchmark.md); None or level 0 = off.
+    #[serde(default)]
+    pub cis: Option<crate::cis::CisOptions>,
 }
+
+impl BakeOptions {
+    /// The CIS level this bake applies - 0 when off or the image has no benchmark.
+    pub fn cis_level(&self, image: &str) -> u8 {
+        match (&self.cis, crate::cis::benchmark_for(image)) {
+            (Some(c), Some(_)) if (1..=2).contains(&c.level) => c.level,
+            _ => 0,
+        }
+    }
+}
+
+/// The seed disk's slot on a Linux VM: virtio-scsi, which every cloud kernel has (Debian 12's
+/// has no AHCI, so no SATA); the last SCSI slot, clear of the data disks (scsi1...).
+pub const SEED_SLOT: &str = "scsi30";
+
+/// Where the CIS bundle lives in the gold.
+pub const CIS_LIB: &str = "/usr/local/lib/pvs-cis";
+/// A CIS Level 2 gold's root partition; the rest of the disk is the LVM volumes.
+pub const CIS_ROOT_GB: u32 = 12;
 
 fn yes() -> bool {
     true
@@ -225,6 +254,12 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
         }
     }
 
+    // Level 2 keeps cloud-init's growpart: the bake disk is ROOT_GB on the first boot, so the
+    // root grows to ROOT_GB there - the image's own root (Ubuntu: 2.3 GB) is too small for the
+    // upgrade. /etc/growroot-disabled (runcmd) stops it on the second boot, after the studio
+    // grew the disk; the agent, which triggers that, answers only after cloud-init's init stage.
+    let cis = opt.cis_level(img.id);
+
     // bootcmd: what has to be settled before the package module, which is the first
     // thing in the final stage.
     let mut boot: Vec<String> = Vec::new();
@@ -249,17 +284,31 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
         // bake from the start - and put back as the distribution had it before the gold
         // is sealed.
         boot.push("if [ -f /etc/sysconfig/qemu-ga ] && [ ! -f /run/pvs-qemu-ga.orig ]; then cp -a /etc/sysconfig/qemu-ga /run/pvs-qemu-ga.orig; sed -i -e 's/^BLOCK_RPCS=.*/BLOCK_RPCS=/' -e 's/^FILTER_RPC_ARGS=.*/FILTER_RPC_ARGS=/' /etc/sysconfig/qemu-ga; systemctl restart --no-block qemu-guest-agent 2>/dev/null || true; fi".into());
-        // SELinux confines the agent to its own files; this boolean lets it read the
-        // report and cloud-init's log. Runtime only (no -P): gone at the next boot, so
-        // the gold keeps the distribution's policy.
+    }
+    if family == "suse" {
+        // Hyper-V Studio's Leap finding: a getty taking ttyS0 hangs the port up and took
+        // cloud-init's final stage down with it mid-zypper. Off for this boot only.
+        boot.push("systemctl mask --runtime --now serial-getty@ttyS0.service 2>/dev/null || true".into());
+    }
+    if family == "rhel" || family == "suse" {
+        // SELinux (EL; openSUSE Leap 16 enforcing too) confines the agent to its own files;
+        // this boolean lets it read the report and cloud-init's log. Runtime only (no -P):
+        // gone at the next boot, so the gold keeps the distribution's policy.
         boot.push("command -v setsebool >/dev/null && setsebool virt_qemu_ga_read_nonsecurity_files on 2>/dev/null || true".into());
     }
     if family == "rhel" {
         boot.push(r#"printf "\ntimeout=20\nretries=2\n" >> /etc/dnf/dnf.conf"#.into());
     }
+    if cis > 0 {
+        // The CIS bundle from the seed disk (pvs-cis/) into the image - once; bootcmd runs
+        // on every boot.
+        boot.push(format!(
+            "if [ ! -x {CIS_LIB}/pvs-cis ]; then mkdir -p /run/pvs-seed && mount -o ro /dev/disk/by-label/CIDATA /run/pvs-seed && rm -rf {CIS_LIB} && cp -r /run/pvs-seed/pvs-cis {CIS_LIB}; umount /run/pvs-seed; chown -R root:root {CIS_LIB}; find {CIS_LIB} -type d -exec chmod 0755 {{}} +; find {CIS_LIB} -type f -exec chmod 0644 {{}} +; chmod 0755 {CIS_LIB}/pvs-cis {CIS_LIB}/layout.sh; ln -sf {CIS_LIB}/pvs-cis /usr/local/sbin/pvs-cis; mkdir -p /etc/pvs-cis; chmod 0700 /etc/pvs-cis; mv {CIS_LIB}/level {CIS_LIB}/exceptions /etc/pvs-cis/; echo BAKE-CIS-BUNDLE $(ls {CIS_LIB}/*/bench.conf | wc -l) benchmark >> /run/pvs-cis-boot.log; fi"
+        ));
+    }
     if distro == "oracle" {
         // Root is an LV, which growpart skips outright - partition, PV and LV grown here.
-        boot.push(r#"root=$(findmnt -no SOURCE /); case "$root" in /dev/mapper/*) pv=$(pvs --noheadings -o pv_name 2>/dev/null | head -n1 | tr -d " "); part=$(basename "$(readlink -f "$pv")"); disk=$(lsblk -dno PKNAME "/dev/$part"); num=$(cat "/sys/class/block/$part/partition"); growpart "/dev/$disk" "$num"; pvresize "$pv" && lvextend -r -l +100%FREE "$root"; echo BAKE-LVM-ROOT $(lvs --noheadings -o lv_size "$root" 2>/dev/null | tr -d " ") >> /run/pvs-bake.report ;; esac"#.into());
+        boot.push(r#"[ -e /etc/growroot-disabled ] || root=$(findmnt -no SOURCE /); case "${root:-}" in /dev/mapper/*) pv=$(pvs --noheadings -o pv_name 2>/dev/null | head -n1 | tr -d " "); part=$(basename "$(readlink -f "$pv")"); disk=$(lsblk -dno PKNAME "/dev/$part"); num=$(cat "/sys/class/block/$part/partition"); growpart "/dev/$disk" "$num"; pvresize "$pv" && lvextend -r -l +100%FREE "$root"; echo BAKE-LVM-ROOT $(lvs --noheadings -o lv_size "$root" 2>/dev/null | tr -d " ") >> /run/pvs-bake.report ;; esac"#.into());
     }
     // fastfetch lives in EPEL on the EL rebuilds, and EPEL has to exist before the
     // package module runs.
@@ -282,7 +331,7 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
     }
 
     // One write_files key for all of them - a second one is a YAML error, not a merge.
-    if region.is_some() || has("aliases") || has("fastfetch") || has("prompt") {
+    if region.is_some() || has("aliases") || has("fastfetch") || has("prompt") || has("pskeys") {
         ud.line("write_files:");
     }
     if region.is_some() {
@@ -308,6 +357,31 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
             "      alias la='ls -A'",
             "      alias ..='cd ..'",
             "      alias cd..='cd ..'",
+        ]);
+    }
+    if has("pskeys") {
+        // Readline keys as PowerShell has them; included from /etc/inputrc (runcmd below), so
+        // the distribution's own bindings stay and these come last.
+        ud.lines(&[
+            "  - path: /etc/inputrc.d/pvs-keys.inputrc",
+            "    permissions: '0644'",
+            "    content: |",
+            "      # Baked by PVE VM Studio: PowerShell-style keys.",
+            "      # Ctrl+Left / Ctrl+Right: a word back / forward",
+            r#"      "\e[1;5D": backward-word"#,
+            r#"      "\e[5D": backward-word"#,
+            r#"      "\e[1;5C": forward-word"#,
+            r#"      "\e[5C": forward-word"#,
+            "      # Ctrl+Backspace / Ctrl+Delete: delete a word back / forward",
+            r#"      "\C-h": backward-kill-word"#,
+            r#"      "\e[127;5u": backward-kill-word"#,
+            r#"      "\e[7;5~": backward-kill-word"#,
+            r#"      "\e[3;5~": kill-word"#,
+            "      # Home / End",
+            r#"      "\e[H": beginning-of-line"#,
+            r#"      "\e[F": end-of-line"#,
+            r#"      "\eOH": beginning-of-line"#,
+            r#"      "\eOF": end-of-line"#,
         ]);
     }
     if has("fastfetch") {
@@ -364,6 +438,22 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
     ud.line("runcmd:");
     // The studio reads the report through the agent; the agent must be up for that.
     ud.cmd("systemctl enable qemu-guest-agent 2>/dev/null; systemctl restart qemu-guest-agent 2>/dev/null || true");
+    if cis == 2 {
+        // Level 2's volumes are made on the second boot, before the local filesystems mount
+        // (pvs-cis-layout.service). Here growpart has taken the root to the ROOT_GB disk;
+        // /etc/growroot-disabled stops it (and Debian's initramfs growroot) from then on, and
+        // BAKE-GROW-READY tells the studio to grow the disk for the volumes. lvm2 now, while
+        // there is network.
+        // KIWI-built images (openSUSE Leap) grow the root to the whole disk in the initramfs at
+        // EVERY boot (55kiwi-repart, no oem-resize-once): left out of the initramfs through
+        // dracut's own configuration, before the studio grows the disk.
+        ud.cmd(&format!(
+            "if [ -d /usr/lib/dracut/modules.d/55kiwi-repart ]; then printf 'omit_dracutmodules+=\" kiwi-repart \"\\n' > /etc/dracut.conf.d/99-pvs-cis-no-repart.conf && dracut -f --regenerate-all >/dev/null 2>&1 && echo BAKE-KIWI-REPART-OFF >> {REPORT}; fi"
+        ));
+        ud.cmd(&format!(
+            "touch /etc/growroot-disabled; {{ command -v pvcreate >/dev/null && command -v mkfs.ext4 >/dev/null; }} || {{ if command -v apt-get >/dev/null; then DEBIAN_FRONTEND=noninteractive apt-get install -y -q lvm2; elif command -v zypper >/dev/null; then zypper -n -q install --no-recommends lvm2 e2fsprogs; else dnf -y -q install lvm2 e2fsprogs; fi; }} >/dev/null 2>&1; mkdir -p /etc/pvs-cis && echo ROOT_GB={CIS_ROOT_GB} > /etc/pvs-cis/layout.wanted; echo BAKE-GROW-READY >> {REPORT}"
+        ));
+    }
     if let (Some(r), Some(lang), Some(fmt)) = (region, &lang, &fmt) {
         // LANG is the language, the nine LC_* format variables the format locale,
         // LC_MESSAGES left on LANG. How a locale comes to exist is per family.
@@ -420,7 +510,15 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
     }
     if has("fastfetch") {
         // Interactive shells only - a banner in a non-interactive one breaks scp.
+        // cloud-init made /etc/skel/.config 0755 for the config file; a home's dot folders are
+        // its user's (CIS 7.2.11 wants 0750 at most).
+        ud.cmd("chmod 0750 /etc/skel/.config /etc/skel/.config/fastfetch 2>/dev/null || true");
         ud.cmd(r#"grep -q pvs-fastfetch /etc/skel/.bashrc || echo 'command -v fastfetch >/dev/null 2>&1 && case $- in *i*) fastfetch; printf "\n\n" ;; esac # pvs-fastfetch' >> /etc/skel/.bashrc"#);
+    }
+    if has("pskeys") {
+        // openSUSE ships its inputrc in /usr/etc: the /etc copy then replaces it, so it starts
+        // as that copy. A ~/.inputrc of a user's own replaces both - readline reads one file.
+        ud.cmd(r#"[ -f /etc/inputrc ] || cp /usr/etc/inputrc /etc/inputrc 2>/dev/null || touch /etc/inputrc; grep -q pvs-keys.inputrc /etc/inputrc || printf '\n$include /etc/inputrc.d/pvs-keys.inputrc\n' >> /etc/inputrc"#);
     }
     if has("quietmotd") {
         if distro == "ubuntu" {
@@ -430,38 +528,89 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
         ud.cmd("touch /etc/skel/.hushlogin /root/.hushlogin");
     }
 
-    // Generalize: the gold must carry no identity of its own.
-    ud.line("  - [ cloud-init, clean, '--logs', '--machine-id' ]");
-    ud.cmd("rm -f /etc/ssh/ssh_host_*");
+    // Generalize: the gold must carry no identity of its own. (command, part of the report)
+    let mut seal: Vec<(String, bool)> = vec![("cloud-init clean --logs --machine-id".into(), false), ("rm -f /etc/ssh/ssh_host_*".into(), false)];
     for p in network_artifacts(family) {
-        ud.cmd(&format!("rm -f {p}"));
+        seal.push((format!("rm -f {p}"), false));
     }
     // Rocky 9's ifcfg renderer keeps an existing resolv.conf's servers ahead of the
     // seed's. Emptied only when it is a plain file - on Fedora it is resolved's symlink.
     if family == "rhel" || family == "suse" {
-        ud.cmd("[ -L /etc/resolv.conf ] || : > /etc/resolv.conf");
+        seal.push(("[ -L /etc/resolv.conf ] || : > /etc/resolv.conf".into(), false));
     }
-    ud.cmd("truncate -s 0 /etc/machine-id");
-    ud.cmd(": > /etc/hostname");
+    seal.push(("truncate -s 0 /etc/machine-id".into(), false));
+    seal.push((": > /etc/hostname".into(), false));
     // The bake's journal sits under its machine-id and would read as the VM's own.
-    ud.cmd("journalctl --relinquish-var && rm -rf /var/log/journal/*");
+    seal.push(("journalctl --relinquish-var && rm -rf /var/log/journal/*".into(), false));
+    if cis > 0 {
+        // The bake's audit trail and any integrity database are the bake's, not a clone's.
+        seal.push(("find /var/log/audit -type f -delete 2>/dev/null; rm -f /var/lib/aide/aide.db /var/lib/aide/aide.db.new /var/lib/aide/aide.db.gz /var/lib/aide/aide.db.new.gz".into(), false));
+    }
     // Ubuntu 26.04's dracut initrd is hostonly and copied the bake's hostname and
     // machine-id into itself; rebuilt now both are empty.
     if distro == "ubuntu" {
-        ud.report("if dpkg -s dracut >/dev/null 2>&1; then update-initramfs -u -k all >/dev/null 2>&1 && echo BAKE-INITRD-REBUILT || echo BAKE-INITRD-FAILED; fi");
+        seal.push(("if dpkg -s dracut >/dev/null 2>&1; then update-initramfs -u -k all >/dev/null 2>&1 && echo BAKE-INITRD-REBUILT || echo BAKE-INITRD-FAILED; fi".into(), true));
     }
     // Fedora's btrfs mount points under the var/home subvolumes stay unlabeled_t forever
     // unless they are labelled from underneath.
-    ud.report(r#"if command -v matchpathcon >/dev/null && selinuxenabled 2>/dev/null && [ "$(findmnt -no FSTYPE /)" = btrfs ]; then dev=$(findmnt -no SOURCE / | sed "s/\[.*//"); rs=$(findmnt -no FSROOT /); t=$(mktemp -d); if mount -o subvolid=5 "$dev" "$t"; then findmnt -rn -t btrfs -o TARGET | grep -vx / | while read -r m; do h="$t$rs$m"; [ -d "$h" ] || continue; want=$(matchpathcon -n "$m"); have=$(stat -c %C "$h"); if [ "$have" != "$want" ]; then chcon "$want" "$h" && echo "BAKE-RELABEL $m $have -> $want" || echo "BAKE-RELABEL-FAILED $m"; fi; done; umount "$t"; fi; rmdir "$t"; fi"#);
+    seal.push((r#"if command -v matchpathcon >/dev/null && selinuxenabled 2>/dev/null && [ "$(findmnt -no FSTYPE /)" = btrfs ]; then dev=$(findmnt -no SOURCE / | sed "s/\[.*//"); rs=$(findmnt -no FSROOT /); t=$(mktemp -d); if mount -o subvolid=5 "$dev" "$t"; then findmnt -rn -t btrfs -o TARGET | grep -vx / | while read -r m; do h="$t$rs$m"; [ -d "$h" ] || continue; want=$(matchpathcon -n "$m"); have=$(stat -c %C "$h"); if [ "$have" != "$want" ]; then chcon "$want" "$h" && echo "BAKE-RELABEL $m $have -> $want" || echo "BAKE-RELABEL-FAILED $m"; fi; done; umount "$t"; fi; rmdir "$t"; fi"#.into(), true));
     if family == "rhel" {
         // Back to the distribution's agent policy - after the next start, which is a VM's.
-        ud.cmd("[ -f /run/pvs-qemu-ga.orig ] && cp -a /run/pvs-qemu-ga.orig /etc/sysconfig/qemu-ga || true");
+        seal.push(("[ -f /run/pvs-qemu-ga.orig ] && cp -a /run/pvs-qemu-ga.orig /etc/sysconfig/qemu-ga || true".into(), false));
     }
     // Last: the diagnostic account, once nothing can need it any more.
-    ud.cmd("userdel -f -r bake 2>/dev/null || true");
-    ud.cmd("rm -f /etc/sudoers.d/90-cloud-init-users");
-    // The signal the studio waits for. It then shuts the VM down through the API.
-    ud.cmd(&format!("sync; echo BAKE-OK >> {REPORT}"));
+    seal.push(("userdel -f -r bake 2>/dev/null || true".into(), false));
+    seal.push(("rm -f /etc/sudoers.d/90-cloud-init-users".into(), false));
+
+    if cis > 0 {
+        // CIS: harden now, reboot, and check the system as it then is - pvs-cis-finish.service
+        // runs the check on the second boot, then this same generalize, then BAKE-OK.
+        // What bootcmd noted (the bundle, the Level 2 volumes) joins the report here.
+        ud.report("cat /run/pvs-cis-boot.log 2>/dev/null; [ -f /etc/pvs-cis/layout.failed ] && echo BAKE-LAYOUT-FAILED $(cat /etc/pvs-cis/layout.failed); true");
+        if cis == 2 && distro == "ubuntu" {
+            // Level 2 takes squashfs away (1.1.1.7): snaps could no longer mount.
+            ud.report("if dpkg -s snapd >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get purge -y -q snapd >/dev/null 2>&1 && echo BAKE-CIS-SNAPD-PURGED || echo BAKE-CIS-SNAPD-KEPT; fi; sed -i -E 's#:/snap/bin##g' /etc/environment");
+        }
+        ud.report(&format!("pvs-cis fix --level {cis} --exceptions /etc/pvs-cis/exceptions | tee /etc/pvs-cis/fix.log | grep -E '^(CIS-FIX-(FAILED|DONE)|  [|] )'"));
+        // Later fixes install packages (auditd, aide, ufw...) that can pull in what chapter 2
+        // removed, bring SUID programs the privileged-commands audit rule does not list yet, or (ufw on
+        // Debian) bring their own sysctl file over chapter 3's network settings: those rules
+        // once more, now that everything is in.
+        ud.report(&format!(r#"pvs-cis fix --level {cis} --exceptions /etc/pvs-cis/exceptions --only $(pvs-cis list | awk -F'\t' '$1 ~ /^2\./ || $1 ~ /^3\.3\./ || $5 == "audit-use-of-suid-sgid-programs" {{ print $1 }}' | paste -sd,) | sed 's/^CIS-FIX-DONE/CIS-FIX-DONE second pass,/' | tee -a /etc/pvs-cis/fix.log | grep -E '^(CIS-FIX-(FAILED|DONE)|  [|] )'"#));
+        ud.cmd("[ -f /run/pvs-cis/grub-password ] && install -m 0600 /run/pvs-cis/grub-password /root/.pvs-cis-grub-password || true");
+        let script: String = std::iter::once("#!/bin/bash\n# PVE VM Studio: generalize the gold (CIS bake, second boot).\n".to_owned())
+            .chain(seal.iter().map(|(c, report)| if *report { format!("{{ {c}; }} 2>&1 | tee -a {REPORT}\n") } else { format!("{c}\n") }))
+            .collect();
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(script);
+        ud.cmd(&format!("echo {b64} | base64 -d > {CIS_LIB}/generalize.sh && chmod 0700 {CIS_LIB}/generalize.sh"));
+        let units = if cis == 2 { "pvs-cis-finish.service pvs-cis-layout.service" } else { "pvs-cis-finish.service" };
+        // The units are for the next boot: some images start a unit enabled now in this boot
+        // (Oracle Linux - cloud-final before multi-user.target); they compare this boot's id.
+        ud.cmd("cat /proc/sys/kernel/random/boot_id > /etc/pvs-cis/boot1.id");
+        ud.cmd(&format!("install -m 0644 {CIS_LIB}/bake/*.service {CIS_LIB}/units/*.service /etc/systemd/system/ && systemctl daemon-reload && systemctl enable {units}"));
+        if cis == 2 {
+            // The root partition before the reboot - Level 2's layout needs it at ROOT_GB.
+            ud.cmd(&format!(r#"echo "BAKE-ROOT-SIZE root $(lsblk -bdno SIZE "$(findmnt -no SOURCE /)" | numfmt --to=iec) disk $(lsblk -bdno SIZE "/dev/$(lsblk -snlo NAME,TYPE "$(findmnt -no SOURCE /)" | awk '$2 == "disk" {{ print $1; exit }}')" | numfmt --to=iec) cloud-init: $(grep -h 'cc_growpart' /var/log/cloud-init.log 2>/dev/null | grep -Eo '(resized|changed|disabled|NOCHANGE|skip)[^,]*' | tr '
+' ' ' | cut -c1-200)" >> {REPORT}"#));
+        }
+        ud.cmd(&format!("echo BAKE-CIS-REBOOT >> {REPORT}"));
+        // This boot's report (kernel, packages, locales) outlives the reboot in /etc - the
+        // second boot puts it back in front of its own, so the studio judges it as always.
+        ud.cmd(&format!("cp {REPORT} /etc/pvs-cis/boot1.report && sync && echo PVS-BOOT1-SAVED $(wc -l < /etc/pvs-cis/boot1.report) lines"));
+        // cloud-init reboots once its final stage is done.
+        ud.lines(&["power_state:", "  mode: reboot", "  delay: now", "  message: 'PVE VM Studio: CIS - reboot into the hardened system for the check'", "  condition: true"]);
+    } else {
+        for (c, report) in &seal {
+            if *report {
+                ud.report(c);
+            } else {
+                ud.cmd(c);
+            }
+        }
+        // The signal the studio waits for. It then shuts the VM down through the API.
+        ud.cmd(&format!("sync; echo BAKE-OK >> {REPORT}"));
+    }
 
     ud.text()
 }
@@ -486,6 +635,9 @@ pub struct VmSeed {
     pub domain_join: Option<crate::guest::DomainJoin>,
     #[serde(default)]
     pub arc: Option<crate::guest::AzureArc>,
+    /// Cloned from a CIS gold.
+    #[serde(default)]
+    pub cis: bool,
 }
 
 /// One network adapter of a VM, as the seed describes it: matched by its MAC, a static
@@ -525,17 +677,30 @@ pub fn vm_user_data(img: &LinuxImage, s: &VmSeed) -> String {
     ud.line("users:");
     ud.line(format!("  - name: {}", s.user));
     ud.line(format!("    groups: [{}]", admin_group(img.family)));
-    ud.lines(&["    shell: /bin/bash", "    sudo: 'ALL=(ALL) NOPASSWD:ALL'", "    lock_passwd: false"]);
+    // A CIS gold asks for the password on sudo (5.2.4) - the studio always sets one.
+    let sudo = if s.cis { "ALL=(ALL) ALL" } else { "ALL=(ALL) NOPASSWD:ALL" };
+    ud.lines(&["    shell: /bin/bash", &format!("    sudo: '{sudo}'"), "    lock_passwd: false"]);
     if !s.ssh_key.trim().is_empty() {
         ud.line("    ssh_authorized_keys:");
         ud.line(format!("      - {}", sq(s.ssh_key.trim())));
     }
     // In clear, as on Hyper-V: the seed is detached and deleted after this boot, and the
     // scrub below takes cloud-init's own copies of it off the disk.
-    ud.lines(&["chpasswd:", "  expire: false", "  users:"]);
-    ud.line(format!("    - name: {}", s.user));
-    ud.line(format!("      password: {}", sq(&s.password)));
-    ud.lines(&["      type: text", "ssh_pwauth: true"]);
+    if s.cis {
+        // A CIS gold's PAM would judge the password (pwquality, enforce_for_root) and could
+        // refuse it, leaving the admin without one: set as a hash, past PAM (runcmd below).
+        ud.line("ssh_pwauth: true");
+    } else {
+        ud.lines(&["chpasswd:", "  expire: false", "  users:"]);
+        ud.line(format!("    - name: {}", s.user));
+        ud.line(format!("      password: {}", sq(&s.password)));
+        ud.lines(&["      type: text", "ssh_pwauth: true"]);
+    }
+    if s.cis {
+        // The gold's apt sources are CIS's (HTTPS, Signed-By); cloud-init would render its
+        // own http:// ones for the new instance.
+        ud.lines(&["apt:", "  preserve_sources_list: true"]);
+    }
     let mut packages: Vec<String> = s.packages.clone();
     if dj.is_some() {
         packages.extend(crate::guest::join_packages(img.family).iter().map(|p| p.to_string()));
@@ -552,6 +717,14 @@ pub fn vm_user_data(img: &LinuxImage, s: &VmSeed) -> String {
         }
     }
     ud.line("runcmd:");
+    if s.cis {
+        let shq = |v: &str| format!("'{}'", v.replace('\'', "'\\''"));
+        ud.cmd(&format!(
+            "h=$(printf '%s' {pw} | openssl passwd -6 -stdin) && usermod -p \"$h\" {user} && echo PVS-PASSWORD-SET || echo PVS-PASSWORD-FAILED",
+            pw = shq(&s.password),
+            user = shq(&s.user)
+        ));
+    }
     if let Some(d) = dj {
         for c in crate::guest::linux_join_commands(d, img.family) {
             ud.cmd(&c);
@@ -635,7 +808,8 @@ mod tests {
                     ou: "OU=Linux,DC=ad,DC=example".into(),
                     sudo_groups: vec!["Domain Admins".into()],
                     login_groups: vec!["Linux Users".into()],
-                }),
+                    mode: String::new(),
+            }),
                 arc: Some(crate::guest::AzureArc {
                     auth_mode: "servicePrincipal".into(),
                     app_id: "app".into(),
@@ -645,6 +819,7 @@ mod tests {
                     resource_group: "rg".into(),
                     location: "westeurope".into(),
                 }),
+                cis: false,
             };
             let ud = vm_user_data(img, &seed);
             assert!(ud.contains("realm join") && ud.contains("azcmagent connect"));
@@ -680,14 +855,47 @@ mod tests {
                 keyboard: "de-DE".into(),
                 timezone: "Europe/Berlin".into(),
             }),
+            disk_gb: None,
+            disk_storage: None,
+            cis: None,
         };
         for img in catalog::LINUX {
             let ud = bake_user_data(img, &opt);
             assert!(ud.starts_with("#cloud-config\n"));
             assert!(ud.contains("BAKE-OK"));
+            assert!(ud.contains(r#""\e[1;5D": backward-word"#) && ud.contains("$include /etc/inputrc.d/pvs-keys.inputrc"));
             std::fs::write(dir.join(format!("{}.yaml", img.id)), ud).unwrap();
         }
         let plain = bake_user_data(catalog::linux("debian13").unwrap(), &BakeOptions { updates: true, ..Default::default() });
         std::fs::write(dir.join("debian13-plain.yaml"), plain).unwrap();
+
+        // CIS: hardening, then a reboot - BAKE-OK comes from the second boot, not runcmd.
+        let u = catalog::linux("ubuntu2604").unwrap();
+        for level in [1u8, 2] {
+            let cis_opt = BakeOptions { cis: Some(crate::cis::CisOptions { level, exceptions: vec![] }), ..opt.clone() };
+            assert_eq!(cis_opt.cis_level(u.id), level);
+            let ud = bake_user_data(u, &cis_opt);
+            assert!(ud.contains("pvs-cis fix --level") && ud.contains("mode: reboot") && !ud.contains("echo BAKE-OK"));
+            assert_eq!(ud.contains("/etc/pvs-cis/layout.wanted") && ud.contains("growroot-disabled"), level == 2);
+            assert!(!ud.contains("growpart:"));
+            std::fs::write(dir.join(format!("ubuntu2604-cis{level}.yaml")), ud).unwrap();
+        }
+        // No CIS benchmark for Fedora: the option is ignored. Debian 13 has Ubuntu 26.04's.
+        let d = BakeOptions { cis: Some(crate::cis::CisOptions { level: 2, exceptions: vec![] }), ..opt.clone() };
+        assert_eq!(d.cis_level("fedora44"), 0);
+        assert!(bake_user_data(catalog::linux("fedora44").unwrap(), &d).contains("echo BAKE-OK"));
+        // Enterprise Linux: lvm2 by dnf.
+        assert_eq!(d.cis_level("rocky10"), 2);
+        let el = bake_user_data(catalog::linux("rocky10").unwrap(), &d);
+        assert!(el.contains("pvs-cis fix --level 2") && el.contains("dnf -y -q install lvm2 e2fsprogs") && !el.contains("snapd"));
+        std::fs::write(dir.join("rocky10-cis2.yaml"), el).unwrap();
+        assert_eq!(d.cis_level("debian13"), 2);
+        let deb = bake_user_data(catalog::linux("debian13").unwrap(), &d);
+        assert!(deb.contains("pvs-cis fix --level 2") && !deb.contains("snapd"));
+        std::fs::write(dir.join("debian13-cis2.yaml"), deb).unwrap();
+        let vm = VmSeed { hostname: "h".into(), user: "admin".into(), password: "it's".into(), ssh_key: String::new(), packages: vec![], domain_join: None, arc: None, cis: true };
+        let ud = vm_user_data(u, &vm);
+        assert!(ud.contains("ALL=(ALL) ALL'") && !ud.contains("chpasswd:") && ud.contains("openssl passwd -6") && ud.contains("preserve_sources_list"));
+        std::fs::write(dir.join("vm-ubuntu2604-cis.yaml"), ud).unwrap();
     }
 }

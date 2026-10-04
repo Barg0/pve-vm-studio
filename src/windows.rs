@@ -34,11 +34,11 @@ use sqlx::SqlitePool;
 
 use crate::{
     form,
-    golds::{GOLD_IDS, GOLD_POOL},
+    golds::{self, GOLD_IDS, GOLD_POOL},
     jobs::JobLog,
     progress::Progress,
     pve::{enc, Pve},
-    seed::SeedIso,
+    seed::{self, SeedDisk},
     serial,
     settings::Placement,
     wim::WimImage,
@@ -66,7 +66,11 @@ pub fn gvlk(edition_id: &str, build: &str) -> Option<&'static str> {
         ("Education", None) => "NW6C2-QMPVW-D7KKK-3GKT6-VCFB2",
         ("EducationN", None) => "2WH4N-8QGBV-H22JP-CT43Q-MDWWJ",
         ("ProfessionalWorkstation", None) => "NRG8B-VKK3Q-CXVCJ-9G2XF-6Q84J",
-        ("ServerRdsh", None) => "CPWHC-NT2C7-VYW78-DHDB2-PG3GK",
+        ("ProfessionalWorkstationN", None) => "9FNHH-K3HBT-3W4TD-6383H-6XYWF",
+        ("ProfessionalEducation", None) => "6TP4R-GNPTD-KYYHQ-7B7DP-J447Y",
+        ("ProfessionalEducationN", None) => "YVWGF-BXNMC-HTQYQ-CPQ99-66QFC",
+        // Multi-session: DISM names it ServerRdsh or EnterpriseMultiSession.
+        ("ServerRdsh" | "EnterpriseMultiSession", None) => "CPWHC-NT2C7-VYW78-DHDB2-PG3GK",
         _ => return None,
     })
 }
@@ -92,16 +96,133 @@ pub fn image_id(img: &WimImage) -> String {
         let kind = if img.installation_type == "Server Core" { "core" } else { "desktop" };
         format!("ws{year}-{ed}-{kind}")
     } else {
-        let ed = match img.edition_id.as_str() {
-            "Professional" => "pro",
-            "ProfessionalN" => "pro-n",
-            "Enterprise" => "enterprise",
-            "EnterpriseN" => "enterprise-n",
-            "ServerRdsh" => "enterprise-ms",
-            "Education" => "education",
-            other => return format!("w11-{}", other.to_lowercase()),
-        };
-        format!("w11-{ed}")
+        client_id(&img.edition_id)
+    }
+}
+
+/// A Windows 11 edition's image id: w11-pro, w11-enterprise-n, w11-pro-workstation.
+fn client_id(edition_id: &str) -> String {
+    let ed = match edition_id {
+        "Professional" => "pro",
+        "ProfessionalN" => "pro-n",
+        "Enterprise" => "enterprise",
+        "EnterpriseN" => "enterprise-n",
+        "ServerRdsh" | "EnterpriseMultiSession" => "enterprise-ms",
+        "Education" => "education",
+        "EducationN" => "education-n",
+        "ProfessionalWorkstation" => "pro-workstation",
+        "ProfessionalWorkstationN" => "pro-workstation-n",
+        "ProfessionalEducation" => "pro-education",
+        "ProfessionalEducationN" => "pro-education-n",
+        other => return format!("w11-{}", other.to_lowercase()),
+    };
+    format!("w11-{ed}")
+}
+
+/// The virtual editions a gold can be changed to after generalize (New-Vhdx's
+/// $script:VirtualEditionCatalog). `key` is what a bake request carries, `manifest` what
+/// the sidecar records. DISM names every one of these SKUs differently depending on where
+/// you read it, so the bake matches the family and hands /Set-Edition the exact string
+/// DISM printed.
+pub struct VirtualEdition {
+    pub key: &'static str,
+    pub display: &'static str,
+    pub manifest: &'static str,
+    /// Which index to pick - New-Vhdx's SourceHint, said when a bake stops early.
+    pub hint: &'static str,
+    /// For the editions made from Pro: the EditionID of the index it is made from, and the
+    /// target DISM lists for it, word for word ("" for the two older entries, matched by
+    /// family below).
+    pub from: &'static str,
+    pub target: &'static str,
+}
+
+const PRO_HINT: &str = "Use a Windows 11 Pro index: the edition packs are staged on the base edition, and an image already changed to a higher edition has none left to offer.";
+const PRO_N_HINT: &str = "Use a Windows 11 Pro N index: the N editions are made from Pro N.";
+
+pub static VIRTUAL_EDITIONS: &[VirtualEdition] = &[
+    VirtualEdition {
+        key: "MultiSession",
+        display: "Windows 11 Enterprise multi-session",
+        manifest: "EnterpriseMultiSession",
+        hint: PRO_HINT,
+        from: "",
+        target: "",
+    },
+    VirtualEdition {
+        key: "AzureEdition",
+        display: "Windows Server 2025 Datacenter: Azure Edition",
+        manifest: "DatacenterAzureEdition",
+        hint: "Use a Windows Server 2025 Datacenter index: only Server 2025 media lists the Azure Edition target, and Standard Core does not list it directly.",
+        from: "",
+        target: "",
+    },
+    // What Microsoft's media builder makes from Pro - UUP media carries only Home and Pro.
+    VirtualEdition { key: "Enterprise", display: "Windows 11 Enterprise", manifest: "Enterprise", hint: PRO_HINT, from: "Professional", target: "Enterprise" },
+    VirtualEdition { key: "Education", display: "Windows 11 Education", manifest: "Education", hint: PRO_HINT, from: "Professional", target: "Education" },
+    VirtualEdition { key: "ProWorkstation", display: "Windows 11 Pro for Workstations", manifest: "ProfessionalWorkstation", hint: PRO_HINT, from: "Professional", target: "ProfessionalWorkstation" },
+    VirtualEdition { key: "ProEducation", display: "Windows 11 Pro Education", manifest: "ProfessionalEducation", hint: PRO_HINT, from: "Professional", target: "ProfessionalEducation" },
+    VirtualEdition { key: "EnterpriseN", display: "Windows 11 Enterprise N", manifest: "EnterpriseN", hint: PRO_N_HINT, from: "ProfessionalN", target: "EnterpriseN" },
+    VirtualEdition { key: "EducationN", display: "Windows 11 Education N", manifest: "EducationN", hint: PRO_N_HINT, from: "ProfessionalN", target: "EducationN" },
+    VirtualEdition { key: "ProWorkstationN", display: "Windows 11 Pro N for Workstations", manifest: "ProfessionalWorkstationN", hint: PRO_N_HINT, from: "ProfessionalN", target: "ProfessionalWorkstationN" },
+    VirtualEdition { key: "ProEducationN", display: "Windows 11 Pro Education N", manifest: "ProfessionalEducationN", hint: PRO_N_HINT, from: "ProfessionalN", target: "ProfessionalEducationN" },
+];
+
+pub fn virtual_edition(key: &str) -> Option<&'static VirtualEdition> {
+    VIRTUAL_EDITIONS.iter().find(|v| v.key == key)
+}
+
+/// Whether the studio offers this virtual edition for an index - the source New-Vhdx's
+/// hints name. DISM has the last word in pass 1 (/Get-TargetEditions).
+pub fn virtual_edition_fits(key: &str, img: &WimImage) -> bool {
+    match key {
+        "MultiSession" => img.edition_id == "Professional",
+        "AzureEdition" => server_year(&img.build) == Some(2025) && img.edition_id == "ServerDatacenter",
+        k => virtual_edition(k).is_some_and(|v| !v.from.is_empty() && v.from == img.edition_id),
+    }
+}
+
+/// Whether the media already carries a virtual edition's target as a real image (an ISO
+/// with an Enterprise index needs no "Enterprise from Pro").
+pub fn virtual_on_media(key: &str, images: &[WimImage]) -> bool {
+    images.iter().any(|i| match key {
+        "MultiSession" => i.edition_id == "ServerRdsh" || i.edition_id == "EnterpriseMultiSession",
+        "AzureEdition" => i.edition_id.starts_with("ServerTurbine") || i.edition_id.starts_with("ServerAzure"),
+        k => virtual_edition(k).is_some_and(|v| !v.manifest.is_empty() && i.edition_id == v.manifest),
+    })
+}
+
+/// The target DISM listed that belongs to the wanted family (New-Vhdx's TargetPattern):
+/// multi-session is ServerRdsh or EnterpriseMultiSession; Azure Edition is ServerTurbine*
+/// or ServerAzure* - the whole token, since Core is ServerTurbineCor and stopping at
+/// ServerTurbine would hand /Set-Edition a Desktop SKU for a Core image.
+pub fn virtual_target(key: &str, targets: &[String]) -> Option<String> {
+    targets
+        .iter()
+        .find(|t| match key {
+            "MultiSession" => t.contains("ServerRdsh") || t.contains("EnterpriseMultiSession"),
+            "AzureEdition" => t.starts_with("ServerTurbine") || t.starts_with("ServerAzure"),
+            k => virtual_edition(k).is_some_and(|v| !v.target.is_empty() && t.as_str() == v.target),
+        })
+        .cloned()
+}
+
+/// The image id of what a gold IS when a VM boots it (New-Vhdx's Get-GoldImageId): a Pro
+/// index that leaves as multi-session is w11-enterprise-ms, a Datacenter index that leaves
+/// as Azure Edition is ws2025-datacenter-az-<core|desktop> - /Set-Edition changes the SKU,
+/// not the installation type. The sidecar keeps the source index honest.
+pub fn gold_image_id(img: &WimImage, upgrade: &str) -> String {
+    let id = image_id(img);
+    match upgrade {
+        "MultiSession" => "w11-enterprise-ms".into(),
+        "AzureEdition" => {
+            let kind = if img.installation_type == "Server Core" { "core" } else { "desktop" };
+            format!("ws{}-datacenter-az-{kind}", server_year(&img.build).unwrap_or(2025))
+        }
+        k => match virtual_edition(k) {
+            Some(v) if !v.target.is_empty() => client_id(v.manifest),
+            _ => id,
+        },
     }
 }
 
@@ -190,6 +311,22 @@ pub struct WinBakeOptions {
     /// rdp | ping | svrmgr
     #[serde(default)]
     pub features: Vec<String>,
+    /// "" for the edition on the ISO, else a VIRTUAL_EDITIONS key.
+    #[serde(default)]
+    pub edition_upgrade: String,
+    /// The system disk in GiB (New-Vhdx's -VhdSizeGB); None = 64. Thin or thick is the
+    /// storage's own property on PVE (LVM-thin and ZFS are thin, LVM thick), not the disk's.
+    #[serde(default)]
+    pub disk_gb: Option<u32>,
+    /// This bake's disk storage (thin or thick by the storage); None = the bake settings'.
+    #[serde(default)]
+    pub disk_storage: Option<String>,
+}
+
+impl WinBakeOptions {
+    pub fn disk_gb(&self) -> u32 {
+        self.disk_gb.unwrap_or(64).clamp(32, 2048)
+    }
 }
 
 /// The opt-in policies of New-Vhdx's offline customization (doc §4). Client golds also
@@ -291,11 +428,21 @@ for %%v in (2k25 w11 2k22) do if exist %VIO%\vioscsi\%%v\amd64\vioscsi.inf (drvl
 echo PVS-NO-VIOSCSI > COM1
 goto :fail
 :disk
+rem The disk to clean is the virtio-scsi one ("Type : SAS" in DiskPart) - never the seed,
+rem a SATA disk that may well be disk 0.
+set OSDISK=
+for /l %%n in (0,1,7) do (
+  (echo select disk %%n& echo detail disk) > X:\dd.txt
+  diskpart /s X:\dd.txt > X:\dd%%n.txt 2>&1
+  for /f "usebackq tokens=1,2 delims=: " %%a in ("X:\dd%%n.txt") do if /i "%%a"=="Type" if /i "%%b"=="SAS" if not defined OSDISK set OSDISK=%%n
+)
+if not defined OSDISK (echo PVS-NO-OS-DISK > COM1 & goto :fail)
+echo PVS-OS-DISK %OSDISK% > COM1
 rem A disk that arrives with a driver loaded at runtime (vioscsi, above) falls under
 rem WinPE's SAN policy: offline and read-only - "clean" works, then everything after it
 rem is "The media is write protected".
 (
-echo select disk 0
+echo select disk %OSDISK%
 echo online disk noerr
 echo attributes disk clear readonly noerr
 echo clean
@@ -316,7 +463,11 @@ rem The gold boots on virtio-scsi from its first start: the storage, network and
 rem drivers go into the image offline.
 dism /English /Image:W:\ /Add-Driver /Driver:%VIO%\vioscsi\{vdir}\amd64 /Driver:%VIO%\NetKVM\{vdir}\amd64 /Driver:%VIO%\vioserial\{vdir}\amd64 > COM1 2>&1 || goto :fail
 echo PVS-DRIVERS > COM1
-dism /English /Image:W:\ /Get-TargetEditions > COM1 2>&1
+rem What this image can become - each target as a marker, so the studio can stop a
+rem virtual-edition bake here instead of after twenty minutes of audit mode.
+dism /English /Image:W:\ /Get-TargetEditions > X:\targets.txt 2>&1
+type X:\targets.txt > COM1
+for /f "usebackq tokens=1,2,3 delims=: " %%a in ("X:\targets.txt") do if /i "%%a %%b"=="Target Edition" echo PVS-TARGET %%c > COM1
 bcdboot W:\Windows /s S: /f UEFI > COM1 2>&1
 rem Judged by the loader being there, not by the exit code - a bcdboot that did nothing
 rem once shipped a gold that could not boot.
@@ -447,13 +598,29 @@ echo PVS-POLICY power > COM1
 
 /// WinPE pass 2, on the generalized gold: prove generalize worked, then locale, time zone,
 /// policies and the product key - offline, after generalize, in New-Vhdx's order.
-pub fn pe2_cmd(img: &WimImage, region: &WinRegion, features: &[String]) -> String {
+pub fn pe2_cmd(img: &WimImage, region: &WinRegion, features: &[String], edition_target: Option<&str>) -> String {
     let client = img.installation_type == "Client";
     let locale = &region.locale;
     let input = input_locale(if region.keyboard.is_empty() { locale } else { &region.keyboard });
     let tz = &region.timezone;
     let policies = pass2_policies(features, client);
-    let key = match gvlk(&img.edition_id, &img.build) {
+    // New-Vhdx's Convert-ToVirtualEdition: after generalize, before the customization - a
+    // base edition generalizes cleanly and takes the change afterwards; the staged work
+    // completes in specialize on the VM's first boot. Read back with /Get-CurrentEdition,
+    // never the EditionID string: a gold named for an edition it does not carry fails here.
+    let edition = match edition_target {
+        Some(t) => format!(
+            "call :dism /Image:W:\\ /Set-Edition:{t} || goto :fail\n\
+             dism /English /Image:W:\\ /Get-CurrentEdition > X:\\current.txt 2>&1\n\
+             type X:\\current.txt > COM1\n\
+             set CUREDITION=\n\
+             for /f \"usebackq tokens=1,2,3 delims=: \" %%a in (\"X:\\current.txt\") do if /i \"%%a %%b\"==\"Current Edition\" set CUREDITION=%%c\n\
+             if /i not \"%CUREDITION%\"==\"{t}\" (echo PVS-EDITION-NOT-CHANGED %CUREDITION% > COM1 & goto :fail)\n\
+             echo PVS-EDITION {t} > COM1\n"
+        ),
+        None => String::new(),
+    };
+    let key = match gvlk(edition_target.unwrap_or(&img.edition_id), &img.build) {
         Some(k) => format!("call :dism /Image:W:\\ /Set-ProductKey:{k} || goto :fail\necho PVS-KEY > COM1"),
         None => "echo PVS-NO-KEY > COM1".into(),
     };
@@ -468,12 +635,19 @@ for %%v in (2k25 w11 2k22) do if exist %VIO%\vioscsi\%%v\amd64\vioscsi.inf (drvl
 echo PVS-NO-VIOSCSI > COM1
 goto :fail
 :disk
-(
-echo select disk 0
-echo select partition 3
-echo assign letter=W
-) > X:\dp.txt
-diskpart /s X:\dp.txt > COM1 2>&1
+rem Windows on partition 3 of whichever disk carries it - the seed is a disk of its own now
+rem and may enumerate first.
+for /l %%n in (0,1,7) do (
+  if not exist W:\Windows\System32\config\SYSTEM (
+    (echo select disk %%n& echo select partition 3& echo assign letter=W noerr) > X:\find.txt
+    diskpart /s X:\find.txt > COM1 2>&1
+    if not exist W:\Windows\System32\config\SYSTEM (
+      (echo select volume W& echo remove letter=W noerr) > X:\drop.txt
+      diskpart /s X:\drop.txt > nul 2>&1
+    )
+  )
+)
+if not exist W:\Windows\System32\config\SYSTEM (echo PVS-NO-WINDOWS > COM1 & goto :fail)
 echo PVS-PASS2-START > COM1
 type W:\Windows\Setup\State\State.ini > COM1 2>&1
 rem Sysprep can exit 0 and still fail; the tag and the image state are the proof.
@@ -483,7 +657,7 @@ set IMGSTATE=
 for /f "usebackq tokens=1,* delims==" %%a in ("W:\Windows\Setup\State\State.ini") do if /i "%%a"=="ImageState" set IMGSTATE=%%b
 if /i not "%IMGSTATE%"=="IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE" (echo PVS-NOT-GENERALIZED %IMGSTATE% > COM1 & goto :fail)
 echo PVS-GENERALIZED > COM1
-call :dism /Image:W:\ /Set-UserLocale:{locale} /Set-SysLocale:{locale} /Set-InputLocale:{input} || goto :fail
+{edition}call :dism /Image:W:\ /Set-UserLocale:{locale} /Set-SysLocale:{locale} /Set-InputLocale:{input} || goto :fail
 echo PVS-LOCALE {locale} {input} > COM1
 call :dism /Image:W:\ /Set-TimeZone:"{tz}" || goto :fail
 echo PVS-TIMEZONE {tz} > COM1
@@ -518,6 +692,274 @@ exit /b 1
     ))
 }
 
+// ---- WinPE deploy pass ----
+
+/// Built-in apps the studio may remove (Build-Vms' Remove-OfflineProvisionedApps target
+/// list - the design's catalog). The protected set (Store, Terminal, Notepad, Photos...) is
+/// never in it.
+pub static APP_REMOVAL: &[&str] = &[
+    "Microsoft.Microsoft3DViewer", "Microsoft.WindowsAlarms", "Microsoft.Copilot", "Microsoft.549981C3F5F10",
+    "Microsoft.WindowsFeedbackHub", "Microsoft.ZuneVideo", "Microsoft.ZuneMusic", "Microsoft.GetHelp", "Microsoft.YourPhone",
+    "microsoft.windowscommunicationsapps", "Microsoft.WindowsCamera", "Microsoft.WindowsMaps", "Microsoft.People",
+    "Microsoft.MicrosoftSolitaireCollection", "Microsoft.MixedReality.Portal", "Microsoft.MicrosoftOfficeHub",
+    "Microsoft.Office.OneNote", "Microsoft.OutlookForWindows", "Microsoft.MSPaint", "Microsoft.SkypeApp",
+    "Microsoft.WindowsSoundRecorder", "Microsoft.MicrosoftStickyNotes", "Microsoft.BingWeather", "Microsoft.Getstarted",
+    "Microsoft.Windows.DevHome", "Clipchamp.Clipchamp", "Microsoft.Todos", "Microsoft.BingNews",
+    "MicrosoftCorporationII.QuickAssist", "Microsoft.PowerAutomateDesktop", "Microsoft.Whiteboard",
+    "MicrosoftCorporationII.MicrosoftFamily", "Microsoft.MicrosoftJournal", "MicrosoftTeams", "Microsoft.BingSearch",
+    "Microsoft.XboxApp", "Microsoft.GamingApp", "Microsoft.XboxGamingOverlay", "Microsoft.XboxGameOverlay",
+    "Microsoft.XboxIdentityProvider", "Microsoft.XboxSpeechToTextOverlay", "Microsoft.Xbox.TCUI", "MSTeams",
+];
+
+/// Server Manager feature -> DISM feature table for Windows Server 2025 (build 26100), read
+/// from the image's own package manifests by tools/gen-server-features.py.
+static SERVER_FEATURES_26100: &str = include_str!("../data/server-features-26100.json");
+
+/// Features Build-Vms never stages offline: their CBS advanced installer runs in Setup's
+/// "Getting ready" phase, before specialize names the machine (Build-Vms'
+/// $script:guestOnlyWindowsFeatures, evidence in its comments). GuestProvision installs them.
+pub const GUEST_ONLY_FEATURES: &[&str] = &["RDS-Web-Access", "RDS-Connection-Broker"];
+
+/// The DISM features the deploy pass enables for a VM's roles and features, as
+/// Install-WindowsFeature would: each feature, its role (Parent), what it pulls in on its
+/// own (NonAncestorDependencies) and, with management tools, its RSAT companions. Returns
+/// the DISM names and the Server Manager names left for GuestProvision (guest-only ones,
+/// and everything when there is no table for the gold's build).
+pub struct FeaturePlan {
+    /// DISM features for the deploy pass, in order.
+    pub dism: Vec<String>,
+    /// Server Manager names left for GuestProvision (guest-only, unknown, or no table).
+    pub online: Vec<String>,
+    /// Each requested Server Manager feature and the DISM features it brought in - how the
+    /// log reports them, as Install-WindowsFeature names them on Hyper-V.
+    pub groups: Vec<(String, Vec<String>)>,
+}
+
+pub fn plan_server_features(names: &[String], include_tools: bool, build: &str) -> FeaturePlan {
+    static TABLE: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+    if !build.contains("26100") {
+        return FeaturePlan { dism: vec![], online: names.to_vec(), groups: vec![] };
+    }
+    let table = TABLE.get_or_init(|| serde_json::from_str(SERVER_FEATURES_26100).unwrap_or_default());
+    let (mut dism, mut online, mut groups) = (Vec::<String>::new(), Vec::new(), Vec::<(String, Vec<String>)>::new());
+    let mut seen = std::collections::HashSet::new();
+    for requested in names {
+        if requested.is_empty() || seen.contains(requested) {
+            continue;
+        }
+        if GUEST_ONLY_FEATURES.contains(&requested.as_str()) || table[requested.as_str()].is_null() {
+            seen.insert(requested.clone());
+            online.push(requested.clone());
+            continue;
+        }
+        // Everything this feature pulls in that no earlier one did.
+        let mut mine = Vec::new();
+        let mut queue: std::collections::VecDeque<(String, bool)> = [(requested.clone(), true)].into();
+        while let Some((name, top)) = queue.pop_front() {
+            if name.is_empty() || !seen.insert(name.clone()) {
+                continue;
+            }
+            let entry = &table[name.as_str()];
+            if entry.is_null() || GUEST_ONLY_FEATURES.contains(&name.as_str()) {
+                continue;
+            }
+            let list = |k: &str| entry[k].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect::<Vec<_>>()).unwrap_or_default();
+            if let Some(parent) = entry["parent"].as_str().filter(|p| !p.is_empty()) {
+                queue.push_back((parent.to_owned(), false));
+            }
+            for d in list("deps") {
+                queue.push_back((d, false));
+            }
+            if top && include_tools {
+                for t in list("tools") {
+                    queue.push_back((t, false));
+                }
+            }
+            for d in list("dism") {
+                if !dism.contains(&d) {
+                    dism.push(d.clone());
+                    mine.push(d);
+                }
+            }
+        }
+        groups.push((requested.clone(), mine));
+    }
+    FeaturePlan { dism, online, groups }
+}
+
+/// What the deploy pass does to a VM's disk before its first boot - Build-Vms' offline
+/// servicing of the mounted VHDX, done by WinPE because the studio never touches a disk.
+pub struct DeployPass<'a> {
+    /// Capabilities (RSAT, Server Core App Compatibility), from the FoD ISO.
+    pub capabilities: &'a [String],
+    /// Where the FoD payload sits on its ISO ("LanguagesAndOptionalFeatures" or "") and one
+    /// file on it that tells that CD apart from the others.
+    pub fod_root: &'a str,
+    pub fod_marker: &'a str,
+    /// Client optional features (Hyper-V Management Tools) - in the image, no source.
+    pub client_features: &'a [String],
+    /// Server roles and features as DISM names (plan_server_features); a payload the image
+    /// does not carry (.NET 3.5) comes from the source ISO's sources\sxs when it is attached.
+    pub server_features: &'a [String],
+    /// Provisioned apps to remove, by package family prefix.
+    pub remove_apps: &'a [String],
+}
+
+/// The deploy pass's pe.cmd. Servicing failures are markers, not stops (the job log shows
+/// each; GuestProvision retries capabilities online); a disk that cannot be reached or an
+/// answer file that cannot be written ends the pass, and the build with it.
+pub fn pe_deploy_cmd(p: &DeployPass) -> String {
+    let marker = p.fod_marker.replace('/', "\\");
+    let fod_find = if marker.is_empty() { String::new() } else { format!("if exist %%d:\\{marker} set FOD=%%d:\n") };
+    let fod_src = if p.fod_root.is_empty() { "%FOD%\\".to_owned() } else { format!("%FOD%\\{}", p.fod_root) };
+    let caps: String = p.capabilities.iter().map(|c| format!("call :cap {c}\n")).collect();
+    let server: String = p
+        .server_features
+        .iter()
+        .map(|f| {
+            format!(
+                "call :dism /Image:W:\\ /Enable-Feature /FeatureName:{f} /All %SXSARG% && (echo PVS-FEATURE-OK {f} > COM1) || (echo PVS-FEATURE-FAIL {f} > COM1 & set FALLBACK=1)\n"
+            )
+        })
+        .collect();
+    let features: String = p
+        .client_features
+        .iter()
+        .map(|f| {
+            format!(
+                "call :dism /Image:W:\\ /Enable-Feature /FeatureName:{f} /All && (echo PVS-FEATURE-OK {f} > COM1) || (echo PVS-FEATURE-FAIL {f} > COM1 & set FALLBACK=1)\n"
+            )
+        })
+        .collect();
+    let app_checks: String = p
+        .remove_apps
+        .iter()
+        .filter(|a| APP_REMOVAL.iter().any(|x| x.eq_ignore_ascii_case(a)))
+        .map(|a| format!("if /i \"!p:~0,{}!\"==\"{a}_\" goto :rm\n", a.len() + 1))
+        .collect();
+    let apps = if app_checks.is_empty() {
+        String::new()
+    } else {
+        concat!(
+            "dism /English /Image:W:\\ /Get-ProvisionedAppxPackages > X:\\apps.txt 2>&1\n",
+            "for /f \"usebackq tokens=1,* delims=:\" %%a in (\"X:\\apps.txt\") do (\n",
+            "set \"k=%%a\"\n",
+            "if \"!k:~0,11!\"==\"PackageName\" call :app %%b\n",
+            ")\n",
+            "echo PVS-APPS-DONE > COM1\n"
+        )
+        .to_owned()
+    };
+    crlf(&format!(
+        r#"@echo off
+rem PVE VM Studio WinPE deploy pass: Build-Vms' offline servicing of a new VM's disk, before
+rem its first boot - capabilities, features, app removal, then the VM's own answer file and
+rem GuestProvision written into the image. Markers to COM1.
+setlocal EnableDelayedExpansion
+set SEED=%1
+set VIO=
+set FOD=
+set FALLBACK=
+set SXSARG=
+for %%d in (C D E F G H I J K L M N O P Q R S T U V W Y Z) do (
+if exist %%d:\virtio-win_license.txt set VIO=%%d:
+if exist %%d:\sources\sxs set SXSARG=/Source:%%d:\sources\sxs /LimitAccess
+{fod_find})
+echo PVS-DEPLOY-START VIO=%VIO% FOD=%FOD% > COM1
+rem The SAN policy first: a disk that arrives under WinPE's default (offline, read-only) cannot
+rem have the read-only flag cleared once its volumes are mounted. Under OnlineAll the VM's
+rem disk arrives online and writable when drvload brings it in.
+(echo san policy=OnlineAll) > X:\san.txt
+diskpart /s X:\san.txt > COM1 2>&1
+rem vioscsi from inside WinPE (built in since the studio carries it), else from the virtio CD.
+for %%v in (2k25 w11) do if exist X:\pvs\drivers\vioscsi\%%v\amd64\vioscsi.inf (drvload X:\pvs\drivers\vioscsi\%%v\amd64\vioscsi.inf > COM1 2>&1 & goto :disk)
+if "%VIO%"=="" (echo PVS-NO-VIOSCSI > COM1 & goto :fail)
+for %%v in (2k25 w11 2k22) do if exist %VIO%\vioscsi\%%v\amd64\vioscsi.inf (drvload %VIO%\vioscsi\%%v\amd64\vioscsi.inf > COM1 2>&1 & goto :disk)
+echo PVS-NO-VIOSCSI > COM1
+goto :fail
+:disk
+rem Should a disk still be offline or read-only: the flag is cleared while the disk is
+rem offline (with its volumes mounted it refuses), then online, rescan - a volume only shows
+rem after one - and Windows is looked for on partition 3 of each disk (a data disk can
+rem enumerate as disk 0), a few times while the volumes settle.
+(
+for /l %%n in (0,1,7) do (
+echo select disk %%n
+echo offline disk noerr
+echo attributes disk clear readonly noerr
+echo online disk noerr
+)
+echo rescan
+) > X:\online.txt
+diskpart /s X:\online.txt > COM1 2>&1
+for /l %%t in (1,1,5) do (
+  for /l %%n in (0,1,7) do (
+    if not exist W:\Windows\System32\config\SYSTEM (
+      (echo select disk %%n& echo select partition 3& echo assign letter=W noerr) > X:\find.txt
+      diskpart /s X:\find.txt > COM1 2>&1
+      if not exist W:\Windows\System32\config\SYSTEM (
+        (echo select volume W& echo remove letter=W noerr) > X:\drop.txt
+        diskpart /s X:\drop.txt > nul 2>&1
+      )
+    )
+  )
+  if not exist W:\Windows\System32\config\SYSTEM ping -n 3 127.0.0.1 >nul
+)
+if not exist W:\Windows\System32\config\SYSTEM (echo PVS-NO-WINDOWS > COM1 & goto :fail)
+rem The volume has a read-only flag of its own, apart from the disk's.
+(echo select volume W& echo attributes volume clear readonly noerr& echo attributes volume clear hidden noerr) > X:\rw.txt
+diskpart /s X:\rw.txt > COM1 2>&1
+echo pvs> W:\pvs-write-test.txt 2>nul
+if not exist W:\pvs-write-test.txt (
+  (echo select volume W& echo detail volume& echo attributes volume& echo select disk 0& echo detail disk& echo attributes disk) > X:\why.txt
+  diskpart /s X:\why.txt > COM1 2>&1
+  echo PVS-DISK-READONLY > COM1
+  goto :fail
+)
+del /f /q W:\pvs-write-test.txt
+echo PVS-DISK > COM1
+{caps}{server}{features}{apps}if not exist W:\Windows\Panther mkdir W:\Windows\Panther
+copy /y %SEED%\pvs-vm\unattend.xml W:\Windows\Panther\unattend.xml > COM1 2>&1 || goto :fail
+if not exist W:\Windows\Setup\Scripts mkdir W:\Windows\Setup\Scripts
+copy /y %SEED%\pvs-vm\setupcomplete.cmd W:\Windows\Setup\Scripts\SetupComplete.cmd > COM1 2>&1 || goto :fail
+if exist %SEED%\pvs-vm\GuestProvision xcopy /e /i /q /y %SEED%\pvs-vm\GuestProvision W:\Windows\Setup\Scripts\GuestProvision > COM1 2>&1 || goto :fail
+rem GuestProvision gets only what has to happen online - unless something here failed: then
+rem the full lists, so it installs online what did not make it in offline (Build-Vms' fallback).
+if defined FALLBACK (
+  copy /y W:\Windows\Setup\Scripts\GuestProvision\manifest-fallback.json W:\Windows\Setup\Scripts\GuestProvision\manifest.json > COM1 2>&1
+  echo PVS-FALLBACK > COM1
+)
+del /f /q W:\Windows\Setup\Scripts\GuestProvision\manifest-fallback.json > nul 2>&1
+echo PVS-ANSWERFILE > COM1
+rem DISM's log goes onto the disk: the studio reads it back through the guest agent when
+rem something failed here (WinPE's own copy is gone with the RAM disk).
+copy /y X:\Windows\Logs\DISM\dism.log W:\Windows\Temp\pvs-deploy-dism.log > nul 2>&1
+echo PVS-DEPLOY-OK > COM1
+goto :eof
+:fail
+echo PVS-DEPLOY-FAILED > COM1
+goto :eof
+:cap
+if "%FOD%"=="" (echo PVS-CAP-SKIP %1 > COM1 & set FALLBACK=1 & exit /b 0)
+call :dism /Image:W:\ /Add-Capability /CapabilityName:%1 /Source:{fod_src} /LimitAccess && (echo PVS-CAP-OK %1 > COM1) || (echo PVS-CAP-FAIL %1 > COM1 & set FALLBACK=1)
+exit /b 0
+:app
+set "p=%~1"
+{app_checks}exit /b 0
+:rm
+call :dism /Image:W:\ /Remove-ProvisionedAppxPackage /PackageName:!p! && (echo PVS-APP-REMOVED !p! > COM1) || (echo PVS-APP-FAIL !p! > COM1)
+exit /b 0
+:dism
+rem Back-to-back DISM sessions can collide on the image's mapped hives - two retries.
+for /l %%i in (1,1,3) do (
+    dism /English %* > COM1 2>&1 && exit /b 0
+    ping -n 11 127.0.0.1 >nul
+)
+exit /b 1
+"#
+    ))
+}
+
 // ---- bake ----
 
 pub struct WinBake<'a> {
@@ -529,7 +971,7 @@ pub struct WinBake<'a> {
 
 /// One boot of the bake VM, followed on its serial console until it powers itself off.
 /// Returns every PVS- marker it wrote; DISM's own percentages move the bar.
-async fn run_pass(
+pub(crate) async fn run_pass(
     pve: &Pve,
     log: &JobLog,
     pr: &mut Progress,
@@ -555,6 +997,7 @@ async fn run_pass(
     let mut markers = Vec::new();
     let mut last_pct = -1.0;
     loop {
+        log.check_abort()?;
         if started.elapsed() > Duration::from_secs(timeout_min * 60) {
             let _ = pve.vm_action(node, vmid, "stop").await;
             bail!("{label} did not finish within {timeout_min} minutes (markers so far: {})", markers.join(" "));
@@ -576,7 +1019,13 @@ async fn run_pass(
                         continue;
                     }
                     if part.starts_with("PVS-") {
-                        log.line(part).await;
+                        // One line per feature, capability or app is detail: the caller sums
+                        // them up per Server Manager feature.
+                        if ["PVS-FEATURE-", "PVS-CAP-", "PVS-APP-"].iter().any(|p| part.starts_with(p)) {
+                            log.debug(part).await;
+                        } else {
+                            log.line(part).await;
+                        }
                         markers.push(part.to_owned());
                     } else {
                         log.debug(format!("| {part}")).await;
@@ -608,7 +1057,7 @@ async fn run_pass(
 /// rebuilds the order from the drives instead ("order=scsi0;sata3") - and a generalized
 /// disk that boots when WinPE should is a spent sysprep: specialize and OOBE run, and
 /// the bake is lost.
-async fn set_boot(pve: &Pve, node: &str, vmid: u32, order: &str) -> Result<()> {
+pub(crate) async fn set_boot(pve: &Pve, node: &str, vmid: u32, order: &str) -> Result<()> {
     pve.vm_set(node, vmid, form![("boot", format!("order={order}"))]).await?;
     let cfg = pve.vm_config(node, vmid).await?;
     let got = cfg.get("boot").and_then(|v| v.as_str()).unwrap_or_default().to_owned();
@@ -627,23 +1076,26 @@ pub async fn bake(
     winpe_volid: &str,
     virtio_volid: &str,
     virtio_release: &str,
+    iso_sha256: &str,
 ) -> Result<()> {
     let (pve, log) = (b.pve, b.log);
     let node = p.node.as_str();
-    let id = image_id(img);
-    let display = img.name.clone();
+    let upgrade = virtual_edition(&opt.edition_upgrade);
+    let id = gold_image_id(img, &opt.edition_upgrade);
+    let display = upgrade.map(|v| v.display.to_owned()).unwrap_or_else(|| img.name.clone());
     let client = img.installation_type == "Client";
+    golds::check_node_memory(pve, log, node, p.memory_mb.max(4096)).await?;
     let mut pr = Progress::new(log, format!("Baking {display}"));
     pr.stage(0.0, 3.0, "creating the bake VM");
     let mut made: Option<u32> = None;
-    let mut seeds: Vec<String> = Vec::new();
 
-    let result: Result<(u32, String)> = async {
+    let result: Result<(u32, String, Option<String>)> = async {
         // ---- seeds: one per WinPE pass ----
-        let stamp = Utc::now().format("%Y%m%d-%H%M").to_string();
-        let seed_for = |n: u8| format!("pvs-seed-bake-{id}-{stamp}-pass{n}");
+        let working = golds::working_name(gold_id);
+        let seed_for = |n: u8| format!("pvs-seed-{working}-pass{n}");
         let (s1, s2) = (seed_for(1), seed_for(2));
-        let pass1 = SeedIso::build(
+        // Seeds are small disks now (sata3), not ISOs: built here, attached once the VM exists.
+        let pass1 = SeedDisk::build(
             b.work,
             &s1,
             "PVSSEED",
@@ -655,28 +1107,12 @@ pub async fn bake(
             ],
         )
         .await?;
-        let up = pve.upload(node, &p.iso_storage, "iso", &pass1.iso, &format!("{s1}.iso")).await;
-        pass1.remove().await;
-        let seed1 = up?;
-        seeds.push(seed1.clone());
-        let pass2 = SeedIso::build(
-            b.work,
-            &s2,
-            "PVSSEED",
-            &[("pvs/pe.cmd", &pe2_cmd(img, &opt.region, &opt.features)), ("pvs/gold.xml", &gold_unattend())],
-        )
-        .await?;
-        let up = pve.upload(node, &p.iso_storage, "iso", &pass2.iso, &format!("{s2}.iso")).await;
-        pass2.remove().await;
-        let seed2 = up?;
-        seeds.push(seed2.clone());
-        log.ok(format!("Seeds uploaded: {seed1}, {seed2}")).await;
 
         // ---- the bake VM ----
         pve.ensure_pool(GOLD_POOL, "PVE VM Studio: golds (templates) and the bakes that make them").await?;
         let guard = pve.vmid_guard().await;
         let vmid = pve.free_vmid_in(GOLD_IDS).await?;
-        let name = format!("bake-{id}-{stamp}");
+        let name = working.clone();
         // Link down: NetKVM binds in audit mode, but nothing updates between boot and sysprep.
         let mut net0 = format!("virtio,bridge={},link_down=1", p.bridge);
         if let Some(v) = p.vlan {
@@ -697,18 +1133,18 @@ pub async fn bake(
             ("balloon", 0),
             ("efidisk0", format!("{}:1,efitype=4m,pre-enrolled-keys=1", p.disk_storage)),
             ("scsihw", "virtio-scsi-single"),
-            ("scsi0", format!("{}:64,discard=on,iothread=1,ssd=1", p.disk_storage)),
+            ("scsi0", format!("{}:{},discard=on,iothread=1,ssd=1", p.disk_storage, opt.disk_gb())),
             ("sata0", format!("{winpe_volid},media=cdrom")),
             ("sata1", format!("{},media=cdrom", opt.iso)),
             ("sata2", format!("{virtio_volid},media=cdrom")),
-            ("sata3", format!("{seed1},media=cdrom")),
             ("serial0", "socket"),
             ("net0", net0),
-            ("agent", "enabled=1"),
+            // fstrim_cloned_disks: thin storage gets the clone's freed blocks back (PVE's qm guide).
+            ("agent", "enabled=1,fstrim_cloned_disks=1"),
             // Windows expects a local-time RTC.
             ("localtime", 1),
             ("boot", "order=sata0"),
-            ("tags", "pvs;pvs-bake"),
+            ("tags", crate::tags::BAKE),
             ("description", format!("PVE VM Studio: baking {display} - removed or made a template when done.")),
         ];
         if client {
@@ -721,6 +1157,8 @@ pub async fn bake(
         }
         created.context("creating the bake VM")?;
         sqlx::query("UPDATE golds SET vmid = ? WHERE id = ?").bind(vmid).bind(gold_id).execute(b.db).await?;
+        seed::attach(pve, node, vmid, "sata3", &p.disk_storage, pass1, &s1).await.context("attaching the pass 1 seed disk")?;
+        log.ok("Pass 1 seed attached as a disk (sata3)").await;
         pr.within(1.0, "created");
 
         // ---- WinPE pass 1: apply ----
@@ -730,6 +1168,25 @@ pub async fn bake(
         if !m.iter().any(|l| l == "PVS-PASS1-OK") {
             bail!("pass 1 failed: {}", m.last().cloned().unwrap_or_else(|| "no markers on the serial console".into()));
         }
+        // Asked now, before audit mode has cost twenty minutes: an index that cannot become
+        // the edition will not become it after sysprep either.
+        let targets: Vec<String> = m.iter().filter_map(|l| l.strip_prefix("PVS-TARGET ").map(|t| t.trim().to_owned())).collect();
+        let edition_target = match upgrade {
+            Some(v) => match virtual_target(v.key, &targets) {
+                Some(t) => {
+                    log.ok(format!("Index {} can become '{t}' - continuing", img.index)).await;
+                    Some(t)
+                }
+                None => bail!(
+                    "index {} cannot be changed to {} - DISM lists no matching target (can become: {}). {}",
+                    img.index,
+                    v.display,
+                    if targets.is_empty() { "none".into() } else { targets.join(", ") },
+                    v.hint
+                ),
+            },
+            None => None,
+        };
 
         // ---- audit boot: drivers, agent, generalize ----
         log.run("Audit mode: virtio drivers, guest agent, sysprep /generalize").await;
@@ -743,11 +1200,22 @@ pub async fn bake(
         // ---- WinPE pass 2: verify, customize, key ----
         log.run("WinPE pass 2: verify generalize, locale, time zone, policies, key").await;
         pr.stage(70.0, 95.0, "WinPE pass 2");
-        pve.vm_set(node, vmid, form![("sata3", format!("{seed2},media=cdrom"))]).await?;
+        // The pass 2 seed, now that the edition DISM will be handed is known; the VM is off
+        // after sysprep, so the seed disks swap.
+        let pass2 = SeedDisk::build(
+            b.work,
+            &s2,
+            "PVSSEED",
+            &[("pvs/pe.cmd", &pe2_cmd(img, &opt.region, &opt.features, edition_target.as_deref())), ("pvs/gold.xml", &gold_unattend())],
+        )
+        .await?;
+        seed::detach(pve, node, vmid, "sata3").await?;
+        seed::attach(pve, node, vmid, "sata3", &p.disk_storage, pass2, &s2).await.context("attaching the pass 2 seed disk")?;
+        log.ok("Pass 2 seed attached as a disk (sata3)").await;
         set_boot(pve, node, vmid, "sata0").await?;
         let m = run_pass(pve, log, &mut pr, node, vmid, "pass 2", 30).await?;
         if !m.iter().any(|l| l == "PVS-PASS2-OK") {
-            let why = m.iter().find(|l| l.starts_with("PVS-NO-SYSPREP-TAG") || l.starts_with("PVS-NOT-GENERALIZED") || l.ends_with("FAILED")).cloned();
+            let why = m.iter().find(|l| l.starts_with("PVS-NO-SYSPREP-TAG") || l.starts_with("PVS-NOT-GENERALIZED") || l.starts_with("PVS-EDITION-NOT-CHANGED") || l.ends_with("FAILED")).cloned();
             bail!("pass 2 failed: {}", why.or_else(|| m.last().cloned()).unwrap_or_else(|| "no markers on the serial console".into()));
         }
 
@@ -756,64 +1224,91 @@ pub async fn bake(
         pve.vm_set(
             node,
             vmid,
-            form![("delete", "sata0,sata1,sata2,sata3"), ("net0", format!("virtio,bridge={}", p.bridge))],
+            form![("delete", "sata0,sata1,sata2"), ("net0", format!("virtio,bridge={}", p.bridge))],
         )
         .await?;
+        seed::detach(pve, node, vmid, "sata3").await?;
         set_boot(pve, node, vmid, "scsi0").await?;
-        for v in seeds.drain(..) {
-            pve.delete_volume(node, &v).await?;
-        }
-        let gold_name = format!("gold-{id}-{stamp}");
+        let gold_name = golds::gold_name(gold_id);
         let notes = format!(
             "## Gold: {display}\n\nBaked by PVE VM Studio on {}. Do not start this template - clone it.\n\n\
-             | | |\n|---|---|\n| Image | `{id}` (index {} of `{}`) |\n| Build | {} |\n| Language | {} |\n| Region | {} / keyboard {} / {} |\n| virtio-win | {virtio_release} |\n| Policies | {} |\n| Key | {} |\n",
+             | | |\n|---|---|\n| Gold id | `{gold_id}` |\n| Image | `{id}` (index {} of `{}`) |\n| Build | {} |\n| Language | {} |\n| Region | {} / keyboard {} / {} |\n| virtio-win | {virtio_release} |\n| Policies | {} |\n| Key | {} |\n",
             Utc::now().format("%Y-%m-%d %H:%M UTC"),
             img.index,
             opt.iso,
-            img.build,
+            if img.version.is_empty() { &img.build } else { &img.version },
             img.language,
             opt.region.locale,
             opt.region.keyboard,
             opt.region.timezone,
             if opt.features.is_empty() { "none".into() } else { opt.features.join(", ") },
-            if gvlk(&img.edition_id, &img.build).is_some() { "KMS client (GVLK)" } else { "none" },
+            if gvlk(edition_target.as_deref().unwrap_or(&img.edition_id), &img.build).is_some() { "KMS client (GVLK)" } else { "none" },
         );
-        pve.vm_set(
-            node,
-            vmid,
-            form![("name", &gold_name), ("tags", format!("pvs;pvs-gold;pvs-img-{id}")), ("description", notes)],
-        )
-        .await?;
+        let build = if img.version.is_empty() { &img.build } else { &img.version };
+        let tags = vec![crate::tags::GOLD.to_owned(), crate::tags::os("windows", &id, Some(build))];
+        pve.vm_set(node, vmid, form![("name", &gold_name), ("tags", tags.join(";")), ("description", notes)]).await?;
+        crate::tags::paint(pve, &tags).await;
         pve.run_task(&format!("/nodes/{}/qemu/{vmid}/template", enc(node)), vec![], |_| {}).await?;
-        Ok((vmid, gold_name))
+        Ok((vmid, gold_name, edition_target))
     }
     .await;
 
     match result {
-        Ok((vmid, gold_name)) => {
-            let manifest = json!({
-                "osFamily": "windows",
-                "image": id,
-                "name": display,
-                "imageName": img.name,
-                "imageIndex": img.index,
-                "editionId": img.edition_id,
-                "installationType": img.installation_type,
-                "build": img.build,
-                "imageLanguage": img.language,
-                "sourceIso": opt.iso,
-                "locale": opt.region.locale,
-                "keyboardLayout": opt.region.keyboard,
-                "inputLocale": input_locale(if opt.region.keyboard.is_empty() { &opt.region.locale } else { &opt.region.keyboard }),
-                "timeZone": opt.region.timezone,
-                "localeMode": "offline",
-                "policies": opt.features,
-                "virtio": virtio_release,
-                "key": gvlk(&img.edition_id, &img.build).map(|_| "gvlk"),
-                "secureBoot": true,
-                "vtpm": client,
-                "createdUtc": Utc::now().to_rfc3339(),
-            });
+        Ok((vmid, gold_name, edition_target)) => {
+            // New-Vhdx's New-WindowsGoldManifest, then the keys every gold shares.
+            let has = |f: &str| opt.features.iter().any(|x| x == f);
+            let mut bake_options = json!({ "rdp": has("rdp"), "ping": has("ping"), "blockSignInInputMethods": has("signinkeyboard") });
+            if client {
+                bake_options["suppressWelcomeExperience"] = json!(has("welcome"));
+                bake_options["suppressFirstSignInAnimation"] = json!(has("firstlogon"));
+            } else {
+                bake_options["suppressServerManagerAtLogon"] = json!(has("svrmgr"));
+            }
+            let manifest = golds::complete_manifest(
+                gold_id,
+                json!({
+                    "label": "",
+                    "osFamily": "windows",
+                    "imageId": id,
+                    "displayName": display,
+                    "build": if img.version.is_empty() { img.build.clone() } else { img.version.clone() },
+                    "language": img.language,
+                    "locale": opt.region.locale,
+                    "keyboardLayout": opt.region.keyboard,
+                    "inputLocale": input_locale(if opt.region.keyboard.is_empty() { &opt.region.locale } else { &opt.region.keyboard }),
+                    "timeZone": opt.region.timezone,
+                    "localeMode": "offline",
+                    "imageName": img.name,
+                    "imageIndex": img.index,
+                    // The SKU it became, as DISM named it (ServerRdsh, ServerTurbineCor).
+                    "editionId": edition_target.clone().unwrap_or_else(|| img.edition_id.clone()),
+                    // DISM names an evaluation SKU ...Eval: 180 days, no KMS.
+                    "evaluation": edition_target.as_deref().unwrap_or(&img.edition_id).ends_with("Eval"),
+                    "generalized": true,
+                    // [diff] Hyper-V has "avma" (host-based activation); PVE has no AVMA,
+                    // so a gold carries the KMS client key or nothing.
+                    "activation": if gvlk(edition_target.as_deref().unwrap_or(&img.edition_id), &img.build).is_some() { "kms-client" } else { "none" },
+                    "requiresTpm": client,
+                    "secureBootTemplate": "MicrosoftWindows",
+                    "bakeOptions": bake_options,
+                    "sourceMedia": opt.iso,
+                    "sourceMediaSha256": iso_sha256,
+                    "installationType": img.installation_type,
+                    "virtio": virtio_release,
+                }),
+                node,
+                &p.disk_storage,
+                opt.disk_gb(),
+            )
+            .await;
+            let mut manifest = manifest;
+            if let (Some(v), Some(_)) = (upgrade, &edition_target) {
+                // imageName and imageIndex describe the index that was applied; imageId and
+                // displayName what it became. Both are true, so the sidecar says both.
+                manifest["sourceEdition"] = json!(img.name);
+                manifest["sourceEditionId"] = json!(img.edition_id);
+                manifest["editionUpgrade"] = json!(v.manifest);
+            }
             sqlx::query("UPDATE golds SET status = 'ready', name = ?, image_id = ?, manifest = ? WHERE id = ?")
                 .bind(&gold_name)
                 .bind(&id)
@@ -825,9 +1320,6 @@ pub async fn bake(
             Ok(())
         }
         Err(e) => {
-            for v in seeds {
-                let _ = pve.delete_volume(node, &v).await;
-            }
             if let Some(vmid) = made
                 && pve.vm_destroy(node, vmid).await.is_ok()
             {
@@ -868,6 +1360,100 @@ pub struct WinVmSeed {
     /// scripts delete once used.
     pub arc_secret: Option<serde_json::Value>,
     pub join_secret: Option<serde_json::Value>,
+    /// The answer file reaches specialize (written into Panther by the WinPE deploy pass):
+    /// static addresses go into it (TCPIP / DNS-Client by MAC, as Build-Vms writes them)
+    /// instead of SetupComplete.
+    pub specialize: bool,
+    /// A join done by the answer file in specialize (Microsoft-Windows-UnattendedJoin).
+    pub join_specialize: Option<crate::guest::DomainJoin>,
+    /// A product key from the Windows licenses blade - "" keeps the gold's KMS client key.
+    pub product_key: String,
+}
+
+/// A Windows product key: five groups of five letters and digits.
+pub fn product_key_ok(k: &str) -> bool {
+    let g: Vec<&str> = k.split('-').collect();
+    g.len() == 5 && g.iter().all(|x| x.len() == 5 && x.chars().all(|c| c.is_ascii_alphanumeric()))
+}
+
+/// "BC:24:11:AA:BB:CC" -> "BC-24-11-AA-BB-CC", the TCPIP / DNS-Client Identifier form
+/// (Build-Vms' ConvertTo-UnattendMacAddress).
+fn unattend_mac(mac: &str) -> String {
+    let raw: String = mac.chars().filter(|c| c.is_ascii_hexdigit()).collect::<String>().to_uppercase();
+    raw.as_bytes().chunks(2).map(|c| String::from_utf8_lossy(c).into_owned()).collect::<Vec<_>>().join("-")
+}
+
+/// The specialize components Build-Vms' Get-ServerUnattendContent writes after
+/// <ComputerName>: TCPIP and DNS-Client per adapter with a static address (the primary one
+/// first, with the route and the resolver; extra adapters neither - a second default route
+/// is how a multi-homed guest becomes unreachable), then UnattendedJoin.
+fn specialize_components(s: &WinVmSeed) -> String {
+    let mut ifaces = Vec::new();
+    if !s.ip.is_empty() {
+        ifaces.push((unattend_mac(&s.mac), format!("{}/{}", s.ip, s.prefix), s.gateway.clone(), s.dns.clone()));
+    }
+    for (mac, addr, prefix) in &s.extra {
+        ifaces.push((unattend_mac(mac), format!("{addr}/{prefix}"), String::new(), vec![]));
+    }
+    let mut out = String::new();
+    if s.specialize && !ifaces.is_empty() {
+        let tcpip: String = ifaces
+            .iter()
+            .map(|(id, cidr, gw, _)| {
+                let routes = if gw.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "\n          <Routes>\n            <Route wcm:action=\"add\">\n              <Identifier>0</Identifier>\n              <Prefix>0.0.0.0/0</Prefix>\n              <NextHopAddress>{}</NextHopAddress>\n            </Route>\n          </Routes>",
+                        xml_escape(gw)
+                    )
+                };
+                format!(
+                    "\n        <Interface wcm:action=\"add\">\n          <Ipv4Settings>\n            <DhcpEnabled>false</DhcpEnabled>\n          </Ipv4Settings>\n          <Ipv6Settings>\n            <DhcpEnabled>false</DhcpEnabled>\n          </Ipv6Settings>\n          <Identifier>{}</Identifier>\n          <UnicastIpAddresses>\n            <IpAddress wcm:action=\"add\" wcm:keyValue=\"1\">{}</IpAddress>\n          </UnicastIpAddresses>{routes}\n        </Interface>",
+                    xml_escape(id),
+                    xml_escape(cidr)
+                )
+            })
+            .collect();
+        out += &format!("\n    <component name=\"Microsoft-Windows-TCPIP\" {COMP}>\n      <Interfaces>{tcpip}\n      </Interfaces>\n    </component>");
+        let dns: String = ifaces
+            .iter()
+            .filter(|(_, _, _, d)| !d.is_empty())
+            .map(|(id, _, _, d)| {
+                let entries: String = d
+                    .iter()
+                    .enumerate()
+                    .map(|(i, x)| format!("\n            <IpAddress wcm:action=\"add\" wcm:keyValue=\"{}\">{}</IpAddress>", i + 1, xml_escape(x)))
+                    .collect();
+                format!(
+                    "\n        <Interface wcm:action=\"add\">\n          <DNSServerSearchOrder>{entries}\n          </DNSServerSearchOrder>\n          <Identifier>{}</Identifier>\n        </Interface>",
+                    xml_escape(id)
+                )
+            })
+            .collect();
+        if !dns.is_empty() {
+            out += &format!("\n    <component name=\"Microsoft-Windows-DNS-Client\" {COMP}>\n      <Interfaces>{dns}\n      </Interfaces>\n    </component>");
+        }
+    }
+    if let (true, Some(j)) = (s.specialize, &s.join_specialize) {
+        // DOMAIN\user and user@domain both work; the bare name takes the joined domain.
+        let (cred_domain, cred_user) = if let Some((d, u)) = j.user.split_once('\\') {
+            (d.to_owned(), u.to_owned())
+        } else if let Some((u, d)) = j.user.split_once('@') {
+            (d.to_owned(), u.to_owned())
+        } else {
+            (j.domain.clone(), j.user.clone())
+        };
+        let ou = if j.ou.trim().is_empty() { String::new() } else { format!("\n        <MachineObjectOU>{}</MachineObjectOU>", xml_escape(j.ou.trim())) };
+        out += &format!(
+            "\n    <component name=\"Microsoft-Windows-UnattendedJoin\" {COMP}>\n      <Identification>\n        <Credentials>\n          <Domain>{}</Domain>\n          <Password>{}</Password>\n          <Username>{}</Username>\n        </Credentials>\n        <JoinDomain>{}</JoinDomain>{ou}\n      </Identification>\n    </component>",
+            xml_escape(&cred_domain),
+            xml_escape(&j.password),
+            xml_escape(&cred_user),
+            xml_escape(j.domain.trim())
+        );
+    }
+    out
 }
 
 /// Whether the VM has anything for GuestProvision to do (Build-Vms' $needsGuest).
@@ -885,8 +1471,11 @@ pub fn needs_guest(m: &serde_json::Value) -> bool {
 pub static GUEST_PROVISION_PS1: &str = include_str!("../guest-files/GuestProvision.ps1");
 pub static DOMAIN_JOIN_PS1: &str = include_str!("../guest-files/DomainJoin.ps1");
 
-/// The VM's oobeSystem answer file. International-Core repeats the gold's locale: the
-/// region page has no hide flag and is only skipped when this answers it.
+/// The VM's answer file: specialize names the machine (Build-Vms' Get-ServerUnattendContent),
+/// oobeSystem does the rest. Written into Panther by the WinPE deploy pass it replaces the
+/// gold's own file; on the seed-CD path the gold's firstboot.cmd points oobeSystem at it.
+/// International-Core repeats the gold's locale: the region page has no hide flag and is
+/// only skipped when this answers it.
 pub fn vm_unattend(s: &WinVmSeed, manifest: &serde_json::Value) -> String {
     let input = manifest["inputLocale"].as_str().unwrap_or("0409:00000409");
     let locale = manifest["locale"].as_str().unwrap_or("en-US");
@@ -914,9 +1503,16 @@ pub fn vm_unattend(s: &WinVmSeed, manifest: &serde_json::Value) -> String {
     } else {
         ""
     };
+    let computer = xml_escape(&s.name.to_uppercase());
+    let specialize = specialize_components(s);
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
 <unattend {NS}>
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup" {COMP}>
+      <ComputerName>{computer}</ComputerName>
+    </component>{specialize}
+  </settings>
   <settings pass="oobeSystem">
     <component name="Microsoft-Windows-International-Core" {COMP}>
       <InputLocale>{input}</InputLocale>
@@ -952,7 +1548,8 @@ pub fn vm_cmd(s: &WinVmSeed) -> String {
 /// Runs as SYSTEM once OOBE is done: the static address (matched by MAC), then the marker.
 pub fn setupcomplete_cmd(s: &WinVmSeed) -> String {
     let mut ip = String::new();
-    if !s.ip.is_empty() {
+    // With the answer file in specialize the addresses are set there already.
+    if !s.ip.is_empty() && !s.specialize {
         let mac = s.mac.replace(':', "-").to_uppercase();
         let gw = if s.gateway.is_empty() { String::new() } else { format!(" -DefaultGateway {}", s.gateway) };
         let dns = if s.dns.is_empty() {
@@ -965,10 +1562,19 @@ pub fn setupcomplete_cmd(s: &WinVmSeed) -> String {
             s.ip, s.prefix
         );
     }
-    for (mac, addr, prefix) in &s.extra {
+    for (mac, addr, prefix) in s.extra.iter().filter(|_| !s.specialize) {
         let mac = mac.replace(':', "-").to_uppercase();
         ip += &format!(
             "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$a = Get-NetAdapter | Where-Object MacAddress -eq '{mac}'; Set-NetIPInterface -InterfaceIndex $a.ifIndex -Dhcp Disabled; New-NetIPAddress -InterfaceIndex $a.ifIndex -IPAddress {addr} -PrefixLength {prefix}\" >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\n"
+        );
+    }
+    // The licence from the Windows licenses blade: installed over the gold's KMS client key,
+    // then activated (online - a failure is logged, the VM is not held up). The file deletes
+    // itself, the seed disk goes after this boot.
+    if product_key_ok(&s.product_key) {
+        ip += &format!(
+            "cscript //nologo %windir%\\system32\\slmgr.vbs /ipk {} >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\ncscript //nologo %windir%\\system32\\slmgr.vbs /ato >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\n",
+            s.product_key.to_uppercase()
         );
     }
     // GuestProvision after the address (Arc and the join need the network), before the
@@ -982,8 +1588,12 @@ pub fn setupcomplete_cmd(s: &WinVmSeed) -> String {
     // The seed CD takes the first free letter, D: mostly, which the design's data disks
     // want: every CD moves to the end of the alphabet before GuestProvision formats them.
     let cds = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$used = @(Get-Volume | ForEach-Object DriveLetter); $free = @([char[]]'ZYXWVUTSRQP' | Where-Object { $used -notcontains $_ }); $i = 0; Get-CimInstance Win32_Volume -Filter 'DriveType=5' | Where-Object { $_.DriveLetter } | ForEach-Object { Set-CimInstance -InputObject $_ -Property @{ DriveLetter = ('{0}:' -f $free[$i]) }; $i++ }\" >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\n";
+    // The last line deletes this file (Build-Vms' Set-OfflineGuestProvisionPayload):
+    // "(goto) 2>nul" ends the batch before del runs, so cmd never reads on from a file
+    // that is gone. GuestProvision removes its own folder after a successful run, so
+    // nothing under Setup\Scripts runs again if the VM is ever sysprepped and captured.
     crlf(&format!(
-        "@echo off\n{ip}{cds}{guest}if not exist C:\\ProgramData\\PVS mkdir C:\\ProgramData\\PVS\necho done> C:\\ProgramData\\PVS\\provisioned.txt\n"
+        "@echo off\n{ip}{cds}{guest}if not exist C:\\ProgramData\\PVS mkdir C:\\ProgramData\\PVS\necho done> C:\\ProgramData\\PVS\\provisioned.txt\n(goto) 2>nul & del \"%~f0\"\n"
     ))
 }
 
@@ -994,6 +1604,7 @@ pub async fn follow_first_boot(pve: &Pve, log: &JobLog, pr: &mut Progress, node:
     let mut agent = false;
     let mut first = false;
     loop {
+        log.check_abort()?;
         // Roles and features install in this boot (GuestProvision), which can take a while.
         if started.elapsed() > Duration::from_secs(60 * 60) {
             bail!("the VM did not finish its first boot within 60 minutes - its CD (with the passwords) is still attached");
@@ -1030,4 +1641,123 @@ pub fn check_name(name: &str) -> Result<()> {
         bail!("a Windows computer name cannot be only digits");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn img(edition_id: &str, installation_type: &str, build: &str) -> WimImage {
+        WimImage {
+            index: 1,
+            name: String::new(),
+            edition_id: edition_id.into(),
+            installation_type: installation_type.into(),
+            language: "en-US".into(),
+            build: build.into(),
+            version: String::new(),
+            total_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn virtual_targets_match_the_whole_token() {
+        let t = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(virtual_target("MultiSession", &t(&["Enterprise", "ServerRdsh"])).as_deref(), Some("ServerRdsh"));
+        assert_eq!(virtual_target("AzureEdition", &t(&["ServerDatacenterCor", "ServerTurbineCor"])).as_deref(), Some("ServerTurbineCor"));
+        assert_eq!(virtual_target("AzureEdition", &t(&["ServerDatacenter"])), None);
+    }
+
+    #[test]
+    fn deploy_pass_script() {
+        let caps = vec!["Rsat.Dns.Tools~~~~0.0.1.0".to_owned()];
+        let feats = vec!["Microsoft-Hyper-V-Tools-All".to_owned()];
+        let apps = vec!["Microsoft.BingNews".to_owned(), "Not.In.Catalog".to_owned()];
+        let cmd = pe_deploy_cmd(&DeployPass {
+            capabilities: &caps,
+            fod_root: "LanguagesAndOptionalFeatures",
+            fod_marker: "LanguagesAndOptionalFeatures/x-FoD-Package~31bf3856ad364e35~amd64~~.cab",
+            client_features: &feats,
+            server_features: &[],
+            remove_apps: &apps,
+        });
+        assert!(cmd.contains("if exist %%d:\\LanguagesAndOptionalFeatures\\x-FoD-Package"));
+        assert!(cmd.contains("call :cap Rsat.Dns.Tools~~~~0.0.1.0\r\n"));
+        assert!(cmd.contains("/Source:%FOD%\\LanguagesAndOptionalFeatures /LimitAccess"));
+        assert!(cmd.contains("/FeatureName:Microsoft-Hyper-V-Tools-All /All"));
+        assert!(cmd.contains("if /i \"!p:~0,19!\"==\"Microsoft.BingNews_\" goto :rm"));
+        assert!(!cmd.contains("Not.In.Catalog"));
+        assert!(cmd.contains("W:\\Windows\\Panther\\unattend.xml"));
+        // Nothing to do but the answer file: no FoD lookup, no app listing.
+        let bare = pe_deploy_cmd(&DeployPass { capabilities: &[], fod_root: "", fod_marker: "", client_features: &[], server_features: &[], remove_apps: &[] });
+        assert!(!bare.contains("Get-ProvisionedAppxPackages") && !bare.contains("set FOD=%%d:"));
+    }
+
+    #[test]
+    fn specialize_join_and_address() {
+        let mut seed = WinVmSeed {
+            name: "dc-02".into(), user: "admin".into(), password: "P@ss".into(), builtin_admin_only: false, client: false,
+            mac: "bc:24:11:aa:bb:cc".into(), ip: "10.0.0.12".into(), prefix: 24, gateway: "10.0.0.1".into(), dns: vec!["10.0.0.10".into()],
+            extra: vec![], manifest: serde_json::json!({}), arc_secret: None, join_secret: None, specialize: true,
+            join_specialize: Some(crate::guest::DomainJoin {
+                domain: "ad.example.invalid".into(), user: "AD\\joiner".into(), password: "x<y".into(), ou: "OU=Servers,DC=ad".into(),
+                sudo_groups: vec![], login_groups: vec![], mode: "specialize".into(),
+            }),
+            product_key: String::new(),
+        };
+        let xml = vm_unattend(&seed, &serde_json::json!({}));
+        assert!(xml.contains("<ComputerName>DC-02</ComputerName>"));
+        assert!(xml.contains("<Identifier>BC-24-11-AA-BB-CC</Identifier>"));
+        assert!(xml.contains("<IpAddress wcm:action=\"add\" wcm:keyValue=\"1\">10.0.0.12/24</IpAddress>"));
+        assert!(xml.contains("<NextHopAddress>10.0.0.1</NextHopAddress>"));
+        assert!(xml.contains("Microsoft-Windows-DNS-Client"));
+        assert!(xml.contains("<Domain>AD</Domain>") && xml.contains("<Username>joiner</Username>") && xml.contains("<Password>x&lt;y</Password>"));
+        assert!(xml.contains("<MachineObjectOU>OU=Servers,DC=ad</MachineObjectOU>"));
+        assert!(!setupcomplete_cmd(&seed).contains("New-NetIPAddress"));
+        // The seed-CD path: nothing in specialize but the name, the address set by SetupComplete.
+        seed.specialize = false;
+        let xml = vm_unattend(&seed, &serde_json::json!({}));
+        assert!(!xml.contains("UnattendedJoin") && !xml.contains("Microsoft-Windows-TCPIP"));
+        assert!(setupcomplete_cmd(&seed).contains("New-NetIPAddress"));
+        // A licence key: installed and activated by SetupComplete; a malformed one is not.
+        assert!(!setupcomplete_cmd(&seed).contains("slmgr"));
+        seed.product_key = "abcde-12345-fghij-67890-klmno".into();
+        let sc = setupcomplete_cmd(&seed);
+        assert!(sc.contains("cscript //nologo %windir%\\system32\\slmgr.vbs /ipk ABCDE-12345-FGHIJ-67890-KLMNO >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\r\n"), "{sc}");
+        assert!(sc.contains("slmgr.vbs /ato"));
+        seed.product_key = "abcde-12345".into();
+        assert!(!setupcomplete_cmd(&seed).contains("slmgr"));
+    }
+
+    #[test]
+    fn server_feature_plan() {
+        let plan = plan_server_features(
+            &["AD-Domain-Services".to_owned(), "ADCS-Cert-Authority".to_owned(), "RDS-Web-Access".to_owned()],
+            true,
+            "10.0.26100.4061",
+        );
+        let (dism, online) = (plan.dism, plan.online);
+        assert_eq!(plan.groups.len(), 2);
+        assert!(plan.groups[0].1.contains(&"DirectoryServices-DomainController".to_owned()));
+        // The role, what Install-WindowsFeature adds (RSAT-AD-PowerShell), the tools, the
+        // role service's role.
+        for want in ["DirectoryServices-DomainController", "ActiveDirectory-PowerShell", "CertificateServices", "ADCertificateServicesRole"] {
+            assert!(dism.iter().any(|d| d == want), "{want} missing from {dism:?}");
+        }
+        assert_eq!(online, vec!["RDS-Web-Access".to_owned()]);
+        let p = plan_server_features(&["DNS".to_owned()], true, "20348");
+        assert!(p.dism.is_empty() && p.online == vec!["DNS".to_owned()]);
+    }
+
+    #[test]
+    fn virtual_gold_ids() {
+        let pro = img("Professional", "Client", "26200");
+        assert!(virtual_edition_fits("MultiSession", &pro));
+        assert_eq!(gold_image_id(&pro, "MultiSession"), "w11-enterprise-ms");
+        let core = img("ServerDatacenter", "Server Core", "26100");
+        assert!(virtual_edition_fits("AzureEdition", &core));
+        assert_eq!(gold_image_id(&core, "AzureEdition"), "ws2025-datacenter-az-core");
+        assert_eq!(gold_image_id(&core, ""), "ws2025-datacenter-core");
+        assert!(!virtual_edition_fits("AzureEdition", &img("ServerDatacenter", "Server", "20348")));
+    }
 }
