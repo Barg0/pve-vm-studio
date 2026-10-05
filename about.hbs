@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PVE VM Studio - third-party licenses</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #1e1e1e; line-height: 1.5; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.1rem; margin-top: 2rem; }
+  ul.overview li { margin: .2rem 0; }
+  .crates { font-size: .9rem; color: #555; }
+  pre { white-space: pre-wrap; background: #f6f6f8; padding: 1rem; border: 1px solid #ddd; font-size: .8rem; }
+</style>
+</head>
+<body>
+<h1>Third-party licenses</h1>
+<p>PVE VM Studio is MIT-licensed. Its binary contains the Rust crates below, each under its own license.
+Programs, downloads and trademarks are listed in NOTICE.md in the repository.</p>
+<h2>Overview</h2>
+<ul class="overview">
+{{#each overview}}
+  <li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
+{{/each}}
+</ul>
+{{#each licenses}}
+<h2 id="{{id}}">{{name}}</h2>
+<p class="crates">Used by:
+{{#each used_by}}<a href="{{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}}">{{crate.name}} {{crate.version}}</a>{{#unless @last}}, {{/unless}}{{/each}}
+</p>
+<pre>{{text}}</pre>
+{{/each}}
+</body>
+</html>

@@ -1,5 +1,5 @@
 //! The WinPE the Windows bakes boot, distilled from a Windows ISO - the path the kiln.sh
-//! prototype proved (docs/windows-provisioning.md §0):
+//! prototype proved:
 //!
 //!   - the ISO's own boot files (bootmgr, boot/, efi/),
 //!   - boot.wim **index 2**, the Setup environment. Index 1, the bare WinPE, applies images

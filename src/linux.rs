@@ -29,9 +29,65 @@ pub struct BakeOptions {
     /// bake settings' storage.
     #[serde(default)]
     pub disk_storage: Option<String>,
-    /// CIS hardening (docs/cis-benchmark.md); None or level 0 = off.
+    /// CIS hardening; None or level 0 = off.
     #[serde(default)]
     pub cis: Option<crate::cis::CisOptions>,
+    /// Country code of the apt mirror (catalog::APT_MIRRORS), Ubuntu and Debian only; ""
+    /// keeps the image's own.
+    #[serde(default)]
+    pub mirror: String,
+    /// This bake only: another node, bridge or VLAN than the bake settings'. None keeps theirs.
+    #[serde(default)]
+    pub node: Option<String>,
+    #[serde(default)]
+    pub bridge: Option<String>,
+    #[serde(default)]
+    pub vlan: Option<u16>,
+    /// This bake only: its addresses ("dhcp", one, or a range), gateway and DNS. None keeps
+    /// the bake settings'.
+    #[serde(default)]
+    pub addresses: Option<String>,
+    #[serde(default)]
+    pub gateway: Option<String>,
+    #[serde(default)]
+    pub dns: Option<Vec<String>>,
+    /// The bake VM's own address, taken from the bake settings' range when the bake starts
+    /// (recorded with the gold, so the next bake sees it is taken). None: DHCP.
+    #[serde(default)]
+    pub bake_address: Option<String>,
+}
+
+impl BakeOptions {
+    /// The bake settings this bake runs with: the defaults, with the bake form's node and
+    /// network over them.
+    pub fn placement_over(&self, s: &crate::settings::BakeSettings) -> crate::settings::BakeSettings {
+        let mut s = s.clone();
+        if let Some(n) = self.node.as_deref().filter(|n| !n.is_empty()) {
+            s.node = n.to_owned();
+        }
+        if let Some(b) = self.bridge.as_deref().filter(|b| !b.is_empty()) {
+            s.bridge = b.to_owned();
+            s.vlan = self.vlan;
+        }
+        if let Some(a) = self.addresses.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+            s.linux_address = if a.eq_ignore_ascii_case("dhcp") { String::new() } else { a.to_owned() };
+            if let Some(g) = self.gateway.as_deref().map(str::trim).filter(|g| !g.is_empty()) {
+                s.linux_gateway = g.to_owned();
+            }
+            if let Some(d) = self.dns.as_ref().filter(|d| !d.is_empty()) {
+                s.linux_dns = d.clone();
+            }
+        }
+        s
+    }
+
+    /// The apt mirror this bake uses for `img`, when there is one.
+    pub fn mirror_uri(&self, img: &LinuxImage) -> Option<String> {
+        if img.family != "debian" || self.mirror.is_empty() {
+            return None;
+        }
+        catalog::apt_mirror_uri(img.distro, &self.mirror)
+    }
 }
 
 impl BakeOptions {
@@ -228,10 +284,20 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
         "      type: text",
     ]);
 
+    let mirror = opt.mirror_uri(img);
     if family == "debian" {
+        ud.line("apt:");
+        // Through cloud-init's apt module, not by editing files: Ubuntu 26.04 and Debian 13
+        // write deb822 sources (*.sources), and the module knows which format the release
+        // uses. It runs again on every VM's first boot - the drop-in below carries the choice
+        // there. `security` goes with `primary`, always (catalog::apt_security_uri).
+        if let Some(uri) = &mirror {
+            for l in catalog::apt_mirror_yaml(distro, uri) {
+                ud.line(format!("  {l}"));
+            }
+        }
         // Bounded apt timeouts, so a dead mirror costs minutes, not an hour.
         ud.lines(&[
-            "apt:",
             "  conf: |",
             "    Acquire::http::Timeout \"20\";",
             "    Acquire::https::Timeout \"20\";",
@@ -331,8 +397,17 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
     }
 
     // One write_files key for all of them - a second one is a YAML error, not a merge.
-    if region.is_some() || has("aliases") || has("fastfetch") || has("prompt") || has("pskeys") {
+    if region.is_some() || mirror.is_some() || has("aliases") || has("fastfetch") || has("prompt") || has("pskeys") {
         ud.line("write_files:");
+    }
+    if let Some(uri) = &mirror {
+        // The mirror for every VM from this gold: cloud.cfg.d is read on every boot and left
+        // alone by `cloud-init clean`, so a VM's first boot renders its sources from the same
+        // primary and security as the bake instead of from the image's defaults.
+        ud.lines(&["  - path: /etc/cloud/cloud.cfg.d/90-apt-mirror.cfg", "    permissions: '0644'", "    content: |", "      apt:"]);
+        for l in catalog::apt_mirror_yaml(distro, uri) {
+            ud.line(format!("        {l}"));
+        }
     }
     if region.is_some() {
         // The locale is the gold's; cloud-init's locale module would re-apply its own
@@ -409,7 +484,9 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
         ud.line("          { \"type\": \"dns\", \"key\": \"{#0;90}│{#0}  {#1;31}DNS\" },");
         ud.line(r#"          { "type": "command", "key": "{#0;90}│{#0}  {#1;31}Domain", "text": "d=$(PATH=\"$PATH:/usr/sbin:/sbin\" realm list --name-only 2>/dev/null | head -n 1); if [ -n \"$d\" ]; then printf '%s' \"$d\"; else printf '\\033[2;37mnone\\033[0m'; fi" },"#);
         ud.line(format!("          {{ \"type\": \"custom\", \"format\": \"{{#90}}└{}{{#}}\" }},", bar(43)));
-        ud.lines(&["          \"break\",", "          { \"type\": \"colors\", \"paddingLeft\": 2 }", "        ]", "      }"]);
+        // Two empty lines under the colour blocks, so the prompt never starts at the bottom of
+        // the fetch - in the config, so they come however fastfetch is started.
+        ud.lines(&["          \"break\",", "          { \"type\": \"colors\", \"paddingLeft\": 2 },", "          \"break\",", "          \"break\"", "        ]", "      }"]);
     }
     if has("prompt") {
         // Appended, so it is the last word on PS1 in skel's .bashrc.
@@ -513,7 +590,7 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
         // cloud-init made /etc/skel/.config 0755 for the config file; a home's dot folders are
         // its user's (CIS 7.2.11 wants 0750 at most).
         ud.cmd("chmod 0750 /etc/skel/.config /etc/skel/.config/fastfetch 2>/dev/null || true");
-        ud.cmd(r#"grep -q pvs-fastfetch /etc/skel/.bashrc || echo 'command -v fastfetch >/dev/null 2>&1 && case $- in *i*) fastfetch; printf "\n\n" ;; esac # pvs-fastfetch' >> /etc/skel/.bashrc"#);
+        ud.cmd(r#"grep -q pvs-fastfetch /etc/skel/.bashrc || echo 'command -v fastfetch >/dev/null 2>&1 && case $- in *i*) fastfetch ;; esac # pvs-fastfetch' >> /etc/skel/.bashrc"#);
     }
     if has("pskeys") {
         // openSUSE ships its inputrc in /usr/etc: the /etc copy then replaces it, so it starts
@@ -687,8 +764,9 @@ pub fn vm_user_data(img: &LinuxImage, s: &VmSeed) -> String {
     // In clear, as on Hyper-V: the seed is detached and deleted after this boot, and the
     // scrub below takes cloud-init's own copies of it off the disk.
     if s.cis {
-        // A CIS gold's PAM would judge the password (pwquality, enforce_for_root) and could
-        // refuse it, leaving the admin without one: set as a hash, past PAM (runcmd below).
+        // A CIS gold sets it through PAM (runcmd below), so its password policy judges it and
+        // pam_unix hashes it the gold's way (yescrypt). The studio checks the design's password
+        // against that policy before it deploys; PASSWORD-FAILED is the refusal if one slips by.
         ud.line("ssh_pwauth: true");
     } else {
         ud.lines(&["chpasswd:", "  expire: false", "  users:"]);
@@ -720,7 +798,7 @@ pub fn vm_user_data(img: &LinuxImage, s: &VmSeed) -> String {
     if s.cis {
         let shq = |v: &str| format!("'{}'", v.replace('\'', "'\\''"));
         ud.cmd(&format!(
-            "h=$(printf '%s' {pw} | openssl passwd -6 -stdin) && usermod -p \"$h\" {user} && echo PVS-PASSWORD-SET || echo PVS-PASSWORD-FAILED",
+            "if printf '%s:%s\\n' {user} {pw} | chpasswd 2>/run/pw.err; then echo PASSWORD-SET; else echo \"PASSWORD-FAILED $(tr '\\n' ' ' </run/pw.err | head -c 300)\"; fi; rm -f /run/pw.err",
             pw = shq(&s.password),
             user = shq(&s.user)
         ));
@@ -736,6 +814,9 @@ pub fn vm_user_data(img: &LinuxImage, s: &VmSeed) -> String {
         }
     }
     ud.cmd(r#"find /var/lib/cloud/instances -maxdepth 2 -type f \( -name 'user-data.txt*' -o -name 'cloud-config.txt' -o -name 'vendor-data.txt*' -o -name 'vendor-cloud-config.txt' -o -name 'obj.pkl' \) -delete 2>/dev/null; rm -f /run/cloud-init/instance-data-sensitive.json /var/lib/cloud/instance/scripts/runcmd; echo SEED-SCRUBBED"#);
+    // The studio reads this log through the agent every 3 s; the power-off must not beat it
+    // to the last lines (PASSWORD-FAILED among them).
+    ud.cmd("sleep 8");
     ud.lines(&["growpart:", "  mode: auto", "  devices: ['/']", "resize_rootfs: true"]);
     // Powered off when done: that is the signal to take the seed away.
     ud.lines(&["power_state:", "  mode: poweroff", "  timeout: 30", "  condition: true"]);
@@ -749,13 +830,19 @@ pub fn vm_meta_data(hostname: &str, stamp: &str) -> String {
 
 /// netplan v2, one entry per adapter matched by MAC (Get-CloudInitNetworkConfig, all
 /// adapters). None when there is nothing cloud-init's own DHCP default would not do.
-pub fn vm_network_config(nics: &[NicCfg]) -> Option<String> {
-    if nics.len() <= 1 && nics.iter().all(|n| n.address.is_empty()) {
+/// `no_ra`: a CIS gold of the Debian family - systemd-networkd takes no router
+/// advertisements either (the kernel's accept_ra is 0 already; networkd has its own RA
+/// client), so the config is written even for a single DHCP adapter.
+pub fn vm_network_config(nics: &[NicCfg], no_ra: bool) -> Option<String> {
+    if !no_ra && nics.len() <= 1 && nics.iter().all(|n| n.address.is_empty()) {
         return None;
     }
     let mut s = String::from("version: 2\nethernets:\n");
     for (i, n) in nics.iter().enumerate() {
         s += &format!("  nic{i}:\n    match:\n      macaddress: '{}'\n", n.mac.to_lowercase());
+        if no_ra {
+            s += "    accept-ra: false\n";
+        }
         if n.address.is_empty() {
             s += "    dhcp4: true\n";
             if i > 0 {
@@ -831,13 +918,16 @@ mod tests {
     fn network_config_multi_nic() {
         let primary = NicCfg { mac: "BC:24:11:00:00:01".into(), address: "10.0.0.5".into(), prefix: 24, gateway: "10.0.0.1".into(), dns: vec!["10.0.0.1".into()], search: "lab.local".into() };
         let extra = NicCfg { mac: "BC:24:11:00:00:02".into(), address: String::new(), prefix: 24, gateway: String::new(), dns: vec![], search: String::new() };
-        let y = vm_network_config(&[primary.clone(), extra]).unwrap();
+        let y = vm_network_config(&[primary.clone(), extra], false).unwrap();
         assert!(y.contains("nic0:") && y.contains("nic1:"));
         assert!(y.contains("via: '10.0.0.1'"));
         assert!(y.contains("use-routes: false"), "a DHCP extra adapter must not take the default route");
         // One DHCP adapter: cloud-init's own default does it.
         let dhcp = NicCfg { address: String::new(), ..primary };
-        assert!(vm_network_config(&[dhcp]).is_none());
+        assert!(vm_network_config(&[dhcp.clone()], false).is_none());
+        // A CIS gold: networkd takes no router advertisements, even on one DHCP adapter.
+        let cis = vm_network_config(&[dhcp], true).unwrap();
+        assert!(cis.contains("accept-ra: false") && cis.contains("dhcp4: true"));
     }
 
     /// Writes every image's bake user-data (all features, a region) next to the build, for
@@ -858,9 +948,18 @@ mod tests {
             disk_gb: None,
             disk_storage: None,
             cis: None,
+            mirror: "de".into(),
+            ..Default::default()
         };
         for img in catalog::LINUX {
             let ud = bake_user_data(img, &opt);
+            // The apt distributions get Germany's mirror for the bake and, by the drop-in,
+            // for every VM; the others are left alone.
+            match img.distro {
+                "ubuntu" => assert!(ud.contains("uri: http://de.archive.ubuntu.com/ubuntu/") && ud.contains("90-apt-mirror.cfg") && ud.contains("security.ubuntu.com")),
+                "debian" => assert!(ud.contains("uri: http://ftp.de.debian.org/debian/") && ud.contains("debian-security")),
+                _ => assert!(!ud.contains("90-apt-mirror.cfg")),
+            }
             assert!(ud.starts_with("#cloud-config\n"));
             assert!(ud.contains("BAKE-OK"));
             assert!(ud.contains(r#""\e[1;5D": backward-word"#) && ud.contains("$include /etc/inputrc.d/pvs-keys.inputrc"));
@@ -895,7 +994,7 @@ mod tests {
         std::fs::write(dir.join("debian13-cis2.yaml"), deb).unwrap();
         let vm = VmSeed { hostname: "h".into(), user: "admin".into(), password: "it's".into(), ssh_key: String::new(), packages: vec![], domain_join: None, arc: None, cis: true };
         let ud = vm_user_data(u, &vm);
-        assert!(ud.contains("ALL=(ALL) ALL'") && !ud.contains("chpasswd:") && ud.contains("openssl passwd -6") && ud.contains("preserve_sources_list"));
+        assert!(ud.contains("ALL=(ALL) ALL'") && !ud.contains("chpasswd:") && ud.contains("| chpasswd") && !ud.contains("openssl passwd") && ud.contains("preserve_sources_list"));
         std::fs::write(dir.join("vm-ubuntu2604-cis.yaml"), ud).unwrap();
     }
 }

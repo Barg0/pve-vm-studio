@@ -35,7 +35,7 @@ use crate::{update,
     tls::{self, AcmeSettings, ServerSettings, TlsSettings},
     virtio,
     vms::{self, VmSpec},
-    media, uup, wim, windows, winpe,
+    autoupdate, mail, maintenance, media, notify, uup, wim, windows, winpe,
     AppState,
 };
 
@@ -90,6 +90,17 @@ pub fn router() -> Router<AppState> {
         .route("/studio/update", post(studio_update))
         .route("/settings/update", get(get_update_settings).put(put_update_settings))
         .route("/uup/languages", get(uup_languages))
+        .route("/settings/maintenance", get(get_maintenance).put(put_maintenance))
+        .route("/auto-update", get(get_auto_update).put(put_auto_update))
+        .route("/auto-update/check", post(check_auto_update))
+        .route("/auto-update/runs/{id}", axum::routing::delete(dismiss_run))
+        .route("/auto-update/runs/{id}/start", post(start_run))
+        .route("/auto-update/runs/{id}/retry", post(retry_run))
+        .route("/golds/{id}/keep-current", post(set_keep_current))
+        .route("/settings/mail", get(get_mail).put(put_mail))
+        .route("/mail/test", post(test_mail))
+        .route("/mail/preview", get(mail_preview))
+        .route("/settings/notify", get(get_notify).put(put_notify))
         .route("/labs", get(list_labs).post(create_lab))
         .route("/labs/{id}", get(get_lab).put(save_lab).delete(delete_lab))
         .route("/labs/{id}/deploy", post(deploy_lab))
@@ -544,6 +555,7 @@ async fn catalog_info(State(app): State<AppState>, _user: User) -> ApiResult<imp
     Ok(Json(json!({
         "linux": catalog::LINUX,
         "features": catalog::FEATURES,
+        "mirrors": catalog::APT_MIRRORS,
         "cis": cis_images,
         "region": region,
         "locales": names,
@@ -551,13 +563,22 @@ async fn catalog_info(State(app): State<AppState>, _user: User) -> ApiResult<imp
     })))
 }
 
-async fn get_bake_settings(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+#[derive(Deserialize, Default)]
+struct BakeNodeQuery {
+    #[serde(default)]
+    node: Option<String>,
+}
+
+/// The bake settings, what "auto" resolves to, and the disk storages of the node - the
+/// resolved one, or `?node=` for a bake the form moves to another node.
+async fn get_bake_settings(State(app): State<AppState>, _user: User, axum::extract::Query(q): axum::extract::Query<BakeNodeQuery>) -> ApiResult<impl IntoResponse> {
     let s: BakeSettings = settings::load(&app.db, "bake").await?;
     // What "auto" currently resolves to, so the page can show it.
     let resolved = s.resolve(&app.pve).await.map_err(|e| format!("{e:#}"));
-    let disks = match &resolved {
-        Ok(p) => settings::disk_storages(&app.pve, &p.node).await.unwrap_or_default(),
-        Err(_) => vec![],
+    let disk_node = q.node.filter(|n| !n.is_empty()).or_else(|| resolved.as_ref().ok().map(|p| p.node.clone()));
+    let disks = match &disk_node {
+        Some(n) => settings::disk_storages(&app.pve, n).await.unwrap_or_default(),
+        None => vec![],
     };
     Ok(Json(json!({
         "settings": s,
@@ -575,6 +596,7 @@ async fn put_bake_settings(
     user.require(&app, "/vms", "VM.Allocate").await?;
     // Refused when it does not resolve - a bake would only fail later.
     s.resolve(&app.pve).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    s.linux_pool().map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
     settings::save(&app.db, "bake", &s).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -677,6 +699,30 @@ async fn start_bake(
     let img = catalog::linux(&req.image).ok_or_else(|| ApiError::bad_request(format!("unknown image {}", req.image)))?;
     if let Some(bad) = req.options.features.iter().find(|f| !catalog::FEATURES.iter().any(|x| x.id == f.as_str())) {
         return Err(ApiError::bad_request(format!("unknown feature {bad}")));
+    }
+    // Static bake addresses: this bake takes the first one no running Linux bake holds (two VMs
+    // with one address would both lose their network).
+    let bs: BakeSettings = req.options.placement_over(&settings::load(&app.db, "bake").await?);
+    // Held until this bake's gold row (and with it its address) is recorded.
+    static PICK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _pick = PICK.lock().await;
+    let mut req = req;
+    if let Some((pool, _)) = bs.linux_pool().map_err(|e| ApiError::bad_request(format!("{e:#}")))? {
+        let taken: Vec<String> = golds::list(&app.db)
+            .await?
+            .iter()
+            .filter(|g| g.os == "linux" && g.status == "baking")
+            .filter_map(|g| serde_json::from_str::<BakeOptions>(&g.options).ok().and_then(|o| o.bake_address))
+            .collect();
+        let free = pool.iter().map(|a| a.to_string()).find(|a| !taken.contains(a)).ok_or_else(|| {
+            ApiError::new(StatusCode::CONFLICT, format!("all {} bake addresses are in use by running bakes - wait for one, or widen the range under Media", pool.len()))
+        })?;
+        req.options.bake_address = Some(free);
+    }
+    // Ubuntu's and Debian's country mirrors serve http only; CIS wants every apt source on
+    // https (1.2.1.x) - the two cannot both be had.
+    if req.options.cis_level(img.id) > 0 && req.options.mirror_uri(img).is_some() {
+        return Err(ApiError::bad_request("a country mirror serves http only and CIS needs https apt sources - keep the default mirror for a CIS gold"));
     }
     if let Some(c) = &req.options.cis
         && c.level > 0
@@ -1177,7 +1223,7 @@ async fn fetch_virtio(State(app): State<AppState>, user: User) -> ApiResult<impl
 // ---- Windows golds ----
 
 /// Where the studio sees an ISO volume: <iso_root>/<storage>/<file>.
-fn iso_path(app: &AppState, volid: &str) -> Option<std::path::PathBuf> {
+pub fn iso_path(app: &AppState, volid: &str) -> Option<std::path::PathBuf> {
     let (storage, rest) = volid.split_once(':')?;
     let file = rest.strip_prefix("iso/")?;
     if file.contains('/') || file.contains("..") || storage.contains('/') {
@@ -1271,6 +1317,13 @@ async fn start_windows_bake(
     Json(opt): Json<windows::WinBakeOptions>,
 ) -> ApiResult<impl IntoResponse> {
     user.require(&app, "/vms", "VM.Allocate").await?;
+    let (job, gold_id) = spawn_windows_bake(&app, &user.session.user, opt, json!({})).await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "id": job, "gold": gold_id }))))
+}
+
+/// Starts a Windows bake: the form's, and the auto-update's (`extra` goes into the job's
+/// params). Returns (job, gold).
+pub async fn spawn_windows_bake(app: &AppState, by: &str, opt: windows::WinBakeOptions, extra: serde_json::Value) -> ApiResult<(String, String)> {
     let path = iso_path(&app, &opt.iso).ok_or_else(|| ApiError::bad_request("not an ISO volume"))?;
     let images = wim::inspect(&path, &app.config.data_dir.join("wim-cache.json"))
         .await
@@ -1318,9 +1371,13 @@ async fn start_windows_bake(
         windows::virtual_edition(&opt.edition_upgrade).map(|v| v.display.to_owned()).unwrap_or_else(|| img.name.clone()),
         golds::working_name(&gold_id)
     );
+    let mut params = json!({ "gold": gold_id, "iso": opt.iso, "index": opt.index });
+    if let (Some(p), Some(e)) = (params.as_object_mut(), extra.as_object()) {
+        p.extend(e.clone());
+    }
     let job = app
         .jobs
-        .spawn("bake", &title, &user.session.user, json!({ "gold": gold_id, "iso": opt.iso, "index": opt.index }), move |log| async move {
+        .spawn("bake", &title, by, params, move |log| async move {
             let result = async {
                 let p = bake.resolve(&pve).await?.with_disk_storage(&pve, opt.disk_storage.as_deref()).await?;
                 sqlx::query("UPDATE golds SET node = ?, storage = ? WHERE id = ?")
@@ -1368,7 +1425,7 @@ async fn start_windows_bake(
         })
         .await?;
     sqlx::query("UPDATE golds SET job_id = ? WHERE id = ?").bind(&job).bind(&gold_id).execute(&app.db).await?;
-    Ok((StatusCode::ACCEPTED, Json(json!({ "id": job, "gold": gold_id }))))
+    Ok((job, gold_id))
 }
 
 // ---- WinPE ----
@@ -1588,22 +1645,29 @@ async fn media_size(State(app): State<AppState>, _user: User, axum::extract::Que
 }
 
 #[derive(Deserialize)]
-struct MediaBuild {
-    product: String,
-    uuid: String,
-    build: String,
-    lang: String,
-    editions: Vec<String>,
+pub struct MediaBuild {
+    pub product: String,
+    pub uuid: String,
+    pub build: String,
+    pub lang: String,
+    pub editions: Vec<String>,
 }
 
 async fn media_build(State(app): State<AppState>, user: User, Json(q): Json<MediaBuild>) -> ApiResult<impl IntoResponse> {
     user.require(&app, "/vms", "VM.Allocate").await?;
+    let job = spawn_media_build(&app, &user.session.user, q, json!({})).await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
+}
+
+/// Starts a Windows media build: the blade's, and the auto-update's (`extra` goes into
+/// the job's params).
+pub async fn spawn_media_build(app: &AppState, by: &str, q: MediaBuild, extra: serde_json::Value) -> ApiResult<String> {
     let p = uup::product(&q.product).ok_or_else(|| ApiError::bad_request("no such product"))?;
     let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.');
     if !ok(&q.uuid) || !ok(&q.lang) || !ok(&q.build) || q.editions.is_empty() || !q.editions.iter().all(|e| ok(e) && !e.to_uppercase().starts_with("SERVERTURBINE")) {
         return Err(ApiError::bad_request("pick a build, a language and at least one edition"));
     }
-    already_running(&app, "media", "uuid", &q.uuid).await?;
+    already_running(app, "media", "uuid", &q.uuid).await?;
     let bake: BakeSettings = settings::load(&app.db, "bake").await?;
     let (pve, db, web, work) = (app.pve.clone(), app.db.clone(), app.web.clone(), app.config.data_dir.join("work"));
     // How the worker reaches the studio: this very server, its key pinned.
@@ -1616,15 +1680,19 @@ async fn media_build(State(app): State<AppState>, user: User, Json(q): Json<Medi
         media::Link { base: format!("https://{{ip}}:{port}"), pin }
     };
     let title = format!("Build {} {} media ({})", p.name, q.build, uup::lang_tag(&q.lang));
+    let mut params = json!({ "media": p.id, "build": q.build, "uuid": q.uuid, "lang": q.lang, "editions": q.editions });
+    if let (Some(o), Some(e)) = (params.as_object_mut(), extra.as_object()) {
+        o.extend(e.clone());
+    }
     let job = app
         .jobs
-        .spawn("media", &title, &user.session.user, json!({ "media": p.id, "build": q.build, "uuid": q.uuid, "lang": q.lang, "editions": q.editions }), move |log| async move {
+        .spawn("media", &title, by, params, move |log| async move {
             let pl = bake.resolve(&pve).await?;
             let req = media::Request { product: p, uuid: q.uuid, build: q.build, lang: q.lang, editions: q.editions };
             media::build(&pve, &db, &log, &web, &work, &pl, link, req).await.map(|_| ())
         })
         .await?;
-    Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
+    Ok(job)
 }
 
 // ---- the studio's own version and updates ----
@@ -1692,7 +1760,7 @@ async fn media_isos(State(app): State<AppState>, _user: User) -> ApiResult<impl 
 
 /// The ISOs the studio built that are still in PVE - one deleted in PVE (or by a clean-up)
 /// drops out of the record too, so nothing claims "built" for what is gone.
-async fn live_media_isos(app: &AppState) -> Vec<media::MediaIso> {
+pub async fn live_media_isos(app: &AppState) -> Vec<media::MediaIso> {
     let list: Vec<media::MediaIso> = settings::load(&app.db, "media_isos").await.unwrap_or_default();
     let Ok(res) = app.pve.resources().await else { return list };
     let mut have = std::collections::HashSet::new();
@@ -1737,6 +1805,13 @@ async fn create_lab(State(app): State<AppState>, user: User, Json(b): Json<LabBo
     let name = b.name.trim();
     if name.is_empty() {
         return Err(ApiError::bad_request("a lab needs a name"));
+    }
+    // One design for the whole studio: when there is one, that is the answer - two tabs
+    // signing in at once must not make two.
+    if let Some(first) = labs::list(&app.db).await?.into_iter().next()
+        && let Some(l) = labs::get(&app.db, &first.id).await?
+    {
+        return Ok((StatusCode::OK, Json(lab_json(l))));
     }
     let state = if b.state.is_null() { "{}".to_owned() } else { b.state.to_string() };
     let l = labs::create(&app.db, name, &state, &user.session.user).await?;
@@ -2066,4 +2141,174 @@ async fn deploy_lab(State(app): State<AppState>, user: User, Path(id): Path<Stri
         jobs.push(json!({ "job": job, "vm": vm_id, "name": spec.name }));
     }
     Ok((StatusCode::ACCEPTED, Json(json!({ "jobs": jobs }))))
+}
+
+
+// ---- maintenance windows ----
+
+async fn get_maintenance(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    let s: maintenance::MaintenanceSettings = settings::load(&app.db, "maintenance").await?;
+    let now = chrono::Local::now().naive_local();
+    Ok(Json(json!({
+        "settings": s,
+        "open": s.open_at(now).map(|t| t.format("%H:%M").to_string()),
+        "next": s.next_open(now).map(|t| t.format("%Y-%m-%dT%H:%M").to_string()),
+        "zone": std::fs::read_to_string("/etc/timezone").unwrap_or_default().trim(),
+    })))
+}
+
+async fn put_maintenance(State(app): State<AppState>, user: User, Json(s): Json<maintenance::MaintenanceSettings>) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    s.check().map_err(ApiError::bad_request)?;
+    settings::save(&app.db, "maintenance", &s).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---- Windows auto-update ----
+
+/// The settings, the runs, and for every Windows gold whether it can follow and does.
+async fn get_auto_update(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    let s: autoupdate::AutoUpdateSettings = settings::load(&app.db, "auto_update").await?;
+    let isos = live_media_isos(&app).await;
+    let mut golds_out = serde_json::Map::new();
+    for g in golds::list(&app.db).await?.into_iter().filter(|g| g.os == "windows" && g.status == "ready") {
+        let on = serde_json::from_str::<windows::WinBakeOptions>(&g.options).is_ok_and(|o| o.keep_current);
+        let v = match autoupdate::eligibility(&g, &isos) {
+            Ok((p, iso)) => json!({ "on": on, "can": true, "product": p.name, "build": iso.build, "iso": iso.volid }),
+            Err(why) => json!({ "on": on, "can": false, "why": why }),
+        };
+        golds_out.insert(g.id.clone(), v);
+    }
+    let runs = autoupdate::list_runs(&app.db).await?;
+    let runs: Vec<serde_json::Value> = runs
+        .into_iter()
+        .map(|r| {
+            let followers: serde_json::Value = serde_json::from_str(&r.golds).unwrap_or_default();
+            json!({
+                "id": r.id, "source_iso": r.source_iso, "product": uup::product(&r.product).map(|p| p.name).unwrap_or(""),
+                "from": r.from_build, "to": r.to_build, "release": r.release, "step": r.step, "new_iso": r.new_iso,
+                "golds": followers, "job": r.job_id, "error": r.error, "failed_step": r.failed_step, "force": r.force != 0,
+                "created_at": r.created_at, "updated_at": r.updated_at,
+            })
+        })
+        .collect();
+    let w: maintenance::MaintenanceSettings = settings::load(&app.db, "maintenance").await?;
+    let now = chrono::Local::now().naive_local();
+    Ok(Json(json!({
+        "settings": s, "runs": runs, "golds": golds_out,
+        "window_open": w.open_at(now).is_some(),
+        "next_window": w.next_open(now).map(|t| t.format("%Y-%m-%dT%H:%M").to_string()),
+    })))
+}
+
+async fn put_auto_update(State(app): State<AppState>, user: User, Json(s): Json<autoupdate::AutoUpdateSettings>) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    if !(1..=10).contains(&s.keep_golds) {
+        return Err(ApiError::bad_request("keep 1 to 10 golds per kind"));
+    }
+    settings::save(&app.db, "auto_update", &s).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn check_auto_update(State(app): State<AppState>, user: User) -> ApiResult<impl IntoResponse> {
+    user.require(&app, "/vms", "VM.Allocate").await?;
+    let made = autoupdate::check(&app).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    Ok(Json(json!({ "found": made })))
+}
+
+async fn start_run(State(app): State<AppState>, user: User, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
+    user.require(&app, "/vms", "VM.Allocate").await?;
+    autoupdate::start_now(&app.db, &id).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn retry_run(State(app): State<AppState>, user: User, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
+    user.require(&app, "/vms", "VM.Allocate").await?;
+    autoupdate::retry(&app.db, &id).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn dismiss_run(State(app): State<AppState>, user: User, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
+    user.require(&app, "/vms", "VM.Allocate").await?;
+    autoupdate::dismiss(&app.db, &id).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct KeepCurrent {
+    on: bool,
+}
+
+/// Keep current on a Windows gold: it follows its ISO's product from now on.
+async fn set_keep_current(State(app): State<AppState>, user: User, Path(id): Path<String>, Json(q): Json<KeepCurrent>) -> ApiResult<impl IntoResponse> {
+    user.require(&app, "/vms", "VM.Allocate").await?;
+    let g = golds::get(&app.db, &id).await?.ok_or_else(|| ApiError::not_found("no such gold"))?;
+    let mut opt: windows::WinBakeOptions = serde_json::from_str(&g.options).map_err(|_| ApiError::bad_request("only Windows golds follow a product"))?;
+    if q.on {
+        autoupdate::eligibility(&g, &live_media_isos(&app).await).map_err(ApiError::bad_request)?;
+    }
+    opt.keep_current = q.on;
+    sqlx::query("UPDATE golds SET options = ? WHERE id = ?").bind(serde_json::to_string(&opt).unwrap_or_default()).bind(&id).execute(&app.db).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---- mail and notifications ----
+
+async fn get_mail(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    let m: mail::MailSettings = settings::load(&app.db, "mail").await?;
+    let st: notify::MailStatus = settings::load(&app.db, "mail_status").await?;
+    let log = mail::log(&app.db, 25).await?;
+    let themes: Vec<_> = mail::themes().into_iter().map(|(id, name)| json!({ "id": id, "name": name })).collect();
+    Ok(Json(json!({ "settings": m, "status": st, "log": log, "themes": themes })))
+}
+
+#[derive(Deserialize)]
+struct PreviewQuery {
+    #[serde(default)]
+    theme: String,
+}
+
+/// A sample mail in a theme, as the Mail card's preview shows it (icons inlined).
+async fn mail_preview(State(app): State<AppState>, _user: User, axum::extract::Query(q): axum::extract::Query<PreviewQuery>) -> ApiResult<impl IntoResponse> {
+    let url = notify::studio_url(&app).await;
+    let host = std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_owned()).unwrap_or_default();
+    let html = mail::preview(if q.theme.is_empty() { mail::DEFAULT_THEME } else { &q.theme }, &url, &host);
+    Ok(([(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8"), (axum::http::header::CACHE_CONTROL, "no-store")], html))
+}
+
+async fn put_mail(State(app): State<AppState>, user: User, Json(m): Json<mail::MailSettings>) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    m.check().map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    settings::save(&app.db, "mail", &m).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Sends a test mail with the settings as given (saved or not), and says what the smart
+/// host answered.
+async fn test_mail(State(app): State<AppState>, user: User, Json(m): Json<mail::MailSettings>) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    let reply = notify::test(&app, &m, &user.session.user).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    Ok(Json(json!({ "reply": reply })))
+}
+
+async fn get_notify(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    let n: notify::NotifySettings = settings::load(&app.db, "notify").await?;
+    Ok(Json(json!({ "events": n.all() })))
+}
+
+#[derive(Deserialize)]
+struct NotifyBody {
+    events: std::collections::BTreeMap<String, bool>,
+}
+
+async fn put_notify(State(app): State<AppState>, user: User, Json(b): Json<NotifyBody>) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    // Only what differs from the default is kept, so a later default change still reaches it.
+    let events = b
+        .events
+        .into_iter()
+        .filter(|(k, v)| notify::EVENTS.iter().any(|e| e.0 == k && e.3 != *v))
+        .collect();
+    settings::save(&app.db, "notify", &notify::NotifySettings { events }).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

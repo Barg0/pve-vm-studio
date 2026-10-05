@@ -338,6 +338,14 @@ button.gold-flag { font-family: inherit; cursor: pointer; background: none; }
 .dash-split .dot.bad { background: var(--danger); }
 .dash-split .dot.warn { background: var(--warn); }
 .dash-split .dot.design { background: transparent; border: 1.5px dashed var(--fg-muted); width: 9px; height: 9px; box-sizing: border-box; }
+/* A media card's state in its subtitle: a dot, then the words in the dot's colour. */
+.vio-meta { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.vio-meta .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.vio-meta .dot.ok { background: var(--success); box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 30%, transparent); }
+.vio-meta .dot.run { background: var(--run); }
+.vio-meta .dot.warn { background: var(--warn); }
+.vio-meta .dot.idle { border: 1px solid var(--fg-muted); width: 5px; height: 5px; }
+.vio-ok { color: var(--success-text); } .vio-run { color: var(--run); } .vio-warn { color: var(--warn); }
 /* A section's way to its blade: an icon button in the heading's own line, no taller than it. */
 .dash-sec h5 { min-height: 26px; }
 /* A section's way to its blade: the studio's square icon button, at the heading's right. */
@@ -377,14 +385,16 @@ button.gold-flag { font-family: inherit; cursor: pointer; background: none; }
 .dash-act-took { font-size: 11.5px; color: var(--fg-muted); }
 
 .dash-vms { display: flex; flex-direction: column; }
-.dash-vm { display: grid; grid-template-columns: 10px minmax(90px, .8fr) minmax(0, 1.4fr) minmax(90px, auto) auto; gap: 12px; align-items: center; width: 100%; text-align: left;
+/* Fixed address and state columns: every row's grid lines up with the one above it. */
+.dash-vm { display: grid; grid-template-columns: 10px minmax(0, .8fr) minmax(0, 1.4fr) 15ch 7.5rem; gap: 12px; align-items: center; width: 100%; text-align: left;
   font: inherit; color: var(--fg); background: none; border: 0; border-top: 1px solid var(--divider); padding: 7px 4px; cursor: pointer; }
 .dash-vm:first-child { border-top: 0; }
 .dash-vm:hover { background: var(--bg-hover); }
 .dash-vm-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-vm-os { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--fg-muted); min-width: 0; white-space: nowrap; overflow: hidden; }
 .dash-vm-os img { width: 15px; height: 15px; flex-shrink: 0; }
-.dash-vm-ip { font-size: 12px; color: var(--fg-muted); }
+.dash-vm-ip { font-size: 12px; color: var(--fg-muted); text-align: right; font-variant-numeric: tabular-nums; }
+.dash-vm > .pill { width: 100%; box-sizing: border-box; justify-content: center; }
 
 .dash-split .card-body:has(> .dash-sys) { padding: 0; }
 .dash-sec { padding: 10px 16px 12px; border-top: 1px solid var(--divider); display: flex; flex-direction: column; gap: 3px; }
@@ -393,8 +403,10 @@ button.gold-flag { font-family: inherit; cursor: pointer; background: none; }
 .dash-line { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 2px 0; min-height: 22px; }
 .dash-line-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dash-line-right { font-size: 12px; color: var(--fg-muted); display: flex; align-items: center; gap: 6px; }
-.dash-mini { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 1px 0 1px 16px; }
-.dash-mini.wide { grid-template-columns: minmax(0, 1fr) auto; }
+/* The value column has one width for every row, so CPU, RAM and DISK bars end at the same x. */
+.dash-mini { display: grid; grid-template-columns: 36px minmax(0, 1fr) 15ch; gap: 8px; align-items: center; padding: 1px 0 1px 16px; }
+.dash-mini > :last-child { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dash-mini.wide { grid-template-columns: minmax(0, 1fr) 15ch; }
 .dash-mini em { font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .4px; color: var(--fg-muted); }
 .dash-mini .meter-track { display: block; height: 6px; }
 .dash-mini .meter-fill { display: block; }
@@ -546,7 +558,7 @@ fieldset.built-lock:disabled { opacity: .72; }
 .cis-modal { width: min(980px, 100%); max-height: min(86vh, 900px); display: flex; flex-direction: column; gap: 12px; }
 .cis-head { display: flex; align-items: flex-start; gap: 12px; }
 .cis-head h2 { margin: 0 0 2px; font-size: 15px; }
-.cis-head .confirm-icon img { width: 18px; height: 18px; }
+.cis-head .card-icon img { width: 18px; height: 18px; }
 .cis-score { margin-left: auto; text-align: right; display: flex; flex-direction: column; }
 .cis-score b { font-size: 22px; line-height: 1.1; }
 .cis-score span { font-size: 11px; color: var(--fg-muted); }
@@ -610,7 +622,7 @@ a.btn, a.btn:hover { text-decoration: none; }
 /* One height per row of buttons, everywhere (a general rule): a card head's actions, an
    overlay's or a form's footer - 32 px for every button, icon button and pill; a table row's
    actions - 28 px. Icon buttons are square. */
-.card-head .card-actions > .btn, .card-head .card-actions > .pill.status,
+.card-head .card-actions > .btn, .card-head .card-actions > .pill.status, .card-head .card-actions > .pill.role,
 .actions > .btn, .actions > a.btn, .cf-actions > .btn, .gs-actions .btn { height: 32px; min-height: 0; box-sizing: border-box; }
 .card-head .card-actions > .btn.sm, .actions > .btn.sm { padding: 0 12px; font-size: 12.5px; }
 .card-head .card-actions > .btn.icon, .actions > .btn.icon { width: 32px; padding: 0; justify-content: center; }
@@ -638,3 +650,84 @@ a.btn, a.btn:hover { text-decoration: none; }
 .ver-k { display: inline-block; min-width: 58px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
 .ver-k.new { color: var(--success-text); } .ver-k.fix { color: var(--warn); } .ver-k.chg { color: var(--band-ident); }
 @media (max-width: 720px) { .ver-cmp { grid-template-columns: 1fr; } .ver-arrow { display: none; } }
+
+/* Maintenance windows (Studio settings): one row per window - its days, its times, Patch
+   week only, remove. Wraps to two lines on a narrow screen. */
+.mw-rows { display: flex; flex-direction: column; gap: 8px; }
+.mw-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-subtle); }
+.mw-days .btn { height: 30px; min-width: 44px; justify-content: center; padding: 0 8px; }
+.mw-times { display: inline-flex; align-items: center; gap: 8px; }
+.mw-times input { width: 110px; height: 30px; }
+.mw-dash { color: var(--fg-muted); font-size: 12px; }
+.mw-row .toggle.mw-patch { width: auto; padding: 6px 10px; margin-left: auto; }
+.mw-empty { margin: 4px 0; }
+
+/* Windows updates (Media): a run's step as a dot and words. */
+.au-step { display: inline-flex; align-items: center; gap: 7px; }
+.au-step .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--fg-muted); display: inline-block; }
+.au-step .dot.ok { background: var(--success); }
+.au-step .dot.run { background: var(--run); box-shadow: 0 0 0 3px var(--run-soft); }
+.au-step .dot.bad { background: var(--danger); }
+.au-step .dot.warn { background: var(--warn); }
+.au-step .dot.idle { background: transparent; border: 1.5px solid var(--fg-muted); width: 8px; height: 8px; box-sizing: border-box; }
+
+/* Keep current on a gold card's head: the switch and its words, no box around it. */
+.gold-acts .toggle.gold-keep { width: auto; border: 0; background: none; padding: 0 6px 0 0; gap: 8px; font-size: 12px; color: var(--fg-muted); }
+.gold-acts .toggle.gold-keep:hover { background: none; color: var(--fg); }
+.gold-acts .toggle.gold-keep .toggle-label { order: 2; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+
+/* Notifications without mail: the toggles stay readable but cannot be changed. */
+.notify-groups.is-off { opacity: .45; pointer-events: none; }
+.notify-off-banner { margin-bottom: 4px; }
+.notify-off-banner .warn-banner { display: flex; width: 100%; max-width: none; box-sizing: border-box; padding: 7px 10px; }
+
+/* A card's buttons in a footer band that mirrors its head: the card's own subtle fill and
+   rule, edge to edge, kept slim (9 px + 28 px buttons) so the card does not get fat. Only as
+   the body's last element - an action row inside a section keeps the plain divider. */
+.card-body > .gs-actions:last-child, .card:not(.collapsible) > .gs-actions:last-child {
+  margin: 14px -16px -16px; padding: 9px 16px; border-top: 1px solid var(--border);
+  background: var(--bg-subtle); border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+.card-body > .gs-actions:last-child .btn, .card:not(.collapsible) > .gs-actions:last-child .btn { height: 28px; font-size: 12.5px; }
+.card-body > .gs-actions:last-child .gs-actions-note { font-size: 12px; }
+
+/* Where a bake runs: chips at the foot of the bake form, a picker above them. */
+.bake-place { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-right: auto; position: relative; }
+.chip-btn { height: 28px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; font: inherit; font-size: 12px;
+  color: var(--fg); background: var(--bg-subtle); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); cursor: pointer; }
+.chip-btn:hover { background: var(--bg-hover); }
+.chip-btn.on { border-color: var(--accent-border); background: var(--accent-soft); }
+.chip-btn img { width: 14px; height: 14px; }
+.chip-btn .k { color: var(--fg-muted); }
+.chip-btn b { font-weight: 600; }
+.bake-place-pop { position: absolute; left: 0; bottom: calc(100% + 10px); z-index: var(--z-popover); width: min(680px, 86vw);
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 12px;
+  background: var(--bg-elevated); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); }
+.bake-place-acts { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 640px) { .bake-place-pop { grid-template-columns: 1fr; } }
+
+/* Mail card: the sent-mail log - job steps, one per mail, the SMTP code as its verdict. */
+.ml-log { display: flex; flex-direction: column; gap: 6px; max-height: 420px; overflow: auto; }
+.ml-row > summary { grid-template-columns: 10px minmax(0, 1fr) auto auto; }
+.ml-main { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.ml-main .step-n { max-width: none; }
+.ml-code { font-family: var(--mono); font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: var(--radius); border: 1px solid; min-width: 4ch; text-align: center; }
+.ml-code.c-ok { color: var(--success); border-color: color-mix(in srgb, var(--success) 45%, transparent); background: color-mix(in srgb, var(--success) 12%, transparent); }
+.ml-code.c-warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.ml-code.c-bad { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.ml-row .step-took { white-space: nowrap; min-width: 9ch; }
+.ml-row .job-log { padding: 6px 0; }
+.ml-row.s-warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+
+/* Mail card: the theme with its preview, and the preview itself - the mail at its own
+   640px, framed as a client shows it. */
+.ml-theme { display: flex; gap: 8px; }
+.ml-theme select { flex: 1; min-width: 0; }
+.ml-preview { width: min(760px, 100%); max-height: min(92vh, 1100px); display: flex; flex-direction: column; gap: 12px; }
+.ml-pv-head { display: flex; align-items: center; gap: 12px; }
+.ml-pv-head h2 { flex: 1; margin: 0; font-size: 16px; }
+.ml-pv-head select { width: 200px; }
+.ml-pv-frame { width: 100%; height: min(72vh, 860px); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-subtle); }
+.ml-preview .actions { display: flex; gap: 8px; justify-content: flex-end; }
+.section.collapsible > .section-body > :is(.ml-log, p.hint):first-child { margin-top: 12px; }
+.section.collapsible > .section-body > p.hint:only-child { margin-bottom: 0; }

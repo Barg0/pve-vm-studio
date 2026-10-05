@@ -1,9 +1,12 @@
 # CIS Ubuntu 26.04 - chapter 6: logging (journald / rsyslog / log files), auditd, AIDE.
 #
 # Decisions
-# - Logger: journald is the studio's method. rsyslog is neither installed nor removed: the
-#   rsyslog rules (6.1.1.1.3, 6.1.2.x) apply when the rsyslog package is installed (then it
-#   is in use and gets hardened), else they return na. journald rules always apply.
+# - Logger: journald is the studio's method (LOGGER in bench.conf, default journald). The
+#   benchmark wants exactly one and says of 6.1.1.1.3 and all of 6.1.2: "do not apply if
+#   systemd-journald is used". So 6.1.1.1.3's fix purges rsyslog (Ubuntu server installs it)
+#   and its check FAILS while rsyslog is installed - two loggers is not "journald chosen".
+#   With rsyslog gone the 6.1.2.x rules are na, on the benchmark's own word. LOGGER=rsyslog
+#   would keep it and harden it instead (then 6.1.2.5/9/10 need a remote log host).
 # - 6.1.1.1.4 (manual): the tmpfiles check is run; nothing too open -> pass, else review.
 #   Decision: systemd's tmpfiles defaults are kept (utmp-group files stay 0664/0660).
 # - 6.1.1.1.5 (manual): drop-in sets SystemMaxUse=1G, SystemKeepFree=500M, RuntimeMaxUse=200M,
@@ -13,8 +16,10 @@
 #   with no forwarding configured 6.1.2.9/6.1.2.10 are na, 6.1.2.5 is review (or na w/o rsyslog).
 # - 6.1.2.4 / 6.1.2.7 (manual): distro rsyslog selectors and logrotate policy kept; review.
 # - 6.1.3.1: anchored owner/group matching (CIS's is a substring match - stricter here).
-#   The fix also turns "create 644" into "create 0640" in /etc/logrotate.d/* so rotated
-#   files stay compliant (the benchmark's "permanent fix").
+#   The fix also makes new files compliant, not only the ones there now (the benchmark's
+#   "permanent fix"): "create 644" -> "create 0640" in /etc/logrotate.d/*, and sysstat's own
+#   UMASK=0027 in /etc/sysstat/sysstat - sa1/sa2 start a new /var/log/sysstat/saDD every day
+#   with that umask (0022 shipped = 0644 files, failing again from day two).
 # - auditd/aide are installed with --no-install-recommends (no MTA pulled in).
 # - 6.2.1.3/6.2.1.4: audit=1 and audit_backlog_limit=8192 appended to GRUB_CMDLINE_LINUX in
 #   /etc/default/grub.d/60-pvs-cis-audit*.cfg, then update-grub. Effective after reboot.
@@ -28,8 +33,11 @@
 #   -C operand order normalized) on disk (rules.d) AND running (auditctl -l).
 # - Path/dir watch rules are only added/required when the watched dir (dir=) or the parent
 #   dir (path=) exists - a missing one cannot be loaded (benchmark: absent = passing).
-# - 6.2.3.3: sudo-rs (26.04 default) has no logfile; with no "Defaults logfile=" the rule
-#   is na. With one configured, the rule watches that file.
+# - 6.2.3.3: decided by the sudo actually in use (c5_sudo_impl), not by what is installed.
+#   Classic sudo: the fix sets Defaults logfile="/var/log/sudo.log" and watches it. sudo-rs
+#   (26.04's default) has no logfile option at all, so the rule FAILS there - and the
+#   benchmark's exceptions.default declares that deviation with its reason (sudo events go to
+#   the persistent journal, which 5.2.3 accepts). No sudo at all: na.
 # - 6.2.3.10: privileged-command rules are generated from the SUID/SGID files found AT FIX
 #   TIME (/etc/audit/rules.d/55-pvs-cis-privileged.rules). Software installed later is not
 #   covered until the fix runs again; the check then fails. /snap mounts are skipped.
@@ -49,6 +57,7 @@ C6_INIT_RULES=/etc/audit/rules.d/01-pvs-cis-initialize.rules
 C6_FINAL_RULES=/etc/audit/rules.d/99-finalize.rules
 C6_SPACE_SCRIPT=/usr/local/sbin/pvs-cis-audit-space-left
 C6_AIDE_CONF=/etc/aide/aide.conf
+C6_LOGGER=${LOGGER:-journald}
 
 # ---- chapter helpers: logging ----
 
@@ -249,15 +258,21 @@ c6_rule_in() {
 c6_disk_rules() { cat /etc/audit/rules.d/*.rules 2>/dev/null | grep -Ev '^[[:space:]]*(#|$)'; }
 c6_run_rules() { auditctl -l 2>/dev/null; }
 
-# A watch rule can only be loaded when its directory (dir=) or parent (path=) exists.
+# A watch rule can only be loaded when its directory (dir=) or parent (path=) exists. Only the
+# network configuration watches may be skipped when absent - the benchmark allows that for
+# 6.2.3.8/6.2.3.9 (ifupdown, NetworkManager: one of them is not there). Any other watch on a
+# missing target is required anyway, so its check fails rather than passing unseen.
 c6_target_ok() {
-    local p
+    local p t
     p=$(grep -oE -- '-F (path|dir)=[^ ]+' <<<"$1" | head -n 1)
     [ -n "$p" ] || return 0
     case $p in
-        *dir=*) [ -d "${p#*dir=}" ] ;;
-        *) p=${p#*path=}; [ -d "${p%/*}" ] ;;
+        *dir=*) t=${p#*dir=}; t=${t%/} ;;
+        *) t=${p#*path=}; t=${t%/*} ;;
     esac
+    [ -d "$t" ] && return 0
+    case $t in /etc/network | /etc/network/* | /etc/networks | /etc/netplan | /etc/NetworkManager | /etc/NetworkManager/*) return 1 ;; esac
+    return 0
 }
 
 # Every RULE present on disk (rules.d) and in the running configuration.
@@ -385,7 +400,15 @@ fix_journal_remote_receiver_not_in_use() {
 
 rule journald-forwards-to-rsyslog-if-rsyslog "journald forwards to rsyslog (if rsyslog)"
 check_journald_forwards_to_rsyslog_if_rsyslog() {
-    if ! c6_rsyslog_used; then ev "rsyslog not installed - journald is the logger"; return 2; fi
+    if [ "$C6_LOGGER" = journald ]; then
+        if c6_rsyslog_used; then
+            ev "journald is the chosen logger, but rsyslog is installed - two loggers"
+            return 1
+        fi
+        ev "journald is the chosen logger, rsyslog not installed - the benchmark: do not apply"
+        return 2
+    fi
+    if ! c6_rsyslog_used; then ev "rsyslog is the chosen logger but not installed"; return 1; fi
     local bad=0
     if systemd-analyze cat-config systemd/journald.conf 2>/dev/null | grep -Piq '^\h*ForwardToSyslog\h*=\h*yes\b'; then
         ev "ForwardToSyslog=yes"
@@ -397,7 +420,17 @@ check_journald_forwards_to_rsyslog_if_rsyslog() {
     return $bad
 }
 fix_journald_forwards_to_rsyslog_if_rsyslog() {
-    c6_rsyslog_used || return 0
+    if [ "$C6_LOGGER" = journald ]; then
+        local inst
+        inst=$(c2_installed rsyslog rsyslog-gnutls rsyslog-gssapi rsyslog-relp)
+        systemctl stop rsyslog.service syslog.socket 2>/dev/null
+        # shellcheck disable=SC2086
+        [ -z "$inst" ] || c2_apt purge $inst || return 1
+        c6_journald_set ForwardToSyslog no
+        c6_journald_reload
+        return 0
+    fi
+    pkg_installed rsyslog || pkg_install rsyslog
     c6_journald_set ForwardToSyslog yes
     c6_journald_reload
 }
@@ -606,6 +639,15 @@ fix_log_files_in_var_log_restricted() {
         [ -f "$f" ] || continue
         sed -i -E 's/^([[:space:]]*create[[:space:]]+)0?644([[:space:]])/\10640\2/' "$f"
     done
+    # sysstat's collector writes a new saDD (and sarDD) every day with ITS umask, set in its
+    # own config file (a dpkg conffile, kept on upgrade).
+    if [ -f /etc/sysstat/sysstat ]; then
+        if grep -Eq '^[[:space:]]*UMASK=' /etc/sysstat/sysstat; then
+            sed -i -E 's/^[[:space:]]*UMASK=.*/UMASK=0027/' /etc/sysstat/sysstat
+        else
+            echo 'UMASK=0027' >> /etc/sysstat/sysstat
+        fi
+    fi
     c6_logfiles 1 >/dev/null
     # apt's daily runs create /var/log/apt files with the default umask (0644) on clones.
     local u
@@ -737,11 +779,14 @@ c6_sudo_logfile() {
 c6_sudo_rule() { echo "-a always,exit -F arch=b64 -F path=$1 -F perm=wa -k sudo_log_file"; }
 rule audit-sudo-log-file-changes "Audit sudo log file changes"
 check_audit_sudo_log_file_changes() {
-    local f
+    local f impl
+    impl=$(c5_sudo_impl)
     f=$(c6_sudo_logfile)
+    if [ -z "$impl" ]; then ev "sudo: not installed"; return 2; fi
+    ev "sudo in use: $impl"
     if [ -z "$f" ]; then
-        if pkg_installed sudo-rs; then ev "sudo-rs: no logfile support, logs go to the journal"; else ev "no sudo logfile configured (sudo logs to the journal)"; fi
-        return 2
+        if [ "$impl" = sudo-rs ]; then ev "sudo-rs has no logfile option - no sudo log file to watch"; else ev "no Defaults logfile= configured"; fi
+        return 1
     fi
     ev "sudo logfile: $f"
     c6_audit_check "$(c6_sudo_rule "$f")"
@@ -749,7 +794,12 @@ check_audit_sudo_log_file_changes() {
 fix_audit_sudo_log_file_changes() {
     local f
     f=$(c6_sudo_logfile)
-    [ -n "$f" ] || return 0
+    if [ -z "$f" ]; then
+        # sudo-rs has nothing to set; classic sudo gets its log file.
+        [ "$(c5_sudo_impl)" = sudo ] || return 0
+        c5_sudoers_add 'Defaults logfile="/var/log/sudo.log"' || return 1
+        f=/var/log/sudo.log
+    fi
     c6_audit_fix "$(c6_sudo_rule "$f")"
 }
 
@@ -1003,6 +1053,13 @@ rule audit-apparmor-policy-changes "Audit AppArmor policy changes"
 check_audit_apparmor_policy_changes() { c6_audit_check "${C6_R_6_2_3_26[@]}"; }
 fix_audit_apparmor_policy_changes() { c6_audit_fix "${C6_R_6_2_3_26[@]}"; }
 
+# 6.2.3.27: on Ubuntu 26.04 /usr/bin/chcon is a symlink into rust-coreutils' multi-call binary
+# (one inode, 100+ names). The rule is the benchmark's and passes its audit, but a path watch
+# does not follow the symlink, so running chcon is not recorded by THIS rule. What chcon does -
+# set the security.selinux xattr - is recorded by 6.2.3.9's setxattr/lsetxattr/fsetxattr
+# rules for every user. Watching the multi-call binary instead would log every coreutils
+# command; switching the gold to GNU coreutils (coreutils-from-gnu) only for this was judged
+# out of proportion.
 C6_R_6_2_3_27=("-a always,exit -F arch=b64 -F path=/usr/bin/chcon -F perm=x -F auid>=$C6_UID -F auid!=unset -k perm_chng")
 rule audit-chcon-use "Audit chcon use"
 check_audit_chcon_use() { c6_audit_check "${C6_R_6_2_3_27[@]}"; }
@@ -1030,7 +1087,7 @@ check_audit_kmod_use() {
     c6_audit_check "${C6_R_6_2_3_31[@]}" || bad=1
     k=$(readlink -f /bin/kmod)
     for f in /usr/sbin/lsmod /usr/sbin/rmmod /usr/sbin/insmod /usr/sbin/modinfo /usr/sbin/modprobe /usr/sbin/depmod; do
-        [ -e "$f" ] || [ -L "$f" ] || { ev "$f: missing"; continue; }
+        [ -e "$f" ] || [ -L "$f" ] || { ev "$f: missing"; bad=1; continue; }
         if [ "$(readlink -f "$f")" = "$k" ]; then ev "$f -> kmod"; else ev "$f -> $(readlink -f "$f") (not kmod)"; bad=1; fi
     done
     return $bad

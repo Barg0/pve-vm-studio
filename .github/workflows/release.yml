@@ -16,9 +16,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --release
       - run: cargo build --release
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-about
       - name: Assets
         run: |
           mkdir dist
+          # The licenses of every crate in the binary, as their MIT/Apache terms ask.
+          cargo about generate about.hbs -o dist/THIRD-PARTY-LICENSES.html
           cp target/release/pve-vm-studio dist/pve-vm-studio-x86_64
           cp deploy/install.sh deploy/update-lxc.sh deploy/pve-vm-studio.service deploy/pvs-update.sh \
              deploy/pve-vm-studio-update.path deploy/pve-vm-studio-update.service dist/

@@ -19,7 +19,7 @@
 //!
 //! A VM's first boot: the gold's specialize pass runs firstboot.cmd, which finds the VM's
 //! own CD, names the machine and points Setup at the VM's answer file for oobeSystem
-//! (Setup never searches a CD for one after generalize - see docs/windows-provisioning.md).
+//! (Setup never searches a CD for one after generalize).
 //! SetupComplete.cmd sets a static address when there is one and leaves the marker the
 //! studio waits for; then the CD, which holds the passwords, is ejected and deleted.
 
@@ -321,6 +321,10 @@ pub struct WinBakeOptions {
     /// This bake's disk storage (thin or thick by the storage); None = the bake settings'.
     #[serde(default)]
     pub disk_storage: Option<String>,
+    /// Keep current: baked again from every newer Patch Tuesday build of its ISO's product
+    /// (autoupdate.rs). A gold the auto-update bakes inherits it.
+    #[serde(default)]
+    pub keep_current: bool,
 }
 
 impl WinBakeOptions {
@@ -1000,7 +1004,7 @@ pub(crate) async fn run_pass(
         log.check_abort()?;
         if started.elapsed() > Duration::from_secs(timeout_min * 60) {
             let _ = pve.vm_action(node, vmid, "stop").await;
-            bail!("{label} did not finish within {timeout_min} minutes (markers so far: {})", markers.join(" "));
+            bail!("{label} did not finish within {timeout_min} minutes (so far: {})", crate::markers::list(&markers));
         }
         match tokio::time::timeout(Duration::from_secs(5), lines.recv()).await {
             Ok(Some(line)) => {
@@ -1020,11 +1024,12 @@ pub(crate) async fn run_pass(
                     }
                     if part.starts_with("PVS-") {
                         // One line per feature, capability or app is detail: the caller sums
-                        // them up per Server Manager feature.
-                        if ["PVS-FEATURE-", "PVS-CAP-", "PVS-APP-"].iter().any(|p| part.starts_with(p)) {
-                            log.debug(part).await;
+                        // them up per Server Manager feature. So is a worker's verdict per
+                        // update, which the media build words itself.
+                        if ["PVS-FEATURE-", "PVS-CAP-", "PVS-APP-", "PVS-UPD-OK", "PVS-UPD-FAIL"].iter().any(|p| part.starts_with(p)) {
+                            log.debug(crate::markers::text(part)).await;
                         } else {
-                            log.line(part).await;
+                            log.line(crate::markers::text(part)).await;
                         }
                         markers.push(part.to_owned());
                     } else {
@@ -1130,7 +1135,6 @@ pub async fn bake(
             ("cpu", &p.cpu_windows),
             ("cores", p.cores.max(2)),
             ("memory", p.memory_mb.max(4096)),
-            ("balloon", 0),
             ("efidisk0", format!("{}:1,efitype=4m,pre-enrolled-keys=1", p.disk_storage)),
             ("scsihw", "virtio-scsi-single"),
             ("scsi0", format!("{}:{},discard=on,iothread=1,ssd=1", p.disk_storage, opt.disk_gb())),
@@ -1166,7 +1170,7 @@ pub async fn bake(
         pr.stage(3.0, 40.0, "WinPE pass 1");
         let m = run_pass(pve, log, &mut pr, node, vmid, "pass 1", 40).await?;
         if !m.iter().any(|l| l == "PVS-PASS1-OK") {
-            bail!("pass 1 failed: {}", m.last().cloned().unwrap_or_else(|| "no markers on the serial console".into()));
+            bail!("pass 1 failed: {}", m.last().map(|l| crate::markers::text(l)).unwrap_or_else(|| "nothing on the serial console".into()));
         }
         // Asked now, before audit mode has cost twenty minutes: an index that cannot become
         // the edition will not become it after sysprep either.
@@ -1216,7 +1220,7 @@ pub async fn bake(
         let m = run_pass(pve, log, &mut pr, node, vmid, "pass 2", 30).await?;
         if !m.iter().any(|l| l == "PVS-PASS2-OK") {
             let why = m.iter().find(|l| l.starts_with("PVS-NO-SYSPREP-TAG") || l.starts_with("PVS-NOT-GENERALIZED") || l.starts_with("PVS-EDITION-NOT-CHANGED") || l.ends_with("FAILED")).cloned();
-            bail!("pass 2 failed: {}", why.or_else(|| m.last().cloned()).unwrap_or_else(|| "no markers on the serial console".into()));
+            bail!("pass 2 failed: {}", why.or_else(|| m.last().cloned()).map(|l| crate::markers::text(&l)).unwrap_or_else(|| "nothing on the serial console".into()));
         }
 
         // ---- make it a gold ----

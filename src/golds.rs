@@ -376,6 +376,8 @@ async fn bake_linux_inner(
     let pve = &ctx.pve;
     let mut pr = Progress::new(log, format!("Baking {}", img.name));
     pr.stage(0.0, 25.0, "cloud image");
+    // The bake form's node and network for this bake, over the bake settings'.
+    let settings = opt.placement_over(settings);
     let p: Placement = settings.resolve(pve).await?.with_disk_storage(pve, opt.disk_storage.as_deref()).await?;
     let node = p.node.as_str();
     check_node_memory(pve, log, node, p.memory_mb).await?;
@@ -456,6 +458,17 @@ async fn bake_linux_inner(
     // the VM exists. A CIS bake carries the pvs-cis bundle on it as well.
     let meta = linux::bake_meta_data(img.id, &stamp);
     let mut files: Vec<(String, Vec<u8>)> = vec![("user-data".into(), user_data.into_bytes()), ("meta-data".into(), meta.into_bytes())];
+    // A network without DHCP: the bake VM gets the static address from the bake settings,
+    // matched by the MAC it is created with. The clone's first boot writes its own.
+    let bake_mac = crate::vms::new_mac();
+    if let Some(ip) = opt.bake_address.clone().filter(|a| !a.is_empty()) {
+        let prefix = p.linux_address.rsplit_once('/').and_then(|(_, b)| b.trim().parse::<u8>().ok()).unwrap_or(24);
+        let nic = linux::NicCfg { mac: bake_mac.clone(), address: ip.clone(), prefix, gateway: p.linux_gateway.clone(), dns: p.linux_dns.clone(), search: String::new() };
+        if let Some(n) = linux::vm_network_config(&[nic], false) {
+            files.push(("network-config".into(), n.into_bytes()));
+        }
+        log.line(format!("Bake address {ip}/{prefix}, gateway {}, DNS {}", p.linux_gateway, p.linux_dns.join(", "))).await;
+    }
     if cis_level > 0
         && let (Some(b), Some(c)) = (cis::benchmark_for(img.id), &opt.cis)
     {
@@ -473,7 +486,7 @@ async fn bake_linux_inner(
     let vmid_guard = pve.vmid_guard().await;
     let vmid = pve.free_vmid_in(GOLD_IDS).await?;
     let name = working_name(&gold_id);
-    let mut net0 = format!("virtio,bridge={}", p.bridge);
+    let mut net0 = format!("virtio={bake_mac},bridge={}", p.bridge);
     if let Some(v) = p.vlan {
         net0 += &format!(",tag={v}");
     }
@@ -492,7 +505,6 @@ async fn bake_linux_inner(
                 ("cpu", &p.cpu),
                 ("cores", p.cores),
                 ("memory", p.memory_mb),
-                ("balloon", 0),
                 ("efidisk0", format!("{}:1,efitype=4m,pre-enrolled-keys={}", p.disk_storage, u8::from(img.secure_boot))),
                 ("scsihw", "virtio-scsi-single"),
                 ("scsi0", format!("{}:0,import-from={import_volid},discard=on,iothread=1,ssd=1", p.disk_storage)),
@@ -559,7 +571,7 @@ async fn bake_linux_inner(
         let grub = pve.agent_read(node, vmid, "/run/pvs-cis/grub-password", 0).await.map(|(p, _)| p);
         cis_report = Some((raw, grub));
     }
-    log.run("BAKE-OK - shutting the bake VM down").await;
+    log.run("Bake finished - shutting the bake VM down").await;
     pr.stage(97.0, 99.0, "shutting down");
     if pve
         .run_task(&format!("/nodes/{}/qemu/{vmid}/status/shutdown", enc(node)), form![("timeout", 180)], |_| {})
@@ -572,16 +584,16 @@ async fn bake_linux_inner(
 
     for l in report.lines().filter(|l| l.starts_with("BAKE-")) {
         if l.ends_with("MISSING") {
-            log.warn(l).await;
+            log.warn(crate::markers::text(l)).await;
         } else {
-            log.line(l).await;
+            log.line(crate::markers::text(l)).await;
         }
     }
     if let Some(l) = report.lines().find(|l| l.starts_with("BAKE-LOCALE") && l.ends_with("MISSING")) {
-        bail!("a locale is missing on the gold: {l}");
+        bail!("a locale is missing on the gold: {}", crate::markers::text(l));
     }
     if let Some(l) = report.lines().find(|l| l.starts_with("BAKE-LAYOUT-FAILED")) {
-        bail!("the CIS Level 2 filesystems could not be set up: {l}");
+        bail!("the CIS Level 2 filesystems could not be set up: {}", crate::markers::text(l));
     }
     for l in report.lines().filter(|l| l.starts_with("CIS-FIX-FAILED")) {
         log.warn(l).await;
@@ -649,6 +661,7 @@ async fn bake_linux_inner(
             "kernel": kernel,
             "updatesApplied": opt.updates,
             "features": opt.features,
+            "aptMirror": opt.mirror_uri(&img).unwrap_or_default(),
             "sourceUrl": img.url,
             "sourceFormat": img.url.rsplit('.').next().unwrap_or(""),
             "sourceChecksum": checksum,
@@ -795,7 +808,7 @@ async fn follow_bake(pve: &Pve, log: &JobLog, pr: &mut Progress, node: &str, vmi
         }
         let status = pve.vm_status(node, vmid).await?;
         if status.status != "running" {
-            bail!("the bake VM stopped before it reported BAKE-OK");
+            bail!("the bake VM stopped before the bake finished");
         }
         if !agent_up {
             if pve.agent_ping(node, vmid).await {

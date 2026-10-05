@@ -95,13 +95,14 @@ svc_off() {
 mod_unavailable() {
     local m=$1 n=${1//-/_} kver conf
     kver=$(uname -r)
-    if ! find "/lib/modules/$kver" -type f -name "$m.ko*" 2>/dev/null | grep -q . \
-        && ! find "/lib/modules/$kver" -type f -name "$n.ko*" 2>/dev/null | grep -q .; then
+    # Every installed kernel, not only the running one: the next boot may be another (the
+    # benchmark's audit walks /usr/lib/modules/** too). modprobe.d holds for all of them.
+    if ! find /lib/modules/*/ -type f \( -name "$m.ko*" -o -name "$n.ko*" \) 2>/dev/null | grep -q .; then
         if grep -Eq "/(${m}|${n})\.ko" "/lib/modules/$kver/modules.builtin" 2>/dev/null; then
             ev "$m: built into the kernel"
             return 1
         fi
-        ev "$m: no module in kernel $kver"
+        ev "$m: no module in any installed kernel"
         return 0
     fi
     local bad=0
@@ -136,13 +137,32 @@ sysctl_conf() {
     systemd-analyze cat-config sysctl.d 2>/dev/null | grep -E "$re" | tail -n 1 | cut -d= -f2- | xargs
 }
 
-# Running and configured both equal VAL (whitespace normalized - "1 0" vs "1	0").
+# UFW's own sysctl file (IPT_SYSCTL in /etc/default/ufw), when it exists. ufw applies it on
+# start, after systemd-sysctl - the benchmark's audit reads it first.
+sysctl_ufw_file() {
+    local f
+    [ -f /etc/default/ufw ] || return 0
+    f=$(awk -F= '/^[[:space:]]*IPT_SYSCTL=/ { print $2 }' /etc/default/ufw | tail -n 1 | tr -d "\"' ")
+    [ -n "$f" ] && [ -f "$f" ] && echo "$f"
+    return 0
+}
+
+# Running and configured both equal VAL (whitespace normalized - "1 0" vs "1	0"), and no
+# active line in UFW's sysctl file says otherwise.
 sysctl_is() {
-    local k=$1 want run conf
+    local k=$1 want run conf f have
     want=$(xargs <<<"$2")
     run=$(sysctl -n "$k" 2>/dev/null | xargs)
     conf=$(sysctl_conf "$k")
     ev "$k: running '${run}', configured '${conf:-unset}'"
+    f=$(sysctl_ufw_file)
+    if [ -n "$f" ]; then
+        have=$(grep -E "^[[:space:]]*${k//./[./]}[[:space:]]*=" "$f" 2>/dev/null | tail -n 1 | cut -d= -f2- | xargs)
+        if [ -n "$have" ]; then
+            ev "$f: $k = $have"
+            [ "$have" = "$want" ] || return 1
+        fi
+    fi
     [ "$run" = "$want" ] && [ "$conf" = "$want" ]
 }
 
@@ -170,16 +190,44 @@ sysctl_set() {
 SSHD_FILE=/etc/ssh/sshd_config.d/00-pvs-cis.conf
 
 # sshd's effective value of KEY (lower case key), for a root login from localhost.
-sshd_val() {
-    sshd -T -C user=root -C host="$(hostname)" -C addr=127.0.0.1 2>/dev/null \
-        | awk -v k="${1,,}" 'tolower($1) == k { $1 = ""; sub(/^ /, ""); print; exit }'
+sshd_val() { sshd_val_for root 127.0.0.1 "$1"; }
+
+# sshd's effective value of KEY for USER connecting from ADDR.
+sshd_val_for() {
+    sshd -T -C user="$1" -C host="$(hostname)" -C addr="$2" 2>/dev/null \
+        | awk -v k="${3,,}" 'tolower($1) == k { $1 = ""; sub(/^ /, ""); print; exit }'
+}
+
+# The connections to evaluate, "user addr" per line: root from localhost, and - when the
+# configuration has Match blocks - the users, groups' members and addresses they name (the
+# benchmark evaluates sshd -T for those as well). Patterns (*, ?, !) are not expanded.
+sshd_contexts() {
+    echo "root 127.0.0.1"
+    local m kind vals v
+    m=$(grep -hiE '^[[:space:]]*Match[[:space:]]' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null) || return 0
+    while read -r _ kind vals _; do
+        for v in ${vals//,/ }; do
+            case $v in *'*'* | *'?'* | '!'*) continue ;; esac
+            case ${kind,,} in
+                user) echo "$v 127.0.0.1" ;;
+                group) getent group "$v" | awk -F: '{ n = split($4, u, ","); if (n) print u[1] " 127.0.0.1" }' ;;
+                address) echo "root ${v%/*}" ;;
+            esac
+        done
+    done <<<"$m"
 }
 
 sshd_is() {
-    local have
+    local have u a rc=0 ctx
     have=$(sshd_val "$1")
     ev "sshd $1: ${have:-unset}"
-    [ "${have,,}" = "${2,,}" ]
+    [ "${have,,}" = "${2,,}" ] || rc=1
+    while read -r u a; do
+        [ "$u $a" = "root 127.0.0.1" ] && continue
+        ctx=$(sshd_val_for "$u" "$a" "$1")
+        if [ "${ctx,,}" != "${2,,}" ]; then ev "sshd $1 for $u from $a (Match): ${ctx:-unset}"; rc=1; fi
+    done < <(sshd_contexts)
+    return $rc
 }
 
 # Our drop-in comes first (00-), and sshd keeps the first value it reads.

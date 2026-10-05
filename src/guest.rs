@@ -2,7 +2,7 @@
 //! Arc. The Linux half is Build-Vms.ps1's Get-LinuxDomainJoinPackages,
 //! Get-LinuxDomainJoinCommands and Get-LinuxArcCommands, ported line for line - the
 //! reasons for each step are in those functions' comments and in
-//! docs/windows-provisioning.md §7; the short versions are repeated here.
+//! the provisioning research; the short versions are here.
 
 use serde::{Deserialize, Serialize};
 

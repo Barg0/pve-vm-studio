@@ -1,0 +1,28 @@
+2026-10-05 11:11:39 [ start ] Build web-01
+2026-10-05 11:11:39 [ run   ] Full clone of b6b6510a (template 9003) on pve-01
+2026-10-05 11:11:49 [ o.k.  ] VM 102 (web-01) created
+2026-10-05 11:11:54 [ o.k.  ] Seed attached as a disk (scsi30)
+2026-10-05 11:11:56 [ run   ] First boot: cloud-init provisions, then powers off
+2026-10-05 11:12:08 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 running 'init-local' at Mon, 05 Oct 2026 09:12:03 +0000. Up 6.03 seconds.
+2026-10-05 11:12:08 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 running 'init' at Mon, 05 Oct 2026 09:12:04 +0000. Up 6.47 seconds.
+2026-10-05 11:12:08 [ debug ] | ci-info: ++++++++++++++++++++++++++++++++++++Net device info+++++++++++++++++++++++++++++++++++++
+2026-10-05 11:12:08 [ debug ] | ci-info: +--------+------+------------------------------+-----------+-------+-------------------+
+2026-10-05 11:12:08 [ debug ] | ci-info: | Device |  Up  |           Address            |    Mask   | Scope |     Hw-Address    |
+2026-10-05 11:12:08 [ debug ] | ci-info: +--------+------+------------------------------+-----------+-------+-------------------+
+2026-10-05 11:12:08 [ debug ] | ci-info: | ens18  | True | fe80::be24:11ff:fecd:e859/64 |     .     |  link | bc:24:11:cd:e8:59 |
+2026-10-05 11:12:08 [ debug ] | ci-info: |   lo   | True |          127.0.0.1           | 255.0.0.0 |  host |         .         |
+2026-10-05 11:12:08 [ debug ] | ci-info: |   lo   | True |           ::1/128            |     .     |  host |         .         |
+2026-10-05 11:12:08 [ debug ] | ci-info: +--------+------+------------------------------+-----------+-------+-------------------+
+2026-10-05 11:12:08 [ debug ] | ci-info: +++++++++++++++++++Route IPv6 info+++++++++++++++++++
+2026-10-05 11:12:08 [ debug ] | ci-info: +-------+-------------+---------+-----------+-------+
+2026-10-05 11:12:08 [ debug ] | ci-info: | Route | Destination | Gateway | Interface | Flags |
+2026-10-05 11:12:08 [ debug ] | ci-info: +-------+-------------+---------+-----------+-------+
+2026-10-05 11:12:08 [ debug ] | ci-info: |   0   |  fe80::/64  |    ::   |   ens18   |   U   |
+2026-10-05 11:12:08 [ debug ] | ci-info: |   2   |    local    |    ::   |   ens18   |   U   |
+2026-10-05 11:12:08 [ debug ] | ci-info: |   3   |  multicast  |    ::   |   ens18   |   U   |
+2026-10-05 11:12:08 [ debug ] | ci-info: +-------+-------------+---------+-----------+-------+
+2026-10-05 11:12:08 [ debug ] | 2026-10-05 09:12:04,461 - lifecycle.py[WARNING]: Not unlocking password for user admin. 'lock_passwd: false' present in user-data but no 'passwd'/'plain_text_passwd'/'hashed_passwd' provided in user-data
+2026-10-05 11:12:08 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 running 'modules:config' at Mon, 05 Oct 2026 09:12:04 +0000. Up 6.74 seconds.
+2026-10-05 11:13:53 [ o.k.  ] Seed disk removed and deleted
+2026-10-05 11:14:08 [ o.k.  ] web-01 is ready at 10.10.0.20
+2026-10-05 11:14:08 [ end   ] Build web-01: done

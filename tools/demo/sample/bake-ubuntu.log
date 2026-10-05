@@ -1,0 +1,464 @@
+2026-10-05 11:06:16 [ start ] Bake Ubuntu 26.04 LTS (Resolute) (bake-b6b6510a)
+2026-10-05 11:06:16 [ debug ] pve-01: 59582 MiB free, the bake VM takes 4096 MiB
+2026-10-05 11:06:16 [ run   ] Baking Ubuntu 26.04 LTS (Resolute) on pve-01: disk on local-lvm, image cache on local, seed on local, network vmbr0
+2026-10-05 11:06:16 [ info  ] Published sha256: 8800651811af9a85465ad1d552add729947bb16488dddb4a9b5305a3d97332b2
+2026-10-05 11:06:16 [ o.k.  ] Cloud image already in local (pvs-ubuntu2604-8800651811af9a85.qcow2)
+2026-10-05 11:06:16 [ info  ] CIS: CIS Ubuntu Linux 26.04 LTS Benchmark v1.0.0, Level 2 Server
+2026-10-05 11:06:16 [ run   ] Creating bake VM 9003 (bake-b6b6510a), Secure Boot on
+2026-10-05 11:06:24 [ o.k.  ] Seed attached as a disk (scsi30)
+2026-10-05 11:06:28 [ info  ] Bake VM started - console: bake-b6b6510a (9003) in the PVE UI, user bake / bake
+2026-10-05 11:06:51 [ o.k.  ] Guest agent is up - following cloud-init
+2026-10-05 11:06:51 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 running 'init-local' at Mon, 05 Oct 2026 09:06:37 +0000. Up 5.42 seconds.
+2026-10-05 11:06:51 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 running 'init' at Mon, 05 Oct 2026 09:06:37 +0000. Up 5.83 seconds.
+2026-10-05 11:06:51 [ debug ] | ci-info: +++++++++++++++++++++++++++++++++++++++Net device info+++++++++++++++++++++++++++++++++++++++
+2026-10-05 11:06:51 [ debug ] | ci-info: +--------+------+------------------------------+---------------+--------+-------------------+
+2026-10-05 11:06:51 [ debug ] | ci-info: | Device |  Up  |           Address            |      Mask     | Scope  |     Hw-Address    |
+2026-10-05 11:06:51 [ debug ] | ci-info: +--------+------+------------------------------+---------------+--------+-------------------+
+2026-10-05 11:06:51 [ debug ] | ci-info: | ens18  | True |         10.10.0.102          | 255.255.255.0 | global | bc:24:11:12:20:0d |
+2026-10-05 11:06:51 [ debug ] | ci-info: | ens18  | True | fe80::be24:11ff:fe12:200d/64 |       .       |  link  | bc:24:11:12:20:0d |
+2026-10-05 11:06:51 [ debug ] | ci-info: |   lo   | True |          127.0.0.1           |   255.0.0.0   |  host  |         .         |
+2026-10-05 11:06:51 [ debug ] | ci-info: |   lo   | True |           ::1/128            |       .       |  host  |         .         |
+2026-10-05 11:06:51 [ debug ] | ci-info: +--------+------+------------------------------+---------------+--------+-------------------+
+2026-10-05 11:06:51 [ debug ] | ci-info: +++++++++++++++++++++++++++++Route IPv4 info+++++++++++++++++++++++++++++
+2026-10-05 11:06:51 [ debug ] | ci-info: +-------+-------------+-----------+-----------------+-----------+-------+
+2026-10-05 11:06:51 [ debug ] | ci-info: | Route | Destination |  Gateway  |     Genmask     | Interface | Flags |
+2026-10-05 11:06:51 [ debug ] | ci-info: +-------+-------------+-----------+-----------------+-----------+-------+
+2026-10-05 11:06:51 [ debug ] | ci-info: |   0   |   0.0.0.0   | 10.10.0.1 |     0.0.0.0     |   ens18   |   UG  |
+2026-10-05 11:06:51 [ debug ] | ci-info: |   1   |  10.10.0.0  |  0.0.0.0  |  255.255.255.0  |   ens18   |   U   |
+2026-10-05 11:06:51 [ debug ] | ci-info: |   2   |  10.10.0.1  |  0.0.0.0  | 255.255.255.255 |   ens18   |   UH  |
+2026-10-05 11:06:51 [ debug ] | ci-info: +-------+-------------+-----------+-----------------+-----------+-------+
+2026-10-05 11:06:51 [ debug ] | ci-info: +++++++++++++++++++Route IPv6 info+++++++++++++++++++
+2026-10-05 11:06:51 [ debug ] | ci-info: +-------+-------------+---------+-----------+-------+
+2026-10-05 11:06:51 [ debug ] | ci-info: | Route | Destination | Gateway | Interface | Flags |
+2026-10-05 11:06:51 [ debug ] | ci-info: +-------+-------------+---------+-----------+-------+
+2026-10-05 11:06:51 [ debug ] | ci-info: |   0   |  fe80::/64  |    ::   |   ens18   |   U   |
+2026-10-05 11:06:51 [ debug ] | ci-info: |   2   |    local    |    ::   |   ens18   |   U   |
+2026-10-05 11:06:51 [ debug ] | ci-info: |   3   |  multicast  |    ::   |   ens18   |   U   |
+2026-10-05 11:06:51 [ debug ] | ci-info: +-------+-------------+---------+-----------+-------+
+2026-10-05 11:06:51 [ debug ] | Hit:1 http://archive.ubuntu.com/ubuntu resolute InRelease
+2026-10-05 11:06:51 [ debug ] | Get:2 http://archive.ubuntu.com/ubuntu resolute-updates InRelease [137 kB]
+2026-10-05 11:06:51 [ debug ] | Get:3 http://security.ubuntu.com/ubuntu resolute-security InRelease [137 kB]
+2026-10-05 11:06:51 [ debug ] | Get:4 http://archive.ubuntu.com/ubuntu resolute-backports InRelease [137 kB]
+2026-10-05 11:06:51 [ debug ] | Get:5 http://archive.ubuntu.com/ubuntu resolute/universe amd64 Packages [16.0 MB]
+2026-10-05 11:06:51 [ debug ] | Get:6 http://security.ubuntu.com/ubuntu resolute-security/main amd64 Packages [550 kB]
+2026-10-05 11:06:51 [ debug ] | Get:7 http://security.ubuntu.com/ubuntu resolute-security/main Translation-en [129 kB]
+2026-10-05 11:06:51 [ debug ] | Get:8 http://security.ubuntu.com/ubuntu resolute-security/main amd64 Components [46.7 kB]
+2026-10-05 11:06:51 [ debug ] | Get:9 http://security.ubuntu.com/ubuntu resolute-security/universe amd64 Packages [191 kB]
+2026-10-05 11:06:51 [ debug ] | Get:10 http://security.ubuntu.com/ubuntu resolute-security/universe Translation-en [60.4 kB]
+2026-10-05 11:06:51 [ debug ] | Get:11 http://security.ubuntu.com/ubuntu resolute-security/universe amd64 Components [55.5 kB]
+2026-10-05 11:06:51 [ debug ] | Get:12 http://security.ubuntu.com/ubuntu resolute-security/universe amd64 c-n-f Metadata [3552 B]
+2026-10-05 11:06:51 [ debug ] | Get:13 http://security.ubuntu.com/ubuntu resolute-security/restricted amd64 Packages [445 kB]
+2026-10-05 11:06:51 [ debug ] | Get:14 http://security.ubuntu.com/ubuntu resolute-security/restricted Translation-en [89.7 kB]
+2026-10-05 11:06:51 [ debug ] | Get:15 http://security.ubuntu.com/ubuntu resolute-security/multiverse amd64 Packages [10.8 kB]
+2026-10-05 11:06:51 [ debug ] | Get:16 http://security.ubuntu.com/ubuntu resolute-security/multiverse Translation-en [2844 B]
+2026-10-05 11:06:51 [ debug ] | Get:17 http://security.ubuntu.com/ubuntu resolute-security/multiverse amd64 Components [212 B]
+2026-10-05 11:06:51 [ debug ] | Get:18 http://security.ubuntu.com/ubuntu resolute-security/multiverse amd64 c-n-f Metadata [120 B]
+2026-10-05 11:06:51 [ debug ] | Get:19 http://archive.ubuntu.com/ubuntu resolute/universe Translation-en [6329 kB]
+2026-10-05 11:06:51 [ debug ] | Get:20 http://archive.ubuntu.com/ubuntu resolute/universe amd64 Components [4556 kB]
+2026-10-05 11:06:51 [ debug ] | Get:21 http://archive.ubuntu.com/ubuntu resolute/universe amd64 c-n-f Metadata [313 kB]
+2026-10-05 11:06:51 [ debug ] | Get:22 http://archive.ubuntu.com/ubuntu resolute/multiverse amd64 Packages [290 kB]
+2026-10-05 11:06:51 [ debug ] | Get:23 http://archive.ubuntu.com/ubuntu resolute/multiverse Translation-en [127 kB]
+2026-10-05 11:06:51 [ debug ] | Get:24 http://archive.ubuntu.com/ubuntu resolute/multiverse amd64 Components [50.0 kB]
+2026-10-05 11:06:51 [ debug ] | Get:25 http://archive.ubuntu.com/ubuntu resolute/multiverse amd64 c-n-f Metadata [8276 B]
+2026-10-05 11:06:51 [ debug ] | Get:26 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 Packages [717 kB]
+2026-10-05 11:06:51 [ debug ] | Get:27 http://archive.ubuntu.com/ubuntu resolute-updates/main Translation-en [167 kB]
+2026-10-05 11:06:51 [ debug ] | Get:28 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 Components [97.9 kB]
+2026-10-05 11:06:51 [ debug ] | Get:29 http://archive.ubuntu.com/ubuntu resolute-updates/universe amd64 Packages [315 kB]
+2026-10-05 11:06:51 [ debug ] | Get:30 http://archive.ubuntu.com/ubuntu resolute-updates/universe Translation-en [101 kB]
+2026-10-05 11:06:51 [ debug ] | Get:31 http://archive.ubuntu.com/ubuntu resolute-updates/universe amd64 Components [201 kB]
+2026-10-05 11:06:51 [ debug ] | Get:32 http://archive.ubuntu.com/ubuntu resolute-updates/universe amd64 c-n-f Metadata [4704 B]
+2026-10-05 11:06:51 [ debug ] | Get:33 http://archive.ubuntu.com/ubuntu resolute-updates/restricted amd64 Packages [486 kB]
+2026-10-05 11:06:51 [ debug ] | Get:34 http://archive.ubuntu.com/ubuntu resolute-updates/restricted Translation-en [97.7 kB]
+2026-10-05 11:06:51 [ debug ] | Get:35 http://archive.ubuntu.com/ubuntu resolute-updates/multiverse amd64 Packages [11.9 kB]
+2026-10-05 11:06:51 [ debug ] | Get:36 http://archive.ubuntu.com/ubuntu resolute-updates/multiverse Translation-en [3276 B]
+2026-10-05 11:06:51 [ debug ] | Get:37 http://archive.ubuntu.com/ubuntu resolute-updates/multiverse amd64 Components [216 B]
+2026-10-05 11:06:51 [ debug ] | Get:38 http://archive.ubuntu.com/ubuntu resolute-updates/multiverse amd64 c-n-f Metadata [256 B]
+2026-10-05 11:06:51 [ debug ] | Get:39 http://archive.ubuntu.com/ubuntu resolute-backports/main amd64 Components [212 B]
+2026-10-05 11:06:51 [ debug ] | Get:40 http://archive.ubuntu.com/ubuntu resolute-backports/main amd64 c-n-f Metadata [112 B]
+2026-10-05 11:06:51 [ debug ] | Get:41 http://archive.ubuntu.com/ubuntu resolute-backports/universe amd64 Packages [3136 B]
+2026-10-05 11:06:51 [ debug ] | Get:42 http://archive.ubuntu.com/ubuntu resolute-backports/universe Translation-en [7988 B]
+2026-10-05 11:06:51 [ debug ] | Get:43 http://archive.ubuntu.com/ubuntu resolute-backports/universe amd64 Components [1060 B]
+2026-10-05 11:06:51 [ debug ] | Get:44 http://archive.ubuntu.com/ubuntu resolute-backports/universe amd64 c-n-f Metadata [116 B]
+2026-10-05 11:06:51 [ debug ] | Get:45 http://archive.ubuntu.com/ubuntu resolute-backports/restricted amd64 Components [216 B]
+2026-10-05 11:06:51 [ debug ] | Get:46 http://archive.ubuntu.com/ubuntu resolute-backports/restricted amd64 c-n-f Metadata [120 B]
+2026-10-05 11:06:51 [ debug ] | Get:47 http://archive.ubuntu.com/ubuntu resolute-backports/multiverse amd64 Components [216 B]
+2026-10-05 11:06:51 [ debug ] | Get:48 http://archive.ubuntu.com/ubuntu resolute-backports/multiverse amd64 c-n-f Metadata [120 B]
+2026-10-05 11:06:51 [ debug ] | Fetched 31.8 MB in 6s (5741 kB/s)
+2026-10-05 11:06:51 [ debug ] | Reading package lists...
+2026-10-05 11:06:51 [ debug ] | Reading package lists...
+2026-10-05 11:06:51 [ debug ] | Building dependency tree...
+2026-10-05 11:06:51 [ debug ] | Reading state information...
+2026-10-05 11:06:51 [ debug ] | Solving dependencies...
+2026-10-05 11:06:51 [ debug ] | The following additional packages will be installed:
+2026-10-05 11:06:51 [ debug ] |   liburing2 ubuntu-helper-virt-hwe ubuntu-virt
+2026-10-05 11:06:51 [ debug ] | The following NEW packages will be installed:
+2026-10-05 11:06:51 [ debug ] |   liburing2 qemu-guest-agent ubuntu-helper-virt-hwe ubuntu-virt
+2026-10-05 11:06:51 [ debug ] | 0 upgraded, 4 newly installed, 0 to remove and 14 not upgraded.
+2026-10-05 11:06:51 [ debug ] | Need to get 643 kB of archives.
+2026-10-05 11:06:51 [ debug ] | After this operation, 4212 kB of additional disk space will be used.
+2026-10-05 11:06:51 [ debug ] | Get:1 http://archive.ubuntu.com/ubuntu resolute/main amd64 liburing2 amd64 2.14-1 [25.4 kB]
+2026-10-05 11:06:51 [ debug ] | Get:2 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 ubuntu-helper-virt-hwe all 1:10.2.1+ds-1ubuntu4.3 [45.4 kB]
+2026-10-05 11:06:51 [ debug ] | Get:3 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 ubuntu-virt amd64 1:10.2.1+ds-1ubuntu3.2 [40.7 kB]
+2026-10-05 11:06:51 [ debug ] | Get:4 http://archive.ubuntu.com/ubuntu resolute-updates/universe amd64 qemu-guest-agent amd64 1:10.2.1+ds-1ubuntu3.2 [532 kB]
+2026-10-05 11:06:51 [ debug ] | Fetched 643 kB in 0s (2629 kB/s)
+2026-10-05 11:06:51 [ debug ] | Selecting previously unselected package liburing2:amd64.
+2026-10-05 11:06:51 [ debug ] | (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 91484 files and directories currently installed.)
+2026-10-05 11:06:51 [ debug ] | Preparing to unpack .../liburing2_2.14-1_amd64.deb ...
+2026-10-05 11:06:51 [ debug ] | Unpacking liburing2:amd64 (2.14-1) ...
+2026-10-05 11:06:51 [ debug ] | Selecting previously unselected package ubuntu-helper-virt-hwe.
+2026-10-05 11:06:51 [ debug ] | Preparing to unpack .../ubuntu-helper-virt-hwe_1%3a10.2.1+ds-1ubuntu4.3_all.deb ...
+2026-10-05 11:06:51 [ debug ] | Unpacking ubuntu-helper-virt-hwe (1:10.2.1+ds-1ubuntu4.3) ...
+2026-10-05 11:06:51 [ debug ] | Selecting previously unselected package ubuntu-virt.
+2026-10-05 11:06:51 [ debug ] | Preparing to unpack .../ubuntu-virt_1%3a10.2.1+ds-1ubuntu3.2_amd64.deb ...
+2026-10-05 11:06:51 [ debug ] | Unpacking ubuntu-virt (1:10.2.1+ds-1ubuntu3.2) ...
+2026-10-05 11:06:51 [ debug ] | Selecting previously unselected package qemu-guest-agent.
+2026-10-05 11:06:51 [ debug ] | Preparing to unpack .../qemu-guest-agent_1%3a10.2.1+ds-1ubuntu3.2_amd64.deb ...
+2026-10-05 11:06:51 [ debug ] | Unpacking qemu-guest-agent (1:10.2.1+ds-1ubuntu3.2) ...
+2026-10-05 11:06:51 [ debug ] | Setting up ubuntu-helper-virt-hwe (1:10.2.1+ds-1ubuntu4.3) ...
+2026-10-05 11:06:51 [ debug ] | Setting up liburing2:amd64 (2.14-1) ...
+2026-10-05 11:06:51 [ debug ] | Setting up ubuntu-virt (1:10.2.1+ds-1ubuntu3.2) ...
+2026-10-05 11:06:51 [ debug ] | Setting up qemu-guest-agent (1:10.2.1+ds-1ubuntu3.2) ...
+2026-10-05 11:06:51 [ debug ] | invoke-rc.d: could not determine current runlevel
+2026-10-05 11:06:51 [ debug ] | invoke-rc.d: policy-rc.d denied execution of start.
+2026-10-05 11:06:51 [ debug ] | /usr/sbin/policy-rc.d returned 101, not running 'start qemu-guest-agent.service'
+2026-10-05 11:06:51 [ debug ] | Processing triggers for libc-bin (2.43-2ubuntu2.4) ...
+2026-10-05 11:06:51 [ debug ] | Processing triggers for man-db (2.13.1-1build1) ...
+2026-10-05 11:06:51 [ debug ] | Running kernel seems to be up-to-date.
+2026-10-05 11:06:51 [ debug ] | No services need to be restarted.
+2026-10-05 11:06:51 [ debug ] | No containers need to be restarted.
+2026-10-05 11:06:51 [ debug ] | No user sessions are running outdated binaries.
+2026-10-05 11:06:51 [ debug ] | No VM guests are running outdated hypervisor (qemu) binaries on this host.
+2026-10-05 11:06:51 [ debug ] | 2026-10-05 09:06:50,845 - lifecycle.py[WARNING]: Not unlocking password for user bake. 'lock_passwd: false' present in user-data but no 'passwd'/'plain_text_passwd'/'hashed_passwd' provided in user-data
+2026-10-05 11:06:51 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 running 'modules:config' at Mon, 05 Oct 2026 09:06:51 +0000. Up 19.29 seconds.
+2026-10-05 11:06:55 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 running 'modules:final' at Mon, 05 Oct 2026 09:06:52 +0000. Up 20.42 seconds.
+2026-10-05 11:06:55 [ debug ] | Hit:1 http://security.ubuntu.com/ubuntu resolute-security InRelease
+2026-10-05 11:06:55 [ debug ] | Hit:2 http://archive.ubuntu.com/ubuntu resolute InRelease
+2026-10-05 11:06:55 [ debug ] | Hit:3 http://archive.ubuntu.com/ubuntu resolute-updates InRelease
+2026-10-05 11:06:55 [ debug ] | Hit:4 http://archive.ubuntu.com/ubuntu resolute-backports InRelease
+2026-10-05 11:06:55 [ debug ] | Reading package lists...
+2026-10-05 11:06:55 [ debug ] | Reading package lists...
+2026-10-05 11:06:55 [ debug ] | Building dependency tree...
+2026-10-05 11:06:55 [ debug ] | Reading state information...
+2026-10-05 11:06:55 [ debug ] | Calculating upgrade...
+2026-10-05 11:06:55 [ debug ] | The following NEW packages will be installed:
+2026-10-05 11:06:55 [ debug ] |   linux-headers-7.0.0-38 linux-headers-7.0.0-38-generic
+2026-10-05 11:06:55 [ debug ] |   linux-image-7.0.0-38-generic linux-main-modules-zfs-7.0.0-38-generic
+2026-10-05 11:06:55 [ debug ] |   linux-modules-7.0.0-38-generic linux-tools-7.0.0-38
+2026-10-05 11:06:55 [ debug ] |   linux-tools-7.0.0-38-generic
+2026-10-05 11:06:55 [ debug ] | The following packages will be upgraded:
+2026-10-05 11:06:55 [ debug ] |   bpftool libevent-core-2.1-7t64 libssl3t64 linux-headers-generic
+2026-10-05 11:06:55 [ debug ] |   linux-headers-virtual linux-image-virtual linux-libc-dev linux-perf
+2026-10-05 11:06:55 [ debug ] |   linux-tools-common linux-virtual openssl openssl-provider-legacy python3-jwt
+2026-10-05 11:06:55 [ debug ] |   python3-requests
+2026-10-05 11:06:55 [ debug ] | 14 upgraded, 7 newly installed, 0 to remove and 0 not upgraded.
+2026-10-05 11:06:55 [ debug ] | Need to get 223 MB of archives.
+2026-10-05 11:06:55 [ debug ] | After this operation, 320 MB of additional disk space will be used.
+2026-10-05 11:06:55 [ debug ] | Get:1 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 openssl-provider-legacy amd64 3.5.5-1ubuntu3.7 [39.7 kB]
+2026-10-05 11:06:55 [ debug ] | Get:2 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 libssl3t64 amd64 3.5.5-1ubuntu3.7 [2368 kB]
+2026-10-05 11:06:55 [ debug ] | Get:3 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 openssl amd64 3.5.5-1ubuntu3.7 [1243 kB]
+2026-10-05 11:06:55 [ debug ] | Get:4 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 bpftool amd64 7.7.0+7.0.0-38.38 [1099 kB]
+2026-10-05 11:06:55 [ debug ] | Get:5 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 libevent-core-2.1-7t64 amd64 2.1.12-stable-10ubuntu0.2 [92.6 kB]
+2026-10-05 11:06:55 [ debug ] | Get:6 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-headers-7.0.0-38 all 7.0.0-38.38 [14.9 MB]
+2026-10-05 11:06:59 [ debug ] | Get:7 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-headers-7.0.0-38-generic amd64 7.0.0-38.38 [4288 kB]
+2026-10-05 11:06:59 [ debug ] | Get:8 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-main-modules-zfs-7.0.0-38-generic amd64 7.0.0-38.38 [2419 kB]
+2026-10-05 11:06:59 [ debug ] | Get:9 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-modules-7.0.0-38-generic amd64 7.0.0-38.38 [169 MB]
+2026-10-05 11:07:28 [ debug ] | Get:10 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-image-7.0.0-38-generic amd64 7.0.0-38.38 [17.0 MB]
+2026-10-05 11:07:32 [ debug ] | Get:11 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-virtual amd64 7.0.0-38.38 [1694 B]
+2026-10-05 11:07:32 [ debug ] | Get:12 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-image-virtual amd64 7.0.0-38.38 [2346 B]
+2026-10-05 11:07:32 [ debug ] | Get:13 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-headers-virtual amd64 7.0.0-38.38 [1644 B]
+2026-10-05 11:07:32 [ debug ] | Get:14 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-headers-generic amd64 7.0.0-38.38 [2288 B]
+2026-10-05 11:07:32 [ debug ] | Get:15 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-libc-dev amd64 7.0.0-38.38 [1715 kB]
+2026-10-05 11:07:32 [ debug ] | Get:16 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-perf amd64 7.0.0-38.38 [7119 kB]
+2026-10-05 11:07:32 [ debug ] | Get:17 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-tools-common all 7.0.0-38.38 [204 kB]
+2026-10-05 11:07:32 [ debug ] | Get:18 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-tools-7.0.0-38 amd64 7.0.0-38.38 [1474 kB]
+2026-10-05 11:07:32 [ debug ] | Get:19 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 linux-tools-7.0.0-38-generic amd64 7.0.0-38.38 [1612 B]
+2026-10-05 11:07:32 [ debug ] | Get:20 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 python3-jwt all 2.10.1-4ubuntu1.1 [22.1 kB]
+2026-10-05 11:07:32 [ debug ] | Get:21 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 python3-requests all 2.32.5+dfsg-1ubuntu1.1 [51.9 kB]
+2026-10-05 11:07:32 [ debug ] | Fetched 223 MB in 37s (6074 kB/s)
+2026-10-05 11:07:32 [ debug ] | (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 91515 files and directories currently installed.)
+2026-10-05 11:07:32 [ debug ] | Preparing to unpack .../openssl-provider-legacy_3.5.5-1ubuntu3.7_amd64.deb ...
+2026-10-05 11:07:32 [ debug ] | Unpacking openssl-provider-legacy (3.5.5-1ubuntu3.7) over (3.5.5-1ubuntu3.5) ...
+2026-10-05 11:07:32 [ debug ] | Setting up openssl-provider-legacy (3.5.5-1ubuntu3.7) ...
+2026-10-05 11:07:32 [ debug ] | (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 91515 files and directories currently installed.)
+2026-10-05 11:07:32 [ debug ] | Preparing to unpack .../libssl3t64_3.5.5-1ubuntu3.7_amd64.deb ...
+2026-10-05 11:07:32 [ debug ] | Unpacking libssl3t64:amd64 (3.5.5-1ubuntu3.7) over (3.5.5-1ubuntu3.5) ...
+2026-10-05 11:07:32 [ debug ] | Setting up libssl3t64:amd64 (3.5.5-1ubuntu3.7) ...
+2026-10-05 11:07:32 [ debug ] | (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 91515 files and directories currently installed.)
+2026-10-05 11:07:32 [ debug ] | Preparing to unpack .../00-openssl_3.5.5-1ubuntu3.7_amd64.deb ...
+2026-10-05 11:07:32 [ debug ] | Unpacking openssl (3.5.5-1ubuntu3.7) over (3.5.5-1ubuntu3.5) ...
+2026-10-05 11:07:32 [ debug ] | Preparing to unpack .../01-bpftool_7.7.0+7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:32 [ debug ] | Unpacking bpftool (7.7.0+7.0.0-38.38) over (7.7.0+7.0.0-34.34) ...
+2026-10-05 11:07:32 [ debug ] | Preparing to unpack .../02-libevent-core-2.1-7t64_2.1.12-stable-10ubuntu0.2_amd64.deb ...
+2026-10-05 11:07:32 [ debug ] | Unpacking libevent-core-2.1-7t64:amd64 (2.1.12-stable-10ubuntu0.2) over (2.1.12-stable-10ubuntu0.1) ...
+2026-10-05 11:07:32 [ debug ] | Selecting previously unselected package linux-headers-7.0.0-38.
+2026-10-05 11:07:32 [ debug ] | Preparing to unpack .../03-linux-headers-7.0.0-38_7.0.0-38.38_all.deb ...
+2026-10-05 11:07:32 [ debug ] | Unpacking linux-headers-7.0.0-38 (7.0.0-38.38) ...
+2026-10-05 11:07:32 [ debug ] | Selecting previously unselected package linux-headers-7.0.0-38-generic.
+2026-10-05 11:07:32 [ debug ] | Preparing to unpack .../04-linux-headers-7.0.0-38-generic_7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:32 [ debug ] | Unpacking linux-headers-7.0.0-38-generic (7.0.0-38.38) ...
+2026-10-05 11:07:32 [ debug ] | Selecting previously unselected package linux-main-modules-zfs-7.0.0-38-generic.
+2026-10-05 11:07:32 [ debug ] | Preparing to unpack .../05-linux-main-modules-zfs-7.0.0-38-generic_7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:32 [ debug ] | Unpacking linux-main-modules-zfs-7.0.0-38-generic (7.0.0-38.38) ...
+2026-10-05 11:07:32 [ debug ] | Selecting previously unselected package linux-modules-7.0.0-38-generic.
+2026-10-05 11:07:32 [ debug ] | Preparing to unpack .../06-linux-modules-7.0.0-38-generic_7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:32 [ debug ] | Unpacking linux-modules-7.0.0-38-generic (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Selecting previously unselected package linux-image-7.0.0-38-generic.
+2026-10-05 11:07:36 [ debug ] | Preparing to unpack .../07-linux-image-7.0.0-38-generic_7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:36 [ debug ] | Unpacking linux-image-7.0.0-38-generic (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Preparing to unpack .../08-linux-virtual_7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:36 [ debug ] | Unpacking linux-virtual (7.0.0-38.38) over (7.0.0-34.34) ...
+2026-10-05 11:07:36 [ debug ] | Preparing to unpack .../09-linux-image-virtual_7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:36 [ debug ] | Unpacking linux-image-virtual (7.0.0-38.38) over (7.0.0-34.34) ...
+2026-10-05 11:07:36 [ debug ] | Preparing to unpack .../10-linux-headers-virtual_7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:36 [ debug ] | Unpacking linux-headers-virtual (7.0.0-38.38) over (7.0.0-34.34) ...
+2026-10-05 11:07:36 [ debug ] | Preparing to unpack .../11-linux-headers-generic_7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:36 [ debug ] | Unpacking linux-headers-generic (7.0.0-38.38) over (7.0.0-34.34) ...
+2026-10-05 11:07:36 [ debug ] | Preparing to unpack .../12-linux-libc-dev_7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:36 [ debug ] | Unpacking linux-libc-dev:amd64 (7.0.0-38.38) over (7.0.0-34.34) ...
+2026-10-05 11:07:36 [ debug ] | Preparing to unpack .../13-linux-perf_7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:36 [ debug ] | Unpacking linux-perf (7.0.0-38.38) over (7.0.0-34.34) ...
+2026-10-05 11:07:36 [ debug ] | Preparing to unpack .../14-linux-tools-common_7.0.0-38.38_all.deb ...
+2026-10-05 11:07:36 [ debug ] | Unpacking linux-tools-common (7.0.0-38.38) over (7.0.0-34.34) ...
+2026-10-05 11:07:36 [ debug ] | Selecting previously unselected package linux-tools-7.0.0-38.
+2026-10-05 11:07:36 [ debug ] | Preparing to unpack .../15-linux-tools-7.0.0-38_7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:36 [ debug ] | Unpacking linux-tools-7.0.0-38 (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Selecting previously unselected package linux-tools-7.0.0-38-generic.
+2026-10-05 11:07:36 [ debug ] | Preparing to unpack .../16-linux-tools-7.0.0-38-generic_7.0.0-38.38_amd64.deb ...
+2026-10-05 11:07:36 [ debug ] | Unpacking linux-tools-7.0.0-38-generic (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Preparing to unpack .../17-python3-jwt_2.10.1-4ubuntu1.1_all.deb ...
+2026-10-05 11:07:36 [ debug ] | Unpacking python3-jwt (2.10.1-4ubuntu1.1) over (2.10.1-4ubuntu1) ...
+2026-10-05 11:07:36 [ debug ] | Preparing to unpack .../18-python3-requests_2.32.5+dfsg-1ubuntu1.1_all.deb ...
+2026-10-05 11:07:36 [ debug ] | Unpacking python3-requests (2.32.5+dfsg-1ubuntu1.1) over (2.32.5+dfsg-1ubuntu1) ...
+2026-10-05 11:07:36 [ debug ] | Setting up python3-jwt (2.10.1-4ubuntu1.1) ...
+2026-10-05 11:07:36 [ debug ] | Setting up bpftool (7.7.0+7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Setting up linux-libc-dev:amd64 (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Setting up linux-perf (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Setting up python3-requests (2.32.5+dfsg-1ubuntu1.1) ...
+2026-10-05 11:07:36 [ debug ] | Setting up libevent-core-2.1-7t64:amd64 (2.1.12-stable-10ubuntu0.2) ...
+2026-10-05 11:07:36 [ debug ] | Setting up openssl (3.5.5-1ubuntu3.7) ...
+2026-10-05 11:07:36 [ debug ] | Setting up linux-tools-common (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Setting up linux-headers-7.0.0-38 (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Setting up linux-tools-7.0.0-38 (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Setting up linux-tools-7.0.0-38-generic (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Setting up linux-headers-7.0.0-38-generic (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Setting up linux-headers-generic (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Setting up linux-headers-virtual (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Setting up linux-modules-7.0.0-38-generic (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | Setting up linux-image-7.0.0-38-generic (7.0.0-38.38) ...
+2026-10-05 11:07:36 [ debug ] | I: /boot/vmlinuz is now a symlink to vmlinuz-7.0.0-38-generic
+2026-10-05 11:07:36 [ debug ] | I: /boot/initrd.img is now a symlink to initrd.img-7.0.0-38-generic
+2026-10-05 11:07:36 [ debug ] | Setting up linux-main-modules-zfs-7.0.0-38-generic (7.0.0-38.38) ...
+2026-10-05 11:07:39 [ debug ] | Setting up linux-image-virtual (7.0.0-38.38) ...
+2026-10-05 11:07:39 [ debug ] | Setting up linux-virtual (7.0.0-38.38) ...
+2026-10-05 11:07:39 [ debug ] | Processing triggers for libc-bin (2.43-2ubuntu2.4) ...
+2026-10-05 11:07:39 [ debug ] | Processing triggers for man-db (2.13.1-1build1) ...
+2026-10-05 11:07:39 [ debug ] | Processing triggers for linux-image-7.0.0-38-generic (7.0.0-38.38) ...
+2026-10-05 11:07:39 [ debug ] | /etc/kernel/postinst.d/dracut:
+2026-10-05 11:07:39 [ debug ] | dracut: Generating /boot/initrd.img-7.0.0-38-generic
+2026-10-05 11:07:47 [ debug ] | /etc/kernel/postinst.d/zz-update-grub:
+2026-10-05 11:07:47 [ debug ] | Sourcing file `/etc/default/grub'
+2026-10-05 11:07:47 [ debug ] | Sourcing file `/etc/default/grub.d/50-cloudimg-settings.cfg'
+2026-10-05 11:07:47 [ debug ] | Generating grub configuration file ...
+2026-10-05 11:07:47 [ debug ] | Found linux image: /boot/vmlinuz-7.0.0-38-generic
+2026-10-05 11:07:47 [ debug ] | Found initrd image: /boot/initrd.img-7.0.0-38-generic
+2026-10-05 11:07:47 [ debug ] | Found linux image: /boot/vmlinuz-7.0.0-34-generic
+2026-10-05 11:07:47 [ debug ] | Found initrd image: /boot/initrd.img-7.0.0-34-generic
+2026-10-05 11:07:47 [ debug ] | Warning: os-prober will not be executed to detect other bootable partitions.
+2026-10-05 11:07:47 [ debug ] | Systems on them will not be added to the GRUB boot configuration.
+2026-10-05 11:07:47 [ debug ] | Check GRUB_DISABLE_OS_PROBER documentation entry.
+2026-10-05 11:07:47 [ debug ] | Adding boot menu entry for UEFI Firmware Settings ...
+2026-10-05 11:07:47 [ debug ] | done
+2026-10-05 11:07:47 [ debug ] | Restarting services...
+2026-10-05 11:07:47 [ debug ] |  /etc/needrestart/restart.d/systemd-manager
+2026-10-05 11:07:47 [ debug ] |  systemctl restart packagekit.service ssh.service systemd-journald.service systemd-networkd.service systemd-resolved.service systemd-udevd.service udisks2.service
+2026-10-05 11:07:47 [ debug ] | Service restarts being deferred:
+2026-10-05 11:07:47 [ debug ] |  systemctl restart cloud-init-main.service
+2026-10-05 11:07:47 [ debug ] |  systemctl restart networkd-dispatcher.service
+2026-10-05 11:07:47 [ debug ] |  systemctl restart systemd-logind.service
+2026-10-05 11:07:47 [ debug ] |  systemctl restart unattended-upgrades.service
+2026-10-05 11:07:47 [ debug ] | No containers need to be restarted.
+2026-10-05 11:07:47 [ debug ] | No user sessions are running outdated binaries.
+2026-10-05 11:07:47 [ debug ] | No VM guests are running outdated hypervisor (qemu) binaries on this host.
+2026-10-05 11:07:51 [ debug ] | Reading package lists...
+2026-10-05 11:07:51 [ debug ] | Building dependency tree...
+2026-10-05 11:07:51 [ debug ] | Reading state information...
+2026-10-05 11:07:51 [ debug ] | qemu-guest-agent is already the newest version (1:10.2.1+ds-1ubuntu3.2).
+2026-10-05 11:07:51 [ debug ] | Solving dependencies...
+2026-10-05 11:07:51 [ debug ] | The following additional packages will be installed:
+2026-10-05 11:07:51 [ debug ] |   language-pack-de-base libyyjson0
+2026-10-05 11:07:51 [ debug ] | The following NEW packages will be installed:
+2026-10-05 11:07:51 [ debug ] |   fastfetch language-pack-de language-pack-de-base libyyjson0
+2026-10-05 11:07:51 [ debug ] | 0 upgraded, 4 newly installed, 0 to remove and 0 not upgraded.
+2026-10-05 11:07:51 [ debug ] | Need to get 3691 kB of archives.
+2026-10-05 11:07:51 [ debug ] | After this operation, 15.5 MB of additional disk space will be used.
+2026-10-05 11:07:51 [ debug ] | Get:1 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 language-pack-de-base all 1:26.04+20260818 [3020 kB]
+2026-10-05 11:07:51 [ debug ] | Get:2 http://archive.ubuntu.com/ubuntu resolute-updates/main amd64 language-pack-de all 1:26.04+20260818 [1900 B]
+2026-10-05 11:07:51 [ debug ] | Get:3 http://archive.ubuntu.com/ubuntu resolute/universe amd64 libyyjson0 amd64 0.12.0+ds-1 [109 kB]
+2026-10-05 11:07:51 [ debug ] | Get:4 http://archive.ubuntu.com/ubuntu resolute/universe amd64 fastfetch amd64 2.57.1+dfsg-1ubuntu1 [560 kB]
+2026-10-05 11:07:51 [ debug ] | Fetched 3691 kB in 1s (2725 kB/s)
+2026-10-05 11:07:51 [ debug ] | Selecting previously unselected package language-pack-de-base.
+2026-10-05 11:07:51 [ debug ] | (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 132380 files and directories currently installed.)
+2026-10-05 11:07:51 [ debug ] | Preparing to unpack .../language-pack-de-base_1%3a26.04+20260818_all.deb ...
+2026-10-05 11:07:51 [ debug ] | Unpacking language-pack-de-base (1:26.04+20260818) ...
+2026-10-05 11:07:51 [ debug ] | Selecting previously unselected package language-pack-de.
+2026-10-05 11:07:51 [ debug ] | Preparing to unpack .../language-pack-de_1%3a26.04+20260818_all.deb ...
+2026-10-05 11:07:51 [ debug ] | Unpacking language-pack-de (1:26.04+20260818) ...
+2026-10-05 11:07:51 [ debug ] | Selecting previously unselected package libyyjson0:amd64.
+2026-10-05 11:07:51 [ debug ] | Preparing to unpack .../libyyjson0_0.12.0+ds-1_amd64.deb ...
+2026-10-05 11:07:51 [ debug ] | Unpacking libyyjson0:amd64 (0.12.0+ds-1) ...
+2026-10-05 11:07:51 [ debug ] | Selecting previously unselected package fastfetch.
+2026-10-05 11:07:51 [ debug ] | Preparing to unpack .../fastfetch_2.57.1+dfsg-1ubuntu1_amd64.deb ...
+2026-10-05 11:07:51 [ debug ] | Unpacking fastfetch (2.57.1+dfsg-1ubuntu1) ...
+2026-10-05 11:07:51 [ debug ] | Setting up libyyjson0:amd64 (0.12.0+ds-1) ...
+2026-10-05 11:07:51 [ debug ] | Setting up fastfetch (2.57.1+dfsg-1ubuntu1) ...
+2026-10-05 11:07:51 [ debug ] | Setting up language-pack-de (1:26.04+20260818) ...
+2026-10-05 11:07:51 [ debug ] | Setting up language-pack-de-base (1:26.04+20260818) ...
+2026-10-05 11:07:51 [ debug ] | Generating locales (this might take a while)...
+2026-10-05 11:07:51 [ debug ] |   de_AT.UTF-8... done
+2026-10-05 11:07:51 [ debug ] |   de_BE.UTF-8...
+2026-10-05 11:07:54 [ debug ] |  done
+2026-10-05 11:07:54 [ debug ] |   de_CH.UTF-8... done
+2026-10-05 11:07:54 [ debug ] |   de_DE.UTF-8... done
+2026-10-05 11:07:54 [ debug ] |   de_IT.UTF-8... done
+2026-10-05 11:07:54 [ debug ] |   de_LI.UTF-8...
+2026-10-05 11:07:58 [ debug ] |  done
+2026-10-05 11:07:58 [ debug ] |   de_LU.UTF-8... done
+2026-10-05 11:07:58 [ debug ] | Generation complete.
+2026-10-05 11:07:58 [ debug ] | Processing triggers for libc-bin (2.43-2ubuntu2.4) ...
+2026-10-05 11:07:58 [ debug ] | Processing triggers for man-db (2.13.1-1build1) ...
+2026-10-05 11:07:58 [ debug ] | Restarting services...
+2026-10-05 11:07:58 [ debug ] | Service restarts being deferred:
+2026-10-05 11:07:58 [ debug ] |  systemctl restart cloud-init-main.service
+2026-10-05 11:07:58 [ debug ] |  systemctl restart networkd-dispatcher.service
+2026-10-05 11:07:58 [ debug ] |  systemctl restart systemd-logind.service
+2026-10-05 11:07:58 [ debug ] |  systemctl restart unattended-upgrades.service
+2026-10-05 11:07:58 [ debug ] | No containers need to be restarted.
+2026-10-05 11:07:58 [ debug ] | No user sessions are running outdated binaries.
+2026-10-05 11:07:58 [ debug ] | No VM guests are running outdated hypervisor (qemu) binaries on this host.
+2026-10-05 11:07:58 [ debug ] | Generating locales (this might take a while)...
+2026-10-05 11:07:58 [ debug ] |   de_DE.UTF-8... done
+2026-10-05 11:07:58 [ debug ] |   en_US.UTF-8...
+2026-10-05 11:08:00 [ info  ] Disk grown to 40 GB for the CIS Level 2 volumes
+2026-10-05 11:08:04 [ debug ] |  done
+2026-10-05 11:08:04 [ debug ] | Generation complete.
+2026-10-05 11:08:04 [ debug ] | BAKE-LOCALE en_US.UTF-8 ok
+2026-10-05 11:08:04 [ debug ] | BAKE-LOCALE de_DE.UTF-8 ok
+2026-10-05 11:08:04 [ debug ] | BAKE-REGION LANG=en_US.UTF-8 LC_TIME=de_DE.UTF-8 TZ=Europe/Berlin KEYMAP=de
+2026-10-05 11:08:04 [ debug ] | BAKE-KERNEL 7.0.0-38-generic
+2026-10-05 11:08:04 [ debug ] | BAKE-RUNNING-KERNEL 7.0.0-34-generic
+2026-10-05 11:08:04 [ debug ] | BAKE-PKG qemu-guest-agent ok
+2026-10-05 11:08:04 [ debug ] | BAKE-PKG language-pack-de ok
+2026-10-05 11:08:04 [ debug ] | BAKE-PKG fastfetch ok
+2026-10-05 11:08:04 [ debug ] | BAKE-CIS-BUNDLE 1 benchmark
+2026-10-05 11:08:07 [ debug ] | BAKE-CIS-SNAPD-PURGED
+2026-10-05 11:09:29 [ debug ] | CIS-FIX-DONE level 2: 315 applied, 0 failed, 34 without a fix
+2026-10-05 11:09:52 [ debug ] | CIS-FIX-DONE second pass, level 2: 69 applied, 0 failed, 4 without a fix
+2026-10-05 11:09:52 [ debug ] | Created symlink '/etc/systemd/system/multi-user.target.wants/pvs-cis-finish.service' → '/etc/systemd/system/pvs-cis-finish.service'.
+2026-10-05 11:09:52 [ debug ] | Created symlink '/etc/systemd/system/sysinit.target.wants/pvs-cis-layout.service' → '/etc/systemd/system/pvs-cis-layout.service'.
+2026-10-05 11:09:52 [ debug ] | PVS-BOOT1-SAVED 16 lines
+2026-10-05 11:09:52 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 finished at Mon, 05 Oct 2026 09:09:34 +0000. Datasource DataSourceNoCloud [seed=/dev/sdb1].  Up 182.98 seconds
+2026-10-05 11:09:52 [ debug ] | Generating public/private rsa key pair.
+2026-10-05 11:09:52 [ debug ] | Your identification has been saved in /etc/ssh/ssh_host_rsa_key
+2026-10-05 11:09:52 [ debug ] | Your public key has been saved in /etc/ssh/ssh_host_rsa_key.pub
+2026-10-05 11:09:52 [ debug ] | The key fingerprint is:
+2026-10-05 11:09:52 [ debug ] | SHA256:coThN0+8RHLKsb3LIi+zLiwNscGYHV5iHBQRzqkSdqg root@bake
+2026-10-05 11:09:52 [ debug ] | The key's randomart image is:
+2026-10-05 11:09:52 [ debug ] | +---[RSA 3072]----+
+2026-10-05 11:09:52 [ debug ] | | o*=  . o o      |
+2026-10-05 11:09:52 [ debug ] | | o*... + X       |
+2026-10-05 11:09:52 [ debug ] | |.X+=  o B =      |
+2026-10-05 11:09:52 [ debug ] | |=oB    o = o     |
+2026-10-05 11:09:52 [ debug ] | |E  +  . S +      |
+2026-10-05 11:09:52 [ debug ] | |. o    o . .     |
+2026-10-05 11:09:52 [ debug ] | |   +  . . o      |
+2026-10-05 11:09:52 [ debug ] | |  . + oo .       |
+2026-10-05 11:09:52 [ debug ] | |   . oo+.        |
+2026-10-05 11:09:52 [ debug ] | +----[SHA256]-----+
+2026-10-05 11:09:52 [ debug ] | Generating public/private ecdsa key pair.
+2026-10-05 11:09:52 [ debug ] | Your identification has been saved in /etc/ssh/ssh_host_ecdsa_key
+2026-10-05 11:09:52 [ debug ] | Your public key has been saved in /etc/ssh/ssh_host_ecdsa_key.pub
+2026-10-05 11:09:52 [ debug ] | The key fingerprint is:
+2026-10-05 11:09:52 [ debug ] | SHA256:zzq787r+BWjONXc/jFV1xuMP5erD8W5s5s+KAAdlgEE root@bake
+2026-10-05 11:09:52 [ debug ] | The key's randomart image is:
+2026-10-05 11:09:52 [ debug ] | +---[ECDSA 256]---+
+2026-10-05 11:09:52 [ debug ] | |     .Eo..o    .+|
+2026-10-05 11:09:52 [ debug ] | |      .  o     o=|
+2026-10-05 11:09:52 [ debug ] | |        .     .oo|
+2026-10-05 11:09:52 [ debug ] | |         o    ..o|
+2026-10-05 11:09:52 [ debug ] | |        S = . .+.|
+2026-10-05 11:09:52 [ debug ] | |       + * + .*..|
+2026-10-05 11:09:52 [ debug ] | |        o + .+ *.|
+2026-10-05 11:09:52 [ debug ] | |        o. o .+.B|
+2026-10-05 11:09:52 [ debug ] | |       .BXo . .O*|
+2026-10-05 11:09:52 [ debug ] | +----[SHA256]-----+
+2026-10-05 11:09:52 [ debug ] | Generating public/private ed25519 key pair.
+2026-10-05 11:09:52 [ debug ] | Your identification has been saved in /etc/ssh/ssh_host_ed25519_key
+2026-10-05 11:09:52 [ debug ] | Your public key has been saved in /etc/ssh/ssh_host_ed25519_key.pub
+2026-10-05 11:09:52 [ debug ] | The key fingerprint is:
+2026-10-05 11:09:52 [ debug ] | SHA256:+xSn7XPuzl27vxnBEYMWBkBSccxAUN4E3B6wFdRyDyM root@bake
+2026-10-05 11:09:52 [ debug ] | The key's randomart image is:
+2026-10-05 11:09:52 [ debug ] | +--[ED25519 256]--+
+2026-10-05 11:09:52 [ debug ] | |       oB@@B+ooo |
+2026-10-05 11:09:52 [ debug ] | |        o.*E.B  o|
+2026-10-05 11:09:52 [ debug ] | |         o..* +. |
+2026-10-05 11:09:52 [ debug ] | |           .  ...|
+2026-10-05 11:09:52 [ debug ] | |        S . .  o |
+2026-10-05 11:09:52 [ debug ] | |         . =    .|
+2026-10-05 11:09:52 [ debug ] | |        . o .  ..|
+2026-10-05 11:09:52 [ debug ] | |         o .....=|
+2026-10-05 11:09:52 [ debug ] | |          . .*==*|
+2026-10-05 11:09:52 [ debug ] | +----[SHA256]-----+
+2026-10-05 11:09:52 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 running 'init-local' at Mon, 05 Oct 2026 09:09:48 +0000. Up 8.05 seconds.
+2026-10-05 11:09:52 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 running 'init' at Mon, 05 Oct 2026 09:09:49 +0000. Up 8.19 seconds.
+2026-10-05 11:09:52 [ debug ] | ci-info: +++++++++++++++++++++++++++++++++++++++Net device info+++++++++++++++++++++++++++++++++++++++
+2026-10-05 11:09:52 [ debug ] | ci-info: +--------+------+------------------------------+---------------+--------+-------------------+
+2026-10-05 11:09:52 [ debug ] | ci-info: | Device |  Up  |           Address            |      Mask     | Scope  |     Hw-Address    |
+2026-10-05 11:09:52 [ debug ] | ci-info: +--------+------+------------------------------+---------------+--------+-------------------+
+2026-10-05 11:09:52 [ debug ] | ci-info: | ens18  | True |         10.10.0.102          | 255.255.255.0 | global | bc:24:11:12:20:0d |
+2026-10-05 11:09:52 [ debug ] | ci-info: | ens18  | True | fe80::be24:11ff:fe12:200d/64 |       .       |  link  | bc:24:11:12:20:0d |
+2026-10-05 11:09:52 [ debug ] | ci-info: |   lo   | True |          127.0.0.1           |   255.0.0.0   |  host  |         .         |
+2026-10-05 11:09:52 [ debug ] | ci-info: |   lo   | True |           ::1/128            |       .       |  host  |         .         |
+2026-10-05 11:09:52 [ debug ] | ci-info: +--------+------+------------------------------+---------------+--------+-------------------+
+2026-10-05 11:09:52 [ debug ] | ci-info: +++++++++++++++++++++++++++++Route IPv4 info+++++++++++++++++++++++++++++
+2026-10-05 11:09:52 [ debug ] | ci-info: +-------+-------------+-----------+-----------------+-----------+-------+
+2026-10-05 11:09:52 [ debug ] | ci-info: | Route | Destination |  Gateway  |     Genmask     | Interface | Flags |
+2026-10-05 11:09:52 [ debug ] | ci-info: +-------+-------------+-----------+-----------------+-----------+-------+
+2026-10-05 11:09:52 [ debug ] | ci-info: |   0   |   0.0.0.0   | 10.10.0.1 |     0.0.0.0     |   ens18   |   UG  |
+2026-10-05 11:09:52 [ debug ] | ci-info: |   1   |  10.10.0.0  |  0.0.0.0  |  255.255.255.0  |   ens18   |   U   |
+2026-10-05 11:09:52 [ debug ] | ci-info: |   2   |  10.10.0.1  |  0.0.0.0  | 255.255.255.255 |   ens18   |   UH  |
+2026-10-05 11:09:52 [ debug ] | ci-info: +-------+-------------+-----------+-----------------+-----------+-------+
+2026-10-05 11:09:52 [ debug ] | ci-info: +++++++++++++++++++Route IPv6 info+++++++++++++++++++
+2026-10-05 11:09:52 [ debug ] | ci-info: +-------+-------------+---------+-----------+-------+
+2026-10-05 11:09:52 [ debug ] | ci-info: | Route | Destination | Gateway | Interface | Flags |
+2026-10-05 11:09:52 [ debug ] | ci-info: +-------+-------------+---------+-----------+-------+
+2026-10-05 11:09:52 [ debug ] | ci-info: |   0   |  fe80::/64  |    ::   |   ens18   |   U   |
+2026-10-05 11:09:52 [ debug ] | ci-info: |   2   |    local    |    ::   |   ens18   |   U   |
+2026-10-05 11:09:52 [ debug ] | ci-info: |   3   |  multicast  |    ::   |   ens18   |   U   |
+2026-10-05 11:09:52 [ debug ] | ci-info: +-------+-------------+---------+-----------+-------+
+2026-10-05 11:09:52 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 running 'modules:config' at Mon, 05 Oct 2026 09:09:49 +0000. Up 8.40 seconds.
+2026-10-05 11:09:52 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 running 'modules:final' at Mon, 05 Oct 2026 09:09:49 +0000. Up 8.72 seconds.
+2026-10-05 11:09:52 [ debug ] | Cloud-init v. 26.1-0ubuntu3~26.04.1 finished at Mon, 05 Oct 2026 09:09:49 +0000. Datasource DataSourceNoCloud [seed=/dev/sdb1].  Up 8.78 seconds
+2026-10-05 11:10:43 [ run   ] Bake finished - shutting the bake VM down
+2026-10-05 11:10:45 [ info  ] Ready for the bigger disk
+2026-10-05 11:10:45 [ info  ] Language and keyboard: en_US.UTF-8 ok
+2026-10-05 11:10:45 [ info  ] Language and keyboard: de_DE.UTF-8 ok
+2026-10-05 11:10:45 [ info  ] Region: LANG=en_US.UTF-8 LC_TIME=de_DE.UTF-8 TZ=Europe/Berlin KEYMAP=de
+2026-10-05 11:10:45 [ info  ] Kernel: 7.0.0-38-generic
+2026-10-05 11:10:45 [ info  ] Running kernel: 7.0.0-34-generic
+2026-10-05 11:10:45 [ info  ] Package qemu-guest-agent installed
+2026-10-05 11:10:45 [ info  ] Package language-pack-de installed
+2026-10-05 11:10:45 [ info  ] Package fastfetch installed
+2026-10-05 11:10:45 [ info  ] CIS scripts unpacked: 1 benchmark
+2026-10-05 11:10:45 [ info  ] snapd removed
+2026-10-05 11:10:45 [ info  ] Root size: root 11G disk 40G cloud-init: disabled': False}
+2026-10-05 11:10:45 [ info  ] Rebooting into the hardened system
+2026-10-05 11:10:45 [ info  ] Volumes laid out: found: root /dev/sda1 11152M on /dev/sda 40960M
+2026-10-05 11:10:45 [ info  ] Volumes laid out: prepared: root 12G, /dev/sda2 -> VG system (<26,89g)
+2026-10-05 11:10:45 [ info  ] Volumes laid out: migrated: /var /dev/mapper/system-var /var/log /dev/mapper/system-varlog /var/log/audit /dev/mapper/system-varaudit /var/tmp /dev/mapper/system-vartmp /home /dev/mapper/system-home
+2026-10-05 11:10:45 [ info  ] Checking the CIS rules: level 2
+2026-10-05 11:10:45 [ info  ] Sealing the gold
+2026-10-05 11:10:45 [ info  ] initramfs rebuilt
+2026-10-05 11:10:45 [ info  ] Bake finished
+2026-10-05 11:10:45 [ o.k.  ] CIS Level 2 Server · 100% · 1 exception: 322 pass, 0 fail, 1 exception, 6 review, 21 n/a - GRUB password kept with the report
+2026-10-05 11:10:47 [ o.k.  ] Gold ready: b6b6510a (template 9003, kernel 7.0.0-38-generic)
+2026-10-05 11:10:47 [ end   ] Bake Ubuntu 26.04 LTS (Resolute) (bake-b6b6510a): done

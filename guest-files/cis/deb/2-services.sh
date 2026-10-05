@@ -8,8 +8,11 @@
 #   stopped + masked instead (the benchmark's "required as a dependency" branch).
 # - If a purge takes an ubuntu-* metapackage with it, that metapackage's installed deps are
 #   marked manual first, so a later autoremove cannot gut the system. Never autoremove.
-# - 2.1.13 rsync: the benchmark accepts "installed but service masked" - we mask rsync.service
-#   and keep the package (the bake does not need it; purging is not required).
+# - 2.1.13 rsync: purged like every other server package. The benchmark accepts "installed but
+#   not in use" only when another installed package needs it; nothing in the image does, and
+#   the bake copies with tar.
+# - "installed, units off" passes only when an installed package depends on it (the evidence
+#   names it); an installed server package nothing needs is a fail, whatever its units say.
 # - 2.1.3 kea: every installed package named kea* counts (the benchmark matches on "kea").
 # - 2.1.22 MTA: none in the cloud image. Fix handles postfix (loopback-only) and exim4
 #   (127.0.0.1 ; ::1); sendmail is only checked.
@@ -66,10 +69,17 @@ c2_unit_line() {
     echo "$u: ${st:-none}, ${act:-none}"
 }
 
-# Pass when no package of PKGS is installed, or (when UNITS are given) none of UNITS is
-# enabled or active.
+# The installed packages that depend on PKG (Depends/PreDepends), empty when none.
+c2_needed_by() {
+    apt-cache rdepends --installed --no-recommends --no-suggests --no-enhances --no-conflicts \
+        --no-breaks --no-replaces "$1" 2>/dev/null | awk 'NR > 2 { gsub(/^[ |]+/, ""); print }' | sort -u | xargs
+}
+
+# Pass when no package of PKGS is installed, or when (UNITS given) each installed one is needed
+# by another installed package and none of UNITS is enabled or active - the benchmark's
+# "required as a dependency" branch, and only that.
 c2_off_check() {
-    local pkgs=$1 units=${2:-} inst u st bad=0
+    local pkgs=$1 units=${2:-} inst u st bad=0 p need
     # shellcheck disable=SC2086
     inst=$(c2_installed $pkgs)
     if [ -z "$inst" ]; then
@@ -78,6 +88,15 @@ c2_off_check() {
     fi
     ev "installed: $inst"
     [ -n "$units" ] || return 1
+    for p in $inst; do
+        need=$(c2_needed_by "$p")
+        if [ -n "$need" ]; then
+            ev "$p needed by: $need"
+        else
+            ev "$p: no installed package needs it - it should be removed"
+            bad=1
+        fi
+    done
     for u in $units; do
         ev "$(c2_unit_line "$u")"
         st=$(systemctl is-enabled "$u" 2>/dev/null | head -n 1)
@@ -165,12 +184,9 @@ rule rpcbind-removed "rpcbind removed"
 check_rpcbind_removed() { c2_off_check rpcbind "rpcbind.socket rpcbind.service"; }
 fix_rpcbind_removed() { c2_off_fix rpcbind "rpcbind.socket rpcbind.service"; }
 
-rule rsync-daemon-masked "rsync daemon masked"
-check_rsync_daemon_masked() { c2_off_check rsync rsync.service; }
-fix_rsync_daemon_masked() {
-    pkg_installed rsync || return 0
-    svc_off rsync.service
-}
+rule rsync-removed "rsync removed"
+check_rsync_removed() { c2_off_check rsync rsync.service; }
+fix_rsync_removed() { c2_off_fix rsync rsync.service; }
 
 rule samba-removed "samba removed"
 check_samba_removed() { c2_off_check samba smbd.service; }

@@ -1,0 +1,12 @@
+# The README demo: the studio against tools/demo/mock_pve.py, plain HTTP on localhost, its
+# data in /tmp/pvs-demo. Sign in with root@pam and any password.
+listen = "127.0.0.1:8443"
+plain_http = true
+data_dir = "/tmp/pvs-demo"
+iso_root = "/tmp/pvs-demo/iso"
+
+[pve]
+url = "https://127.0.0.1:8006"
+token_id = "pve-vm-studio@pve!studio"
+token_secret = "00000000-0000-0000-0000-000000000000"
+insecure = true

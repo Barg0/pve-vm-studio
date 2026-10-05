@@ -362,10 +362,16 @@ async fn deploy_inner(
     crate::tags::paint(pve, &[os_tag]).await;
     // No user and no address: the notes are readable by anyone who sees the VM.
     let notes = format!("## {}\n\nBuilt by PVE VM Studio from gold `{}` ({}).\n", spec.name, gold.name, image_name);
+    // CPU type from the bake settings, so a gold baked under older defaults follows them too.
+    // Balloon deleted, not 0: the device stays (PVE sees the guest's real memory use) with
+    // its target at full memory, so nothing is ever taken back - static memory.
+    let bake: crate::settings::BakeSettings = crate::settings::load(db, "bake").await?;
+    let cpu = if spec.nested { "host".to_string() } else { bake.cpu_for(win) };
     let mut hw = form![
         ("cores", spec.cores),
         ("memory", spec.memory_mb),
-        ("balloon", 0),
+        ("cpu", cpu),
+        ("delete", "balloon"),
         ("net0", &net0),
         ("onboot", u8::from(spec.onboot)),
         ("tags", tags.join(";")),
@@ -377,9 +383,6 @@ async fn deploy_inner(
             v += &format!(",tag={t}");
         }
         hw.push((format!("net{}", i + 1), v));
-    }
-    if spec.nested {
-        hw.push(("cpu".into(), "host".into()));
     }
     pve.vm_set(&node, vmid, hw).await?;
     // PVE counts a start delay as host behaviour and wants Sys.Modify on / for it - more
@@ -506,7 +509,7 @@ async fn deploy_inner(
         };
         let user_data = linux::vm_user_data(img, &seed);
         let meta_data = linux::vm_meta_data(&spec.name, &stamp);
-        let net_cfg = linux::vm_network_config(&nics);
+        let net_cfg = linux::vm_network_config(&nics, seed.cis && img.family == "debian");
         let mut files = vec![("user-data", user_data.as_str()), ("meta-data", meta_data.as_str())];
         if let Some(n) = &net_cfg {
             files.push(("network-config", n.as_str()));
@@ -625,11 +628,11 @@ async fn deploy_inner(
         let m = windows::run_pass(pve, log, &mut pr, &node, vmid, "deploy pass", 30).await?;
         let count = |p: &str| m.iter().filter(|l| l.starts_with(p)).count();
         for l in m.iter().filter(|l| l.starts_with("PVS-CAP-FAIL") || l.starts_with("PVS-FEATURE-FAIL") || l.starts_with("PVS-APP-FAIL")) {
-            log.warn(format!("{l} - see the debug lines above")).await;
+            log.warn(format!("{} - see the debug lines above", crate::markers::text(l))).await;
         }
         if !m.iter().any(|l| l == "PVS-DEPLOY-OK") {
             let why = m.iter().rev().find(|l| l.starts_with("PVS-NO-") || l.ends_with("FAILED")).cloned();
-            bail!("the deploy pass failed: {}", why.or_else(|| m.last().cloned()).unwrap_or_else(|| "no markers on the serial console".into()));
+            bail!("the deploy pass failed: {}", why.or_else(|| m.last().cloned()).map(|l| crate::markers::text(&l)).unwrap_or_else(|| "nothing on the serial console".into()));
         }
         // As Hyper-V's log names them: per Server Manager feature, per capability, apps summed.
         let ok = |p: &str, name: &str| m.iter().any(|l| l.strip_prefix(p).is_some_and(|r| r.trim() == name));
@@ -766,10 +769,15 @@ async fn follow_first_boot(pve: &Pve, log: &JobLog, pr: &mut Progress, node: &st
     let mut offset = 0u64;
     let mut stage = 0u8;
     let mut packages = PackageCounter::default();
+    let mut refused: Option<String> = None;
     loop {
         log.check_abort()?;
         let s = pve.vm_status(node, vmid).await?;
         if s.status == "stopped" {
+            // A CIS gold's password policy refused the design's password: the account has none.
+            if let Some(why) = refused {
+                bail!("the gold's password policy refused the admin password ({why}) - pick one that meets it (14 characters, 3 kinds, no runs) and deploy again");
+            }
             return Ok(());
         }
         if started.elapsed() > Duration::from_secs(timeout_min * 60) {
@@ -778,6 +786,15 @@ async fn follow_first_boot(pve: &Pve, log: &JobLog, pr: &mut Progress, node: &st
         if let Some((chunk, n)) = pve.agent_read(node, vmid, "/var/log/cloud-init-output.log", offset).await {
             offset += n;
             for l in chunk.lines().map(str::trim_end).filter(|l| !l.is_empty()) {
+                if let Some(why) = l.strip_prefix("PASSWORD-FAILED") {
+                    log.warn(format!("The admin password was refused:{why}")).await;
+                    refused = Some(why.trim().to_owned());
+                    continue;
+                }
+                if l == "PASSWORD-SET" {
+                    log.ok("Admin password set through PAM").await;
+                    continue;
+                }
                 // The join and Arc steps report with markers; those are worth a tag of their own.
                 let marker = ["DOMAIN-", "ARC-", "SUDO-", "MKHOMEDIR-", "NSS-SSS-", "TIME-SYNC"].iter().any(|m| l.starts_with(m));
                 if marker && (l.contains("FAILED") || l.contains("UNRESOLVED") || l.contains("NOT-INSTALLED") || l.contains("MISSING")) {

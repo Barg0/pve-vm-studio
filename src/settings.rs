@@ -41,7 +41,8 @@ pub struct BakeSettings {
     pub iso_storage: String,
     pub bridge: String,
     pub vlan: Option<u16>,
-    /// "host" by default: EL10 needs x86-64-v3, which PVE's default CPU type lacks.
+    /// x86-64-v3 by default: EL10 needs it, and unlike `host` a clone still live-migrates
+    /// between nodes of different CPU generations.
     pub cpu: String,
     /// Windows bakes: a named model. Windows on `host` under nested virtualization (PVE in
     /// Hyper-V, say) stops KVM with an internal error as soon as it sees VMX.
@@ -49,6 +50,16 @@ pub struct BakeSettings {
     pub memory_mb: u32,
     pub cores: u32,
     pub timeout_min: u64,
+    /// Linux bakes' addresses on the bake network: one (10.10.0.60/24) or a range for parallel
+    /// bakes (10.10.0.60-69/24, or 10.10.0.60-10.10.0.69/24); "" = DHCP. For networks without
+    /// DHCP (New-Vhdx asks for it too). Each bake takes the first one no running bake holds.
+    /// Windows bakes stay offline.
+    #[serde(default)]
+    pub linux_address: String,
+    #[serde(default)]
+    pub linux_gateway: String,
+    #[serde(default)]
+    pub linux_dns: Vec<String>,
 }
 
 impl Default for BakeSettings {
@@ -60,13 +71,16 @@ impl Default for BakeSettings {
             iso_storage: String::new(),
             bridge: String::new(),
             vlan: None,
-            cpu: "host".into(),
-            cpu_windows: "x86-64-v2-AES".into(),
+            cpu: CPU_DEFAULT.into(),
+            cpu_windows: CPU_DEFAULT.into(),
             // New-Vhdx's bake VMs get 4 GB; the Windows bake raised anything smaller to it anyway.
             memory_mb: 4096,
             // New-Vhdx gives every bake VM 4 vCPUs.
             cores: 4,
             timeout_min: 60,
+            linux_address: String::new(),
+            linux_gateway: String::new(),
+            linux_dns: vec![],
         }
     }
 }
@@ -85,9 +99,67 @@ pub struct Placement {
     pub memory_mb: u32,
     pub cores: u32,
     pub timeout_min: u64,
+    pub linux_address: String,
+    pub linux_gateway: String,
+    pub linux_dns: Vec<String>,
 }
 
+const CPU_DEFAULT: &str = "x86-64-v3";
+
 impl BakeSettings {
+    /// The Linux bake addresses and their prefix, checked; None for DHCP.
+    pub fn linux_pool(&self) -> Result<Option<(Vec<std::net::Ipv4Addr>, u8)>> {
+        use std::net::Ipv4Addr;
+        let a = self.linux_address.trim();
+        if a.is_empty() {
+            return Ok(None);
+        }
+        let (range, prefix) = a.split_once('/').ok_or_else(|| anyhow!("the bake addresses need their prefix: 10.10.0.60-69/24"))?;
+        let prefix: u8 = prefix.trim().parse().ok().filter(|p| (1..=32).contains(p)).ok_or_else(|| anyhow!("the prefix is 1 to 32"))?;
+        let (first, last) = range.split_once('-').map(|(f, l)| (f.trim(), Some(l.trim()))).unwrap_or((range.trim(), None));
+        let first: Ipv4Addr = first.parse().map_err(|_| anyhow!("'{first}' is not an IPv4 address"))?;
+        let last: Ipv4Addr = match last {
+            None => first,
+            // 10.10.0.60-69: the last octet only.
+            Some(l) if !l.contains('.') => {
+                let o: u8 = l.parse().map_err(|_| anyhow!("'{l}' is not the last part of an address"))?;
+                let f = first.octets();
+                Ipv4Addr::new(f[0], f[1], f[2], o)
+            }
+            Some(l) => l.parse().map_err(|_| anyhow!("'{l}' is not an IPv4 address"))?,
+        };
+        let (f, l) = (u32::from(first), u32::from(last));
+        if l < f {
+            bail!("the range ends before it starts");
+        }
+        if l - f >= 256 {
+            bail!("at most 256 bake addresses");
+        }
+        let mask = if prefix == 32 { u32::MAX } else { !(u32::MAX >> prefix) };
+        if f & mask != l & mask {
+            bail!("the range leaves the /{prefix} network");
+        }
+        let pool: Vec<Ipv4Addr> = (f..=l).map(Ipv4Addr::from).collect();
+        let gw = self.linux_gateway.trim();
+        if gw.is_empty() {
+            bail!("a static bake address needs a gateway - the bake installs packages");
+        }
+        gw.parse::<std::net::Ipv4Addr>().map_err(|_| anyhow!("'{gw}' is not an IPv4 address"))?;
+        if self.linux_dns.is_empty() {
+            bail!("a static bake address needs a DNS server");
+        }
+        for d in &self.linux_dns {
+            d.parse::<std::net::IpAddr>().map_err(|_| anyhow!("'{d}' is not an IP address"))?;
+        }
+        Ok(Some((pool, prefix)))
+    }
+
+    /// The CPU type for a Linux or a Windows VM, the default when left empty.
+    pub fn cpu_for(&self, windows: bool) -> String {
+        let v = if windows { &self.cpu_windows } else { &self.cpu };
+        if v.is_empty() { CPU_DEFAULT.into() } else { v.clone() }
+    }
+
     pub async fn resolve(&self, pve: &Pve) -> Result<Placement> {
         let resources = pve.resources().await?;
         let online = |r: &&Resource| r.kind == "node" && r.status.as_deref() == Some("online");
@@ -159,11 +231,14 @@ impl BakeSettings {
             iso_storage,
             bridge,
             vlan: self.vlan,
-            cpu: if self.cpu.is_empty() { "host".into() } else { self.cpu.clone() },
-            cpu_windows: if self.cpu_windows.is_empty() { "x86-64-v2-AES".into() } else { self.cpu_windows.clone() },
+            cpu: self.cpu_for(false),
+            cpu_windows: self.cpu_for(true),
             memory_mb: self.memory_mb.max(1024),
             cores: self.cores.max(1),
             timeout_min: self.timeout_min.max(10),
+            linux_address: self.linux_address.trim().to_owned(),
+            linux_gateway: self.linux_gateway.trim().to_owned(),
+            linux_dns: self.linux_dns.clone(),
         })
     }
 }
@@ -214,5 +289,29 @@ impl Placement {
             self.disk_storage = w.to_owned();
         }
         Ok(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with(addr: &str) -> BakeSettings {
+        BakeSettings { linux_address: addr.into(), linux_gateway: "10.10.0.1".into(), linux_dns: vec!["10.10.0.1".into()], ..Default::default() }
+    }
+
+    #[test]
+    fn bake_address_ranges() {
+        assert!(with("").linux_pool().unwrap().is_none());
+        let (one, p) = with("10.10.0.60/24").linux_pool().unwrap().unwrap();
+        assert_eq!((one.len(), p), (1, 24));
+        let (short, _) = with("10.10.0.60-69/24").linux_pool().unwrap().unwrap();
+        assert_eq!((short.len(), short[9].to_string()), (10, "10.10.0.69".to_owned()));
+        let (full, _) = with("10.10.0.60 - 10.10.0.63/24").linux_pool().unwrap().unwrap();
+        assert_eq!(full.len(), 4);
+        assert!(with("10.10.0.69-60/24").linux_pool().is_err(), "backwards");
+        assert!(with("10.10.0.250-10.10.1.5/24").linux_pool().is_err(), "leaves the /24");
+        assert!(with("10.10.0.60").linux_pool().is_err(), "no prefix");
+        assert!(BakeSettings { linux_gateway: String::new(), ..with("10.10.0.60/24") }.linux_pool().is_err(), "no gateway");
     }
 }

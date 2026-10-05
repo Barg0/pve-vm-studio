@@ -4,7 +4,7 @@
 onto the bake's seed disk; the bake installs it to `/usr/local/lib/pvs-cis` (engine at
 `/usr/local/sbin/pvs-cis`), runs `pvs-cis fix` in cloud-init, reboots, and runs
 `pvs-cis check` from `pvs-cis-scan.service`. The same files work on Hyper-V VM Studio: nothing
-here knows the hypervisor. Design: `docs/cis-benchmark.md`.
+here knows the hypervisor.
 
 Licence: the benchmarks are CC BY-NC-SA. Rules cite the recommendation number and carry **our
 own** short title; never copy CIS text (titles, rationale, audit or remediation prose).

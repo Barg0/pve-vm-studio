@@ -6,7 +6,7 @@
 //!
 //! An edition's ESD carries three images: 1 is the Setup media (bootmgr, boot/, efi/,
 //! sources/), 2 is WinRE - the base of WinPE - and 3 is the install image. WinPE needs only
-//! that one file (docs/uup-media-worker.md).
+//! that one file.
 
 use std::path::Path;
 

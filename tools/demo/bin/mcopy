@@ -1,0 +1,3 @@
+#!/bin/sh
+# Demo stand-in: the mock PVE never reads the seed disk.
+exit 0

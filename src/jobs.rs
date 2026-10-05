@@ -166,11 +166,17 @@ impl JobLog {
 
 pub type Watch = (Vec<String>, Option<Event>, Option<broadcast::Receiver<Event>>);
 
+/// Told the id of every job that ends (the notifications).
+pub type EndHook = Arc<dyn Fn(String) + Send + Sync>;
+
 #[derive(Clone)]
 pub struct Jobs {
     db: SqlitePool,
     dir: PathBuf,
     running: Arc<RwLock<HashMap<String, Arc<Live>>>>,
+    on_end: Arc<std::sync::OnceLock<EndHook>>,
+    /// The jobs the last stop cut off: (id, title).
+    pub interrupted: Arc<Vec<(String, String)>>,
 }
 
 impl Jobs {
@@ -178,8 +184,8 @@ impl Jobs {
     pub async fn new(db: SqlitePool, dir: PathBuf) -> Result<Self> {
         tokio::fs::create_dir_all(&dir).await?;
         // Their logs get the closing line too - a log ends with [ end ] or [ error ], always.
-        let cut: Vec<(String,)> = sqlx::query_as("SELECT id FROM jobs WHERE status IN ('queued', 'running')").fetch_all(&db).await?;
-        for (id,) in &cut {
+        let cut: Vec<(String, String)> = sqlx::query_as("SELECT id, title FROM jobs WHERE status IN ('queued', 'running')").fetch_all(&db).await?;
+        for (id, _) in &cut {
             use tokio::io::AsyncWriteExt;
             if let Ok(mut f) = tokio::fs::OpenOptions::new().append(true).open(dir.join(format!("{id}.log"))).await {
                 let line = format!("{} [ {:<5} ] interrupted - the studio stopped while this job ran\n", Local::now().format("%Y-%m-%d %H:%M:%S"), "error");
@@ -194,7 +200,12 @@ impl Jobs {
         .bind(now())
         .execute(&db)
         .await?;
-        Ok(Self { db, dir, running: Default::default() })
+        Ok(Self { db, dir, running: Default::default(), on_end: Default::default(), interrupted: Arc::new(cut) })
+    }
+
+    /// Set once, at start.
+    pub fn on_end(&self, hook: EndHook) {
+        let _ = self.on_end.set(hook);
     }
 
     /// Records the job and starts it. Returns its id at once; the work runs on.
@@ -266,6 +277,9 @@ impl Jobs {
                 let _ = live.tx.send(Event::Status { status: status.into(), error });
             }
             this.running.write().await.remove(&job_id);
+            if let Some(hook) = this.on_end.get() {
+                hook(job_id);
+            }
         });
         Ok(id)
     }
@@ -326,6 +340,16 @@ impl Jobs {
     /// The jobs running in this process now.
     pub async fn running_ids(&self) -> Vec<String> {
         self.running.read().await.keys().cloned().collect()
+    }
+
+    /// Waits for a job to end; its final row.
+    pub async fn wait(&self, id: &str) -> Result<JobRow> {
+        loop {
+            if !self.is_running(id).await {
+                return self.get(id).await?.ok_or_else(|| anyhow::anyhow!("job {id} is gone"));
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
     }
 
     pub async fn is_running(&self, id: &str) -> bool {

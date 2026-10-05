@@ -3438,7 +3438,33 @@ function createVhdSet() {
   };
 }
 
+/* What a CIS gold's pam_pwquality would refuse (minlen 14, minclass 3, maxrepeat 3,
+   maxsequence 3, usercheck), as one sentence - "" when it would take it. The dictionary check
+   only the VM can do; the studio's generated passwords are random and pass it. */
+function cisPasswordProblem(pw, user) {
+  const p = String(pw || "");
+  if (p.length < 14) return `${p.length} characters - the CIS policy wants 14 at least`;
+  const kinds = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter(r => r.test(p)).length;
+  if (kinds < 3) return `only ${kinds} kind${kinds === 1 ? "" : "s"} of character - the CIS policy wants 3 of lower case, upper case, digits and others`;
+  if (/(.)\1\1\1/.test(p)) return "the same character 4 times in a row - the CIS policy allows 3";
+  for (let i = 0; i + 3 < p.length; i++) {
+    const d = [1, 2, 3].map(k => p.charCodeAt(i + k) - p.charCodeAt(i + k - 1));
+    if (d.every(x => x === 1) || d.every(x => x === -1)) return `the sequence "${p.slice(i, i + 4)}" - the CIS policy allows 3 in a row`;
+  }
+  const u = String(user || "").trim().toLowerCase();
+  if (u.length >= 3 && p.toLowerCase().includes(u)) return "it contains the user name";
+  return "";
+}
+
 function generateLocalPassword(length) {
+  // Drawn again until a CIS gold's policy would take it too (a run or sequence of 4 is rare).
+  for (let n = 0; n < 50; n++) {
+    const pw = drawPassword(length);
+    if (!cisPasswordProblem(pw, "")) return pw;
+  }
+  return drawPassword(length);
+}
+function drawPassword(length) {
   const len = length || 32;
   // Ambiguous banned: I l 1 O 0 | ` ' " \
   const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -6083,7 +6109,7 @@ function renderServerCard(s) {
         ${psObjectButton("vm", s._id)}
         ${built
           ? `<span class="pill status ok" title="VM ${esc(built.vmid)} on ${esc(built.node)}">built</span>
-             <button class="btn icon sm danger-text" type="button" data-clear-vm="${esc(s._id)}" title="Clear from view - takes this VM out of the studio's view; the VM in Proxmox VE is not touched" aria-label="Clear from view">${trashIcon()}</button>`
+             <button class="btn icon danger-text" type="button" data-clear-vm="${esc(s._id)}" title="Clear from view - takes this VM out of the studio's view; the VM in Proxmox VE is not touched" aria-label="Clear from view">${trashIcon()}</button>`
           : `${clash ? `<span class="pill status warn" title="${esc(clash.what)} ${esc(clash.vmid)} on ${esc(clash.node)} has this name">name in use</span>` : ""}<button class="btn icon danger-text" type="button" title="Remove from the design" aria-label="Remove from the design" data-del="${esc(s._id)}">${trashIcon()}</button>`}
       </div>
     </div>
@@ -7651,6 +7677,13 @@ function validate() {
     } else if (String(s.localUserPassword).length < 8) {
       warn(`${label} has a password shorter than 8 characters — Windows complexity policy may reject it.`, `Virtual machines › ${label}`);
     }
+    // A CIS gold sets the password through PAM: its policy would refuse a weak one and leave
+    // the account without a password - so it is an error here, before the deploy.
+    {
+      const g = goldsLoaded() && goldFor(s), m = g ? goldManifest(g) : {};
+      const why = m.cis && String(s.localUserPassword || "").trim() ? cisPasswordProblem(s.localUserPassword, s.localUserName) : "";
+      if (why) err(`${label}'s password does not meet its CIS gold's password policy: ${why}.`, `Virtual machines › ${label}`, `s:${s._id}:localUserPassword`);
+    }
 
     // Per-VM assignment integrity is meaningless while the all-VMs mode is on -
     // hand-picks are preserved but overridden, and the mode has its own checks above.
@@ -7906,6 +7939,37 @@ function reviewSummaryCards() {
    a reload, or a restored state token, comes back fully masked. */
 const passwordsVisible = Object.create(null);
 
+/* The password export: one row per VM - what you need to sign in to it, in the order you
+   type it. Windows takes the account as <vm>\<user>, Linux an ssh command. The address is
+   the static one, or what the guest agent reported for a built VM on DHCP. UTF-8 with a BOM
+   so Excel reads umlauts; RFC 4180 quoting, so a comma or quote in a password survives. */
+function passwordExportRows() {
+  return state.servers.map(s => {
+    const linux = isLinuxServer(s);
+    const name = serverDisplayName(s);
+    const user = isBuiltInAdminOnly(s) ? "Administrator" : (String(s.localUserName || "").trim());
+    const live = liveVm(s);
+    const ip = String(s.ipAddress || "").trim() || (live && live.ip) || "";
+    return {
+      VM: name,
+      OS: linux ? "Linux" : "Windows",
+      Address: ip,
+      User: linux ? user : (user ? `${name}\\${user}` : ""),
+      Password: s.localUserPassword || "",
+      SSH: linux && user ? `ssh ${user}@${ip || name}` : "",
+    };
+  });
+}
+function exportPasswordsCsv() {
+  const rows = passwordExportRows();
+  if (!rows.length) return 0;
+  const cols = ["VM", "OS", "Address", "User", "Password", "SSH"];
+  const cell = v => /[",\r\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+  const csv = "\ufeff" + [cols.join(","), ...rows.map(r => cols.map(c => cell(r[c])).join(","))].join("\r\n") + "\r\n";
+  downloadTextFile("vm-passwords.csv", csv, "text/csv;charset=utf-8");
+  return rows.length;
+}
+
 function credentialRows() {
   return state.servers.map(s => {
     const adminOnly = isBuiltInAdminOnly(s);
@@ -8006,6 +8070,7 @@ function renderPasswords() {
     <div class="blade-toolbar">
       ${bladeTitle("access")}
       <div class="row">
+        <button class="btn" type="button" id="pwExport"${rows.length ? "" : " disabled"} title="Every VM's address, user, password and SSH command in one CSV">${downloadIcon()} Export CSV</button>
         <button class="btn" type="button" id="sshDownloadAll"${sshRows.some(r => r.priv) ? "" : " disabled"}
           title="${sshRows.some(r => r.priv) ? "Every private key this tab holds, in one ssh-keys.zip" : "No private key in this tab - generate a pair first"}">${downloadIcon()} Download SSH keys</button>
         <button class="btn" type="button" id="pwToggleAll"${rows.length ? "" : " disabled"}>${anyHidden ? eyeIcon() + " Reveal all" : eyeOffIcon() + " Hide all"}</button>
@@ -9362,7 +9427,7 @@ document.getElementById("main").addEventListener("click", e => {
   }
   const toggle = e.target.closest("[data-toggle]");
   // A control inside a card head does its own job, it does not fold the card.
-  if (toggle && !e.target.closest("[data-del], [data-del-vs], button, input, select, textarea, a")) {
+  if (toggle && !e.target.closest("[data-del], [data-del-vs], button, input, select, textarea, a, label.toggle, .tip-info")) {
     const id = toggle.getAttribute("data-toggle");
     // Flip what is actually on screen, not state.expanded[id] — a card that opens by
     // default has no entry yet, and !undefined would re-open it on the first click.
@@ -9461,6 +9526,11 @@ document.getElementById("main").addEventListener("click", e => {
   if (ovMode) {
     ovCompact = ovMode.getAttribute("data-ov-mode") === "compact";
     render();
+    return;
+  }
+  if (e.target.closest("#pwExport")) {
+    const n = exportPasswordsCsv();
+    toast(n ? `vm-passwords.csv downloaded - ${n} VM(s)` : "No VM to export", !n);
     return;
   }
   if (e.target.closest("#sshDownloadAll")) {

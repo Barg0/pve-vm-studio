@@ -30,7 +30,7 @@ fn now() -> String {
 }
 
 pub async fn list(db: &SqlitePool) -> Result<Vec<LabSummary>> {
-    Ok(sqlx::query_as("SELECT id, name, revision, updated_by, updated_at FROM labs ORDER BY name").fetch_all(db).await?)
+    Ok(sqlx::query_as("SELECT id, name, revision, updated_by, updated_at FROM labs ORDER BY updated_at DESC").fetch_all(db).await?)
 }
 
 pub async fn get(db: &SqlitePool, id: &str) -> Result<Option<LabRow>> {

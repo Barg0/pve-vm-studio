@@ -150,6 +150,8 @@ pub fn session_cookie(id: String, secure: bool) -> Cookie<'static> {
         .http_only(true)
         .secure(secure)
         .same_site(SameSite::Strict)
+        // Kept across a browser restart; the server's idle limit (8 h unused) still ends it.
+        .max_age(time::Duration::days(7))
         .build()
 }
 

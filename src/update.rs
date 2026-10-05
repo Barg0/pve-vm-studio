@@ -261,9 +261,16 @@ pub async fn run(web: reqwest::Client, data: PathBuf, log: JobLog, jobs: crate::
 
 /// At start, before the jobs table marks running jobs interrupted: the helper's result for
 /// an update job closes it as succeeded or failed, with the helper's message in its log.
-pub async fn finish_pending(db: &sqlx::SqlitePool, data: &Path, jobs_dir: &Path) {
+/// This build as people read it: 0.1.0 (abc1234).
+pub fn current_label() -> String {
+    let commit = env!("STUDIO_COMMIT");
+    if commit.is_empty() { env!("CARGO_PKG_VERSION").to_owned() } else { format!("{} ({commit})", env!("CARGO_PKG_VERSION")) }
+}
+
+/// Closes the update job the restart ended. Returns (job, ok, message) for the mail.
+pub async fn finish_pending(db: &sqlx::SqlitePool, data: &Path, jobs_dir: &Path) -> Option<(String, bool, String)> {
     let f = dir(data).join("status");
-    let Ok(text) = tokio::fs::read_to_string(&f).await else { return };
+    let Ok(text) = tokio::fs::read_to_string(&f).await else { return None };
     let get = |k: &str| text.lines().find_map(|l| l.strip_prefix(&format!("{k}="))).unwrap_or("").to_owned();
     let (job, result, msg) = (get("JOB"), get("RESULT"), get("MESSAGE"));
     if !job.is_empty() {
@@ -288,6 +295,7 @@ pub async fn finish_pending(db: &sqlx::SqlitePool, data: &Path, jobs_dir: &Path)
             .await;
     }
     let _ = tokio::fs::remove_file(&f).await;
+    (!job.is_empty()).then(|| (job, result == "ok", msg))
 }
 
 #[cfg(test)]

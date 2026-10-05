@@ -166,10 +166,12 @@
      tabular-nums on top of that, so the octets line up digit for digit down the list
      rather than drifting with proportional glyph widths. */
   .card-actions .card-ip {
-    /* Sized to the longest address actually in the list, not to 255.255.255.255 -
-       see ipColumnWidth(). The fallback only applies if that ever fails to run. */
-    min-width: var(--ip-col, 15ch);
-    text-align: right;
+    /* One slot for 255.255.255.255 on every card, the address centered in it: the gaps to the
+       pills on either side stay equal, whatever the address's length. */
+    box-sizing: content-box;
+    width: 15ch;
+    min-width: 15ch;
+    text-align: center;
     font-variant-numeric: tabular-nums;
     font-size: 12px;
     font-weight: 600;

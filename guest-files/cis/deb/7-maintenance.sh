@@ -61,7 +61,8 @@ c7_mounts() {
     local mode=${1:-} fst tgt opts
     findmnt -Dkrn -o FSTYPE,TARGET,OPTIONS 2>/dev/null | while read -r fst tgt opts; do
         case $fst in
-            nfs*|proc|cifs|smb*|vfat|iso9660|efivarfs|selinuxfs|ncpfs|squashfs|fuse*|9p|ceph|glusterfs|afs|autofs|udf) continue ;;
+            # The benchmark's exclusions, no more.
+            nfs*|proc|cifs|smb*|vfat|iso9660|efivarfs|selinuxfs|ncpfs) continue ;;
         esac
         tgt=$(printf '%b' "$tgt")
         if [ "$mode" = suid ]; then

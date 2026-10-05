@@ -1,4 +1,4 @@
-//! CIS Benchmark hardening for Linux golds (docs/cis-benchmark.md). The rules run inside the
+//! CIS Benchmark hardening for Linux golds. The rules run inside the
 //! guest (guest-files/cis: pvs-cis fix, a reboot, pvs-cis check); the studio carries the
 //! bundle on the bake's seed disk, reads the report back and keeps it with the gold.
 //!
@@ -115,6 +115,7 @@ static SUSE: &[(&str, &[u8])] = &[
 static MAPS: &[(&str, &[u8])] = &[
     guest_file!("ubuntu2604/bench.conf"),
     guest_file!("ubuntu2604/map.tsv"),
+    guest_file!("ubuntu2604/exceptions.default"),
     guest_file!("debian13/bench.conf"),
     guest_file!("debian13/map.tsv"),
     guest_file!("ubuntu2404/bench.conf"),

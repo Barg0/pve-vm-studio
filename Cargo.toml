@@ -2,6 +2,9 @@
 name = "pve-vm-studio"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Design VMs in the browser, bake gold images and deploy them on Proxmox VE"
+repository = "https://github.com/Barg0/pve-vm-studio"
 
 [dependencies]
 anyhow = "1.0.104"
@@ -11,6 +14,7 @@ axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 base64 = "0.23.1"
 chrono = { version = "0.4.45", features = ["serde"] }
 futures = "0.3.34"
+lettre = { version = "0.11.23", default-features = false, features = ["builder", "hostname", "smtp-transport", "tokio1", "tokio1-rustls", "ring", "rustls-native-certs"] }
 mime_guess = "2.0.5"
 rcgen = "0.14.10"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "query", "form", "multipart", "stream"] }
@@ -20,6 +24,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros", "chrono"] }
 thiserror = "2.0.21"
+time = { version = "0.3", default-features = false }
 tokio = { version = "1.53.1", features = ["full"] }
 tokio-stream = { version = "0.1.19", features = ["io-util"] }
 tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["__rustls-tls", "connect", "rustls-tls-native-roots"] }
@@ -34,3 +39,6 @@ x509-parser = "0.18.1"
 [profile.release]
 lto = "thin"
 strip = true
+
+[build-dependencies]
+resvg = { version = "0.48.1", default-features = false }

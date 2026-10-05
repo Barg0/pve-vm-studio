@@ -46,7 +46,9 @@ C1B_GRUB_USERS=/etc/grub.d/01_pvs-cis
 C1B_GRUB_PWDIR=/run/pvs-cis
 C1B_GRUB_CFG=/boot/grub/grub.cfg
 C1B_COREDUMP=/etc/systemd/coredump.conf.d/60-pvs-cis.conf
-C1B_STUB_MARK="This profile exist only to give a name"
+# The benchmark's wording ("exist only to give a name") and Ubuntu 26.04's ("allows everything
+# and only exists to give the" / "application a name", wrapped over two lines), as an ERE.
+C1B_STUB_MARK="(exists? only|only exists?) to give (a name|the$)"
 
 # ---- chapter helpers ----
 
@@ -149,12 +151,28 @@ c1b_aa_clear_flags() {
 
 # Is a stub profile's program installed? (no attachment path: treat as not installed)
 c1b_aa_stub_live() {
-    local a
-    a=$(c1b_aa_attach "$1")
+    local f=$1 a line name val
+    a=$(c1b_aa_attach "$f")
     [ -n "$a" ] || return 1
-    # AppArmor alternations/variables ({,usr/}, @{bin}) become a shell glob.
-    a=$(sed -E 's/@?\{[^}]*\}/*/g; s/\*\*+/*/g' <<<"$a")
-    [ -n "$(c1b_glob "$a")" ]
+    # The profile's own variables (@{chromium} = {,ungoogled-}chromium{,-browser}) by their
+    # values; the tunables' (@{HOME}, @{bin}, ...) match anything.
+    while IFS= read -r line; do
+        name=$(xargs <<<"${line%%=*}")
+        val=$(xargs <<<"${line#*=}")
+        a=${a//"$name"/"{${val// /,}}"}
+    done < <(grep -E '^[[:space:]]*@\{[A-Za-z0-9_]+\}[[:space:]]*=' "$f")
+    a=$(sed -E 's/@\{[^}]*\}/*/g; s/\*\*+/*/g' <<<"$a")
+    # AppArmor's alternations {a,b} (nested too) as bash's extglob @(a|b), innermost first.
+    a=$(perl -pe '1 while s/\{([^{}]*)\}/"@(" . join("|", split(",", $1, -1)) . ")"/e' <<<"$a")
+    local hits
+    shopt -s extglob nullglob
+    # shellcheck disable=SC2206
+    hits=($a)
+    shopt -u nullglob
+    # A plain path is no glob and stays even when it does not exist: count only real files.
+    local h
+    for h in "${hits[@]}"; do [ -e "$h" ] && return 0; done
+    return 1
 }
 
 # Effective value of KEY in [Coredump] (last assignment in systemd's read order), "" if unset.
@@ -305,7 +323,7 @@ check_apparmor_every_profile_enforcing() {
     ev "processes unconfined with a profile: ${c:-0}"
     [ "${c:-0}" -eq 0 ] || bad=1
     local stubs
-    stubs=$(grep -rl "$C1B_STUB_MARK" /etc/apparmor.d/ 2>/dev/null | while IFS= read -r f; do
+    stubs=$(grep -rlE "$C1B_STUB_MARK" /etc/apparmor.d/ 2>/dev/null | while IFS= read -r f; do
         c1b_aa_stub_live "$f" && printf '%s ' "${f##*/}"; done)
     [ -n "$stubs" ] && ev "stub profiles of installed programs (left unenforced): $stubs"
     return $bad
@@ -315,7 +333,7 @@ fix_apparmor_every_profile_enforcing() {
     command -v aa-enforce >/dev/null 2>&1 || { ev "aa-enforce missing (apparmor-utils)"; return 1; }
     for f in /etc/apparmor.d/*; do
         [ -f "$f" ] || continue
-        if grep -q "$C1B_STUB_MARK" "$f" 2>/dev/null && c1b_aa_stub_live "$f"; then
+        if grep -qE "$C1B_STUB_MARK" "$f" 2>/dev/null && c1b_aa_stub_live "$f"; then
             skipped+=("${f##*/}")
             continue
         fi
@@ -383,7 +401,9 @@ password_pbkdf2 $user $hash
 GRUBEOF
 EOF
         chown root:root "$C1B_GRUB_USERS"
-        chmod 0755 "$C1B_GRUB_USERS"
+        # Executable for grub-mkconfig, readable by root only: it holds the password's hash
+        # (grub.cfg, which carries it too, is 0600 by 1.4.2).
+        chmod 0700 "$C1B_GRUB_USERS"
     fi
     if [ -f /etc/grub.d/10_linux ]; then
         sed -i -E '/^CLASS="/{/--unrestricted/!s/"[[:space:]]*$/ --unrestricted"/}' /etc/grub.d/10_linux

@@ -27,9 +27,10 @@
 #   it). 5.2.3 on sudo-rs: journald capture (method A); the check runs `sudo -n true` as root
 #   and looks for the event in the journal. No rsyslog file (its PrivDrop user could not write
 #   a root:adm 0640 log).
-# - 5.2.4 (L2): the fix comments out NOPASSWD everywhere EXCEPT 90-cloud-init-users (the bake
-#   removes it). STUDIO: clones get `sudo: ALL=(ALL) NOPASSWD:ALL` from user-data -> L2 fails
-#   on every clone unless the studio drops that line for CIS L2 golds (group sudo suffices).
+# - 5.2.4 (L2): the fix comments out NOPASSWD everywhere EXCEPT 90-cloud-init-users, which is
+#   cloud-init's: the bake removes its own (and the bake user) before the check, and a clone's
+#   comes from the studio's user-data, which writes `ALL=(ALL) ALL` for a CIS gold - no
+#   NOPASSWD. The check reads that file too, so a NOPASSWD there still fails.
 # - 5.2.7: empty group pvs-su; `auth required pam_wheel.so use_uid group=pvs-su` after
 #   pam_rootok in /etc/pam.d/su - nobody but root can su; admins use sudo.
 # - 5.3.1.x: "latest" = no upgrade pending in the apt cache the bake left (apt-get update must
@@ -49,8 +50,10 @@
 #   PAM (common-password) - a password that fails this policy is REJECTED (enforce_for_root)
 #   and the admin has no password. Use `type: hash` (chpasswd -e skips PAM) or enforce the
 #   policy in the studio UI (>= 14 chars, 3 classes, no 4 repeats/sequences, no dictionary word).
-# - pwhistory: profile line carries no options; remember = 24, enforce_for_root, use_authtok in
-#   /etc/security/pwhistory.conf (the benchmark's preferred single location).
+# - pwhistory: remember = 24 and enforce_for_root in /etc/security/pwhistory.conf (the
+#   benchmark's preferred single location). use_authtok goes on the profile's module line:
+#   pwhistory.conf(5) has no such option (only debug, enforce_for_root, remember, retry,
+#   file) - written there, it satisfies the benchmark's grep and does nothing.
 # - login.defs: PASS_MAX_DAYS 365, PASS_MIN_DAYS 1 (5.4.1.2 manual, verified), PASS_WARN_AGE 7,
 #   ENCRYPT_METHOD YESCRYPT, UMASK 027; useradd -D INACTIVE 45. Existing users with a password
 #   get the same via chage. cloud-init creates the clone admin with useradd at first boot and
@@ -84,9 +87,14 @@ c5_ssh_here() {
 }
 
 # Every effective value of KEY (lower case), one per line.
+# Every value of KEY across the connections sshd_contexts names (root, and what Match blocks
+# name) - a weak value in any of them shows.
 c5_sshd_vals() {
-    sshd -T -C user=root -C host="$(hostname)" -C addr=127.0.0.1 2>/dev/null \
-        | awk -v k="${1,,}" 'tolower($1) == k { $1 = ""; sub(/^ /, ""); print }'
+    local u a
+    while read -r u a; do
+        sshd -T -C user="$u" -C host="$(hostname)" -C addr="$a" 2>/dev/null \
+            | awk -v k="${1,,}" 'tolower($1) == k { $1 = ""; sub(/^ /, ""); print }'
+    done < <(sshd_contexts) | sort -u
 }
 
 c5_sshd_reload() {
@@ -872,7 +880,7 @@ check_pam_pam_pwhistory_enabled() {
 fix_pam_pam_pwhistory_enabled() {
     # Options live in /etc/security/pwhistory.conf (5.3.3.3.x), not on the module line.
     printf '%s\n' 'Name: pwhistory password history checking' 'Default: yes' 'Priority: 1024' \
-        'Password-Type: Primary' 'Password:' '	requisite	pam_pwhistory.so' > "$C5_PAMCFG/pwhistory"
+        'Password-Type: Primary' 'Password:' '	requisite	pam_pwhistory.so use_authtok' > "$C5_PAMCFG/pwhistory"
     chmod 0644 "$C5_PAMCFG/pwhistory"
     c5_pam_update --enable pwhistory || return 1
     check_pam_pam_pwhistory_enabled >/dev/null
@@ -1072,12 +1080,15 @@ check_pwhistory_uses_the_token_already_given() {
     local c=0 m=0
     c5_has_flag "$C5_PWH" use_authtok && c=1
     c5_pam_flag /etc/pam.d/common-password password pam_pwhistory.so use_authtok && m=1
-    ev "pwhistory.conf use_authtok: $c; module argument: $m"
-    [ $((c + m)) -eq 1 ]
+    ev "module argument: $m; pwhistory.conf use_authtok: $c (pam_pwhistory does not read it there)"
+    [ $m -eq 1 ] && [ $c -eq 0 ]
 }
 fix_pwhistory_uses_the_token_already_given() {
-    c5_add_flag "$C5_PWH" use_authtok
-    if c5_profile_drop_arg pam_pwhistory.so use_authtok; then c5_pam_update --package || return 1; fi
+    sed -i -E '/^[[:space:]]*use_authtok\b/d' "$C5_PWH" 2>/dev/null
+    if [ -f "$C5_PAMCFG/pwhistory" ] && ! grep -Pq 'pam_pwhistory\.so\b.*\buse_authtok\b' "$C5_PAMCFG/pwhistory"; then
+        sed -i -E 's/(pam_pwhistory\.so)\b(.*)$/\1\2 use_authtok/' "$C5_PAMCFG/pwhistory"
+    fi
+    c5_pam_update --package || return 1
     return 0
 }
 

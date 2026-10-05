@@ -1,0 +1,8 @@
+{
+  "name": "pve-vm-studio-demo",
+  "private": true,
+  "type": "module",
+  "description": "Records the README's videos against the demo studio (run.sh + seed.py).",
+  "scripts": { "record": "node record.mjs" },
+  "dependencies": { "playwright": "^1.56.0" }
+}

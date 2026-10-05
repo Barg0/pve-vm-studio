@@ -1,5 +1,5 @@
 //! Windows install media built from Microsoft's own update files - the "Windows media" blade.
-//! The way Microsoft refreshes its media every month, done here (docs/uup-media-worker.md):
+//! The way Microsoft refreshes its media every month, done here:
 //!
 //!   1. the UUP dump catalog names the files of a build, language and edition;
 //!   2. they come from Microsoft's CDN, each checked against its SHA-1;
@@ -151,8 +151,8 @@ pub struct MediaIso {
     pub updates: Vec<String>,
 }
 
-/// The media worker VM's size (Studio settings): DISM servicing a whole install image wants
-/// memory - 4 GB kept it paging.
+/// The media worker VM's size (Studio settings). 4 GB by default; more makes DISM page less
+/// on a big install image.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WorkerSettings {
@@ -162,7 +162,7 @@ pub struct WorkerSettings {
 
 impl Default for WorkerSettings {
     fn default() -> Self {
-        Self { memory_mb: 8192, cores: 4 }
+        Self { memory_mb: 4096, cores: 4 }
     }
 }
 
@@ -392,11 +392,12 @@ pub fn studio_ip() -> Result<String> {
 /// One DISM step with a verdict on the serial console: PVS-UPD-OK / PVS-UPD-FAIL <code>
 /// (3010, "restart required", counts as done).
 /// Each step logs to a file of its own (DISM's dism.log rotates and loses the early steps),
-/// sent back to the studio when the step fails.
+/// sent back to the studio whatever the verdict: an error line DISM logs in a step that
+/// succeeded is reported with that step, not counted from a log that lost half the run.
 fn dism_step(s: &mut String, what: &str, log: &str, dism: &str) {
     s.push_str(&format!("echo PVS-UPD {what} > COM1\r\n{dism} /LogPath:W:\\logs\\{log}.log > COM1 2>&1\r\nset RC=!errorlevel!\r\nif \"!RC!\"==\"3010\" set RC=0\r\n"));
     s.push_str(&format!(
-        "if \"!RC!\"==\"0\" (echo PVS-UPD-OK {what} > COM1) else (echo PVS-UPD-FAIL {what} !RC! > COM1 & set ERR=1 & %C% -T W:\\logs\\{log}.log %U%/logs/{log}.log > nul 2>&1)\r\n"
+        "if \"!RC!\"==\"0\" (echo PVS-UPD-OK {what} > COM1) else (echo PVS-UPD-FAIL {what} !RC! > COM1 & set ERR=1)\r\n%C% -T W:\\logs\\{log}.log %U%/logs/{log}.log > nul 2>&1\r\n"
     ));
 }
 
@@ -459,7 +460,9 @@ fn worker_cmd(url: &str, pin: &str, indexes: usize, chain: &[String], image: &[S
         let (file, local) = (u.rsplit('/').next().unwrap_or(u), u.replace('/', "\\"));
         dism_step(&mut s, &format!("%1 {file}"), &log_name("%1", file), &format!("dism /English /Image:W:\\mount /Add-Package /PackagePath:W:\\upd\\{local} /ScratchDir:W:\\scratch"));
     }
-    s += "echo PVS-CLEANUP %1 > COM1\r\ndism /English /Image:W:\\mount /Cleanup-Image /StartComponentCleanup /ResetBase /ScratchDir:W:\\scratch > COM1 2>&1\r\n";
+    // Microsoft's procedure cleans the install image without /ResetBase (the updates stay
+    // removable), and only a pending operation (0x800F0806) is a warning, not a failure.
+    dism_step(&mut s, "%1 cleanup", "image%1-cleanup", "dism /English /Image:W:\\mount /Cleanup-Image /StartComponentCleanup /ScratchDir:W:\\scratch");
     s += "dism /English /Image:W:\\mount /Get-Packages /Format:Table > W:\\packages-%1.txt 2>&1\r\n%C% -T W:\\packages-%1.txt %U%/packages-%1.txt > nul 2>&1\r\n";
     s += "echo PVS-COMMIT %1 > COM1\r\ndism /English /Unmount-Image /MountDir:W:\\mount /Commit /ScratchDir:W:\\scratch > COM1 2>&1 || exit /b 1\r\nexit /b 0\r\n";
 
@@ -475,7 +478,9 @@ fn worker_cmd(url: &str, pin: &str, indexes: usize, chain: &[String], image: &[S
         for u in winre {
             dism_step(&mut s, &format!("winre {u}"), &log_name("winre", u), &format!("dism /English /Image:W:\\mount /Add-Package /PackagePath:W:\\upd\\{u} /ScratchDir:W:\\scratch"));
         }
-        s += "dism /English /Image:W:\\mount /Cleanup-Image /StartComponentCleanup /ResetBase /ScratchDir:W:\\scratch > COM1 2>&1\r\n";
+        // Microsoft: /ResetBase /Defer for WinRE - the long null-delta compression of the
+        // boot-recovery components is left to the recovery image's own maintenance.
+        dism_step(&mut s, "winre cleanup", "winre-cleanup", "dism /English /Image:W:\\mount /Cleanup-Image /StartComponentCleanup /ResetBase /Defer /ScratchDir:W:\\scratch");
         s += "dism /English /Unmount-Image /MountDir:W:\\mount /Commit /ScratchDir:W:\\scratch > COM1 2>&1 || exit /b 1\r\n";
         s += "dism /English /Export-Image /SourceImageFile:W:\\winre.wim /SourceIndex:1 /DestinationImageFile:W:\\winre-serviced.wim /Compress:max /Bootable /ScratchDir:W:\\scratch > COM1 2>&1 || exit /b 1\r\n";
         s += "%C% -T W:\\winre-serviced.wim %U%/winre-serviced.wim > COM1 2>&1 || exit /b 1\r\nexit /b 0\r\n";
@@ -794,7 +799,6 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                 ("cpu", &p.cpu_windows),
                 ("cores", size.cores),
                 ("memory", size.memory_mb),
-                ("balloon", 0),
                 ("efidisk0", format!("{}:1,efitype=4m,pre-enrolled-keys=1", p.disk_storage)),
                 ("sata0", format!("{},media=cdrom", pe.volid)),
                 ("sata1", format!("{}:{scratch_gb},discard=on,ssd=1", p.disk_storage)),
@@ -814,39 +818,38 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             log.line(format!("DISM: about 15-25 min per image")).await;
             let minutes = 30 + 45 * base.len() as u64 + if winre_names.is_empty() { 0 } else { 15 };
             let m = windows::run_pass(pve, log, &mut pr, &p.node, vmid, "worker", minutes).await?;
-            // DISM's log first - whatever the verdict, it is what explains it.
+            // DISM's own dism.log rotates and holds only the last steps - it is kept whole for
+            // reading, but the error lines come from each step's own log, named by its step.
+            let keep_dir = work.parent().unwrap_or(work).join("dism-logs");
+            tokio::fs::create_dir_all(&keep_dir).await?;
             let dism_log = share.join("dism.log");
             if dism_log.exists() {
-                let keep = work.parent().unwrap_or(work).join("dism-logs").join(format!("media-{}.log", &run_id[4..12]));
-                tokio::fs::create_dir_all(keep.parent().unwrap()).await?;
-                tokio::fs::copy(&dism_log, &keep).await?;
-                let text = String::from_utf8_lossy(&tokio::fs::read(&dism_log).await?).into_owned();
-                let errors: Vec<&str> = text.lines().filter(|l| l.contains(", Error ")).collect();
-                if !errors.is_empty() {
-                    log.line(format!("DISM logged {} error line(s) - the whole log is {}", errors.len(), keep.display())).await;
-                    for l in errors.iter().take(40) {
-                        log.debug(format!("dism.log | {}", l.trim())).await;
-                    }
-                }
+                tokio::fs::copy(&dism_log, keep_dir.join(format!("media-{}.log", &run_id[4..12]))).await?;
             }
-            // The failed steps' own logs: their error lines in the job, the files kept.
             if let Ok(mut rd) = tokio::fs::read_dir(share.join("logs")).await {
-                let keep_dir = work.parent().unwrap_or(work).join("dism-logs");
-                tokio::fs::create_dir_all(&keep_dir).await?;
+                let mut names = Vec::new();
                 while let Ok(Some(e)) = rd.next_entry().await {
-                    let name = e.file_name().to_string_lossy().into_owned();
+                    names.push(e.file_name().to_string_lossy().into_owned());
+                }
+                names.sort();
+                for name in names {
+                    let path = share.join("logs").join(&name);
                     let keep = keep_dir.join(format!("media-{}-{name}", &run_id[4..12]));
-                    tokio::fs::copy(e.path(), &keep).await?;
-                    let text = String::from_utf8_lossy(&tokio::fs::read(e.path()).await?).into_owned();
-                    let errors: Vec<&str> = text.lines().filter(|l| l.contains(", Error ") || l.contains("0x8")).collect();
-                    log.line(format!("{name}: {} error line(s) - kept as {}", errors.len(), keep.display())).await;
+                    tokio::fs::copy(&path, &keep).await?;
+                    let text = String::from_utf8_lossy(&tokio::fs::read(&path).await?).into_owned();
+                    let errors: Vec<&str> = text.lines().filter(|l| l.contains(", Error ")).collect();
+                    if errors.is_empty() {
+                        continue;
+                    }
+                    let step = name.trim_end_matches(".log");
+                    log.line(format!("DISM logged {} error line(s) in {step} - its verdict follows; the log is {}", errors.len(), keep.display())).await;
                     for l in errors.iter().take(30) {
-                        log.debug(format!("{name} | {}", l.trim())).await;
+                        log.debug(format!("{step} | {}", l.trim())).await;
                     }
                 }
             }
             if !m.iter().any(|l| l == "PVS-WORKER-OK") {
-                bail!("the worker failed: {}", m.iter().rev().find(|l| l.contains("FAIL") || l.starts_with("PVS-NO")).or(m.last()).cloned().unwrap_or_else(|| "no markers on its serial console".into()));
+                bail!("the worker failed: {}", m.iter().rev().find(|l| l.contains("FAIL") || l.starts_with("PVS-NO")).or(m.last()).map(|l| crate::markers::text(l)).unwrap_or_else(|| "nothing on its serial console".into()));
             }
             // Every update's verdict, as the worker reported it.
             let mut failed = Vec::new();
@@ -854,6 +857,21 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             for l in &m {
                 let parts: Vec<&str> = l.split_whitespace().collect();
                 match parts.as_slice() {
+                    ["PVS-UPD-OK", at, "cleanup"] => log.ok(format!("Component store of {} cleaned up", where_label(at))).await,
+                    ["PVS-UPD-FAIL", at, "cleanup", code] => {
+                        let code = dism_code(code);
+                        if *at == "winre" {
+                            log.warn(format!("Cleaning up {} failed with {code}", where_label(at))).await;
+                            winre_ok = false;
+                        } else if code.contains("800F0806") {
+                            // CBS_E_PENDING: Microsoft's procedure takes it as a warning - the
+                            // image is fine, only larger until it boots once.
+                            log.warn(format!("Cleanup of {} skipped - an operation is pending until the image boots ({code})", where_label(at))).await;
+                        } else {
+                            log.warn(format!("Cleaning up {} failed with {code}", where_label(at))).await;
+                            failed.push(format!("component cleanup ({code})"));
+                        }
+                    }
                     ["PVS-UPD-OK", at, name] => log.ok(format!("{} into {}: installed", update_label(name), where_label(at))).await,
                     ["PVS-UPD-FAIL", at, name, code] => {
                         let code = dism_code(code);

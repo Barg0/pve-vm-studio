@@ -430,7 +430,8 @@ async fn install_from_lego(paths: &Paths, live: Option<&RustlsConfig>, fqdn: &st
 
 /// Twice a day: lego renews a certificate within 30 days of expiry, and a renewed one is
 /// swapped in. Runs for the life of the process.
-pub async fn renew_loop(db: SqlitePool, paths: Paths, live: Option<RustlsConfig>) {
+/// Each renewal that changed something, or failed, goes to `told` (the notifications).
+pub async fn renew_loop(db: SqlitePool, paths: Paths, live: Option<RustlsConfig>, told: tokio::sync::mpsc::UnboundedSender<Result<CertInfo, String>>) {
     loop {
         tokio::time::sleep(Duration::from_secs(12 * 3600)).await;
         let mut s: TlsSettings = match settings::load(&db, "tls").await {
@@ -450,10 +451,20 @@ pub async fn renew_loop(db: SqlitePool, paths: Paths, live: Option<RustlsConfig>
             if fresh != before {
                 let info = install_from_lego(&paths, live.as_ref(), &server.fqdn).await?;
                 tracing::info!("renewed certificate installed, valid until {}", info.not_after);
+                return anyhow::Ok(Some(info));
             }
-            anyhow::Ok(())
+            anyhow::Ok(None)
         }
         .await;
+        match &result {
+            Ok(Some(info)) => {
+                let _ = told.send(Ok(info.clone()));
+            }
+            Err(e) => {
+                let _ = told.send(Err(format!("{e:#}")));
+            }
+            Ok(None) => {}
+        }
         s.last_check = Some(chrono::Utc::now().to_rfc3339());
         s.last_error = result.err().map(|e| format!("{e:#}"));
         if let Some(e) = &s.last_error {

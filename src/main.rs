@@ -5,6 +5,7 @@
 
 mod api;
 mod auth;
+mod autoupdate;
 mod catalog;
 mod config;
 mod error;
@@ -15,6 +16,10 @@ mod guest;
 mod jobs;
 mod labs;
 mod linux;
+mod mail;
+mod maintenance;
+mod markers;
+mod notify;
 mod progress;
 mod pve;
 mod seed;
@@ -146,7 +151,9 @@ async fn main() -> Result<()> {
         tls::ensure(&paths, &server.fqdn).await?;
         Some(RustlsConfig::from_pem_file(&paths.cert, &paths.key).await.context("loading the TLS certificate")?)
     };
-    tokio::spawn(tls::renew_loop(db.clone(), tls::Paths::new(&config.data_dir), tls_live.clone()));
+    let (renewed_tx, mut renewed_rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(tls::renew_loop(db.clone(), tls::Paths::new(&config.data_dir), tls_live.clone(), renewed_tx));
+    let update_outcome;
 
     let state = AppState {
         pve: Pve::new(&config.pve)?,
@@ -158,7 +165,7 @@ async fn main() -> Result<()> {
         jobs: {
             // An update ends in the process after the restart: close it before the jobs
             // table marks the running ones interrupted.
-            update::finish_pending(&db, &config.data_dir, &config.jobs_dir()).await;
+            update_outcome = update::finish_pending(&db, &config.data_dir, &config.jobs_dir()).await;
             Jobs::new(db.clone(), config.jobs_dir()).await?
         },
         db,
@@ -169,7 +176,23 @@ async fn main() -> Result<()> {
     tokio::spawn(reconcile_after_restart(state.clone()));
     tokio::spawn(warm_caches(state.clone()));
     tokio::spawn(clean_work(state.clone()));
-    tokio::spawn(auto_update(state.clone()));
+    tokio::spawn(autoupdate::scheduler(state.clone()));
+    tokio::spawn(notify::watch_loop(state.clone()));
+    // Mails: every job's end, the certificate renewal, and what the last stop cut off.
+    {
+        let app = state.clone();
+        state.jobs.on_end(Arc::new(move |id| {
+            tokio::spawn(notify::job_ended(app.clone(), id));
+        }));
+        let app = state.clone();
+        tokio::spawn(async move {
+            while let Some(r) = renewed_rx.recv().await {
+                notify::cert_renewal(app.clone(), r).await;
+            }
+        });
+        let interrupted = state.jobs.interrupted.as_ref().clone();
+        tokio::spawn(notify::after_restart(state.clone(), update_outcome, interrupted));
+    }
 
     let app = Router::new()
         .nest("/api", api::router().layer(axum::middleware::from_fn(time_request)))
@@ -463,25 +486,3 @@ async fn retag(app: &AppState, res: &[pve::Resource]) {
     }
 }
 
-/// "Install updates automatically": between 03:00 and 04:00 local time, when a newer release
-/// is out and no job runs, the same update job an admin starts from Studio settings.
-async fn auto_update(app: AppState) {
-    use chrono::Timelike;
-    loop {
-        tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
-        let s: update::UpdateSettings = settings::load(&app.db, "update").await.unwrap_or_default();
-        if !s.auto || chrono::Local::now().hour() != 3 || !app.jobs.running_ids().await.is_empty() {
-            continue;
-        }
-        let v = update::status(&app.web, true, s.development()).await;
-        if v["state"] != "update" {
-            continue;
-        }
-        let tag = if s.development() { Some(update::EDGE) } else { v["releases"][0]["tag"].as_str() };
-        let Some(tag) = tag else { continue };
-        match api::start_update(&app, tag, "automatic update").await {
-            Ok(id) => tracing::info!("automatic update to {tag} started (job {id})"),
-            Err(e) => tracing::warn!("automatic update to {tag} could not start: {e:#}"),
-        }
-    }
-}

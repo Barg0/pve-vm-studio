@@ -6,8 +6,10 @@
 #   ./install.sh                 menus: container id, DNS name, storage, network, size
 #   ./install.sh --defaults      no questions - everything on its default (DHCP)
 #
-# Next to this script: the pve-vm-studio binary and pve-vm-studio.service. Without a
-# binary here, PVS_BINARY_URL names where to download one from.
+# Next to this script: the pve-vm-studio binary (a release names it pve-vm-studio-x86_64)
+# and pve-vm-studio.service. Without a binary here it downloads the latest release's - or,
+# while there is no release yet, the development build (the rolling "edge" pre-release) -
+# or what PVS_BINARY_URL names.
 #
 # What it does, in order:
 #   1. A service account (pve-vm-studio@pve) and its API token, with the roles the
@@ -349,8 +351,17 @@ install() {
 
     # ---- the binary ----
     local bin=$HERE/pve-vm-studio
+    [[ -f $bin ]] || bin=$HERE/pve-vm-studio-x86_64
+    [[ -f $bin ]] && chmod 0755 "$bin"
     if [[ ! -x $bin ]]; then
-        [[ -n ${PVS_BINARY_URL:-} ]] || die "no pve-vm-studio binary next to this script, and no PVS_BINARY_URL to fetch one"
+        if [[ -z ${PVS_BINARY_URL:-} ]]; then
+            local gh=https://github.com/Barg0/pve-vm-studio/releases
+            PVS_BINARY_URL=$gh/latest/download/pve-vm-studio-x86_64
+            if ! curl -fsIL --max-time 30 -o /dev/null "$PVS_BINARY_URL"; then
+                PVS_BINARY_URL=$gh/download/edge/pve-vm-studio-x86_64
+                log info "No release yet - installing the development build; updates come through Studio settings -> Version -> Development"
+            fi
+        fi
         bin=$(mktemp)
         log get "Downloading the studio from $PVS_BINARY_URL"
         with_bar "downloading" pct -- curl -fL --progress-bar -o "$bin" "$PVS_BINARY_URL" || die "download failed"

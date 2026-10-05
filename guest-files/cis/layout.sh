@@ -4,7 +4,7 @@
 # guest; the studio never touches a disk from outside.
 #
 #   layout.sh migrate   bake, second boot, before local-fs: root partition to ROOT_GB (when
-#                       smaller), the rest of the disk one LVM PV, VG "pvs" with one LV per
+#                       smaller), the rest of the disk one LVM PV, VG "system" with one LV per
 #                       filesystem; then the content copied over, the old directories emptied,
 #                       fstab, mount. The studio grew the disk during the first boot; the
 #                       first boot grows the root to the ROOT_GB disk (growpart), then stops it
@@ -14,9 +14,11 @@
 # Markers: /etc/pvs-cis/layout.wanted (first boot), layout.prepared, layout.done.
 set -u
 STATE=/etc/pvs-cis
-# The volume group: "pvs" on a partition of its own, or - when the root is an LV already
-# (Oracle Linux's KVM template: vg_main) - the root's own, grown by the rest of the disk.
-VG=pvs
+# The volume group: "system" on a partition of its own (lsblk shows system-var, system-home),
+# or - when the root is an LV already (Oracle Linux's KVM template: vg_main) - the root's own,
+# grown by the rest of the disk. A clone reads the name its gold used from layout.vg (golds
+# baked before 2026-10-05 call it "pvs").
+VG=system
 [ -s "$STATE/layout.vg" ] && VG=$(cat "$STATE/layout.vg")
 # The root's size, as the first boot wrote it into the marker (ROOT_GB=12).
 # shellcheck disable=SC1091
@@ -177,8 +179,12 @@ migrate() {
             varlog) find /var/log -mindepth 1 -maxdepth 1 ! -name audit -exec rm -rf {} + ;;
             *) find "$mp" -mindepth 1 -maxdepth 1 -exec rm -rf {} + ;;
         esac
-        grep -qE "^[^#]*[[:space:]]${mp}[[:space:]]" /etc/fstab || printf '/dev/%s/%s\t%s\text4\tdefaults,%s\t0\t2\n' "$VG" "$name" "$mp" "$opts" >> /etc/fstab
     done <<<"$LVS"
+    # fstab parent first (/var before /var/log before /var/log/audit): systemd orders mounts
+    # itself, but mount -a and findmnt --verify read the file top to bottom.
+    while IFS=: read -r name mp pct opts; do
+        grep -qE "^[^#]*[[:space:]]${mp}[[:space:]]" /etc/fstab || printf '/dev/%s/%s\t%s\text4\tdefaults,%s\t0\t2\n' "$VG" "$name" "$mp" "$opts" >> /etc/fstab
+    done < <(printf '%s\n' "$LVS" | sort -t: -k2,2)
     for mp in /var /var/log /var/log/audit /var/tmp /home; do
         mount "$mp" || fail "mount $mp"
     done

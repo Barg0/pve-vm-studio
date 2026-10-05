@@ -32,7 +32,9 @@
 #   review with the offending entries. No fix (the Ubuntu sources ship Signed-By).
 # - 1.2.1.2 (L2) -> /etc/apt/apt.conf.d/99-pvs-cis-weak-deps; 1.2.1.12-15 ->
 #   /etc/apt/apt.conf.d/99-pvs-cis-repositories. Checks read `apt-config dump`.
-# - 1.2.1.10/11 https: http:// URIs switched to https:// only if `apt-get update` then succeeds
+# - 1.2.1.10/11 https: http:// URIs switched to https:// host by host, each kept only if
+#   `apt-get update` then fetches from that host (country mirrors are http only - the studio
+#   does not offer them with CIS)
 #   (no Err:/E: lines); otherwise the files are restored and the fix fails.
 #   RISK: cloud-init regenerates the deb822 sources on a clone's first boot (new instance id)
 #   from its template with http:// mirrors - the studio must send `apt: preserve_sources_list:
@@ -51,11 +53,11 @@
 c1a_mod_check() {
     local m=$1 n=${1//-/_} kver
     kver=$(uname -r)
-    if ! find "/lib/modules/$kver" -type f \( -name "$m.ko*" -o -name "$n.ko*" \) 2>/dev/null | grep -q .; then
+    if ! find /lib/modules/*/ -type f \( -name "$m.ko*" -o -name "$n.ko*" \) 2>/dev/null | grep -q .; then
         if grep -Eq "/(${m}|${n})\.ko" "/lib/modules/$kver/modules.builtin" 2>/dev/null; then
             ev "$m: built into kernel $kver (not a loadable module)"
         else
-            ev "$m: no module in kernel $kver"
+            ev "$m: no module in any installed kernel"
         fi
         return 0
     fi
@@ -144,38 +146,36 @@ c1a_http_lines() {
     return 0
 }
 
-# Switch FILES to https, keep it only if apt-get update works with it.
+# Switch FILES to https host by host, keeping each switch only if apt-get update fetches from
+# that host over https. One host without https (Ubuntu's and Debian's country mirrors serve
+# http only) stays on http - and keeps the rule failing - without taking the others back.
 c1a_https_fix() {
-    local f bak out rc changed=0
-    bak=$(mktemp -d) || return 1
-    for f in "$@"; do
-        [ -f "$f" ] || continue
-        [ -n "$(c1a_http_lines "$f")" ] || continue
-        cp -a "$f" "$bak/$(basename "$f")"
-        case $f in
-            *.sources) sed -i -E '/^[[:space:]]*URIs:/I s#http://#https://#g' "$f" ;;
-            *) sed -i -E 's#^([[:space:]]*deb(-src)?[[:space:]]+(\[[^]]*\][[:space:]]+)?)http://#\1https://#' "$f" ;;
-        esac
-        changed=1
-    done
-    if [ $changed = 0 ]; then
-        rm -rf "$bak"
-        return 0
-    fi
-    out=$(apt-get update -q 2>&1)
-    rc=$?
-    if [ $rc -ne 0 ] || grep -Eq '^(Err:|E:)' <<<"$out"; then
+    local f hosts h out failed=0 esc
+    hosts=$(for f in "$@"; do [ -f "$f" ] && c1a_http_lines "$f"; done \
+        | grep -oE 'http://[^/[:space:]]+' | sed 's#http://##' | sort -u)
+    [ -n "$hosts" ] || return 0
+    for h in $hosts; do
+        esc=${h//./\\.}
         for f in "$@"; do
-            [ -f "$bak/$(basename "$f")" ] && cp -a "$bak/$(basename "$f")" "$f"
+            [ -f "$f" ] || continue
+            case $f in
+                *.sources) sed -i -E "/^[[:space:]]*URIs:/I s#http://${esc}([/[:space:]]|\$)#https://${h}\\1#g" "$f" ;;
+                *) sed -i -E "s#^([[:space:]]*deb(-src)?[[:space:]]+(\\[[^]]*\\][[:space:]]+)?)http://${esc}([/[:space:]]|\$)#\\1https://${h}\\4#" "$f" ;;
+            esac
         done
-        rm -rf "$bak"
-        apt-get update -q >/dev/null 2>&1
-        ev "https mirrors failed apt-get update - reverted"
-        grep -E '^(Err:|E:)' <<<"$out" | head -n 5
-        return 1
-    fi
-    rm -rf "$bak"
-    return 0
+        out=$(apt-get update -q 2>&1)
+        if grep -E '^(Err|E):' <<<"$out" | grep -qF "$h"; then
+            for f in "$@"; do
+                [ -f "$f" ] && sed -i -E "s#https://${esc}([/[:space:]]|\$)#http://${h}\\1#g" "$f"
+            done
+            ev "$h: no https (apt-get update failed) - left on http"
+            failed=1
+        else
+            ev "$h: switched to https"
+        fi
+    done
+    apt-get update -q >/dev/null 2>&1
+    return $failed
 }
 
 # Signed-By key files named in the source files (absolute, existing), one per line.
@@ -590,10 +590,12 @@ fix_apt_release_date_checked() { c1a_apt_set "$C1A_APT_REPO" Acquire::Check-Date
 rule all-package-updates-installed "All package updates installed"
 check_all_package_updates_installed() {
     local pend n rc=0
+    local fresh=1
     if timeout 300 apt-get update -q >/dev/null 2>&1; then
         ev "apt-get update: ok"
     else
-        ev "apt-get update: failed - using cached lists"
+        ev "apt-get update: failed - the package lists may be old, so this cannot pass"
+        fresh=0
     fi
     pend=$(apt-get -s -q -o Debug::NoLocking=1 dist-upgrade 2>/dev/null | awk '/^Inst / { print $2 }')
     n=$(grep -c . <<<"$pend")
@@ -605,6 +607,7 @@ check_all_package_updates_installed() {
     else
         ev "no reboot required"
     fi
+    [ $fresh = 0 ] && rc=3
     [ $rc = 3 ] && ev "decision: the bake installs all updates; clones patch per site policy"
     return $rc
 }

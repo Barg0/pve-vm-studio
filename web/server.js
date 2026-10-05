@@ -28,6 +28,13 @@ async function api(method, path, body) {
 /* ---------- small helpers on top of the studio's ---------- */
 
 const gib = b => ((b || 0) / 1073741824).toFixed(1);
+/* "410 / 1800 GiB" would not fit the meter's value column: one unit for both, TiB from
+   1000 GiB on, decimals only below 100 - "0.4 / 1.8 TiB", "3.0 / 12.0 TiB", "61.5 / 512 GiB". */
+function sizePair(used, total) {
+  const tib = (total || 0) >= 1000 * 1073741824, d = tib ? 1099511627776 : 1073741824;
+  const f = b => { const v = (b || 0) / d; return v < 100 ? v.toFixed(1) : v.toFixed(0); };
+  return `${f(used)} / ${f(total)} ${tib ? "TiB" : "GiB"}`;
+}
 /* The studio's time format (Studio settings): "24h" or 12-hour. */
 let clockFmt = "12h";
 function when(iso) {
@@ -104,7 +111,10 @@ async function signedIn(s) {
   document.querySelector(".topbar .actions").style.visibility = "";
   $id("userChip").textContent = s.user;
   try { clockFmt = (await api("GET", "/settings/server")).settings.clock || "12h"; } catch { /* keep 12h */ }
-  await openLab(null);
+  // What this tab still holds from before (a session that ran out, an older studio) is not
+  // the design: the server's copy is.
+  lab.id = null; lab.saved = ""; clearTimeout(lab.timer);
+  await openLab(null, true);
   render();
   startNavPoll();
 }
@@ -115,9 +125,20 @@ async function signedIn(s) {
 let navPoll = null;
 function startNavPoll() {
   if (navPoll) return;
-  let lastRun = "";
+  let lastRun = "", tick = 0;
   navPoll = setInterval(async () => {
     if (document.hidden || !session.user) return;
+    // The design is one for everyone: what another session saved shows up here within
+    // 15 s - unless this tab has changes of its own waiting, which the save then reports.
+    if (++tick % 3 === 0 && lab.id && !lab.saving && !lab.conflict && encodeState() === lab.saved) {
+      try {
+        const row = (await api("GET", "/labs")).find(l => l.id === lab.id);
+        if (row && row.revision > lab.revision && encodeState() === lab.saved) {
+          await openLab(lab.id, true); render();
+          toast(`${row.updated_by} changed the design - showing it`);
+        }
+      } catch { /* the next tick tries again */ }
+    }
     try {
       const jobs = await api("GET", "/jobs");
       cluster.jobs = jobs;
@@ -153,11 +174,14 @@ function loadPayload(payload) {
   if (!empty) decodeState(STATE_PREFIX + btoa(unescape(encodeURIComponent(JSON.stringify(payload)))));
 }
 
-async function openLab(id) {
-  await flushSave();
+/* fresh: load the server's copy without saving this tab's first - at sign-in and after a
+   conflict, when what the tab holds is the stale one. */
+async function openLab(id, fresh) {
+  if (!fresh) await flushSave();
   lab.list = await api("GET", "/labs");
-  // One design for the whole studio: the oldest one there is (labs from before became it).
-  let wanted = id || (lab.list.length ? [...lab.list].sort((a, b) => String(a.created_at || a.updated_at).localeCompare(String(b.created_at || b.updated_at)))[0].id : null);
+  // One design for the whole studio: the one saved last (the server lists it first). Saving
+  // keeps it last, so every sign-in opens the same one.
+  let wanted = id || (lab.list.length ? lab.list[0].id : null);
   let row;
   if (!wanted) {
     row = await api("POST", "/labs", { name: "Studio", state: studioPayload() });
@@ -176,7 +200,13 @@ async function openLab(id) {
 
 /* Called by studio.js after every render: a changed state is saved a second later. */
 function studioChanged() {
-  if (location.hash !== "#/" + state.blade) history.replaceState(null, "", "#/" + state.blade);
+  // Every blade gets its own history entry, so Back goes to the blade before. An alias of
+  // the same blade (#/passwords is Connect) and the first load replace instead.
+  const cur = location.hash.replace(/^#\/?/, "").split("/")[0];
+  if (cur !== state.blade) {
+    if (!cur || resolveBladeId(cur) === state.blade) history.replaceState(null, "", "#/" + state.blade);
+    else history.pushState(null, "", "#/" + state.blade);
+  }
   if (!lab.id || lab.conflict) return;
   if (encodeState() === lab.saved) return;
   setSaveState("unsaved", "warn");
@@ -207,7 +237,7 @@ window.addEventListener("beforeunload", e => { if (lab.id && encodeState() !== l
 $id("saveState").addEventListener("click", async () => {
   if (!lab.conflict) return;
   lab.conflict = false; lab.saved = "";
-  await openLab(lab.id); render();
+  await openLab(lab.id, true); render();
 });
 $id("deployBtn").addEventListener("click", () => { state.blade = "deploy"; render(); });
 
@@ -302,7 +332,8 @@ document.addEventListener("click", async e => {
 
 /* A designed VM's state, from what the studio built and what PVE says about it now. */
 function vmState(s, vms) {
-  const v = vms.find(x => x.card && x.card === s._id);
+  // The same match as the VM cards: by card, else by name (a card's id is not kept with it yet).
+  const v = liveVm(s);
   if (!v && vmNameClash(s)) return { key: "warn", label: "name in use", v: null };
   if (!v || v.status === "removed") return { key: "design", label: "not built", v: null };
   if (v.status === "building") return { key: "run", label: "building", v };
@@ -415,7 +446,7 @@ function dashSystem(inv) {
     if (n.status !== "online") return line("bad", `<b>${esc(n.node)}</b> is ${esc(n.status || "unknown")}`);
     const cpu = (n.cpu || 0) * 100, mem = pct(n.mem, n.maxmem), disk = pct(n.disk, n.maxdisk);
     return `${line("ok", `<b>${esc(n.node)}</b>`, `<span class="mono muted">${esc(n.ip || "")}</span>`)}
-      <div class="dash-mini"><em>CPU</em>${bar(cpu, `${cpu.toFixed(0)}% of ${n.maxcpu || "?"}`)}</div>
+      <div class="dash-mini"><em>CPU</em>${bar(cpu, `${cpu.toFixed(0)}%`)}</div>
       <div class="dash-mini"><em>RAM</em>${bar(mem, `${gib(n.mem)} / ${gib(n.maxmem)}`)}</div>
       <div class="dash-mini"><em>DISK</em>${bar(disk, `${gib(n.disk)} / ${gib(n.maxdisk)}`)}</div>`;
   }).join("") + (inv.nodes.length > 8 ? `<div class="hint">+${inv.nodes.length - 8} more nodes below</div>` : "");
@@ -428,7 +459,7 @@ function dashSystem(inv) {
   const storage = vmStor.map(st => {
     const p = pct(st.disk, st.maxdisk);
     return `${line(p >= 90 ? "bad" : p >= 75 ? "warn" : "ok", `<b>${esc(st.storage)}</b> <span class="muted">${esc(st.plugintype || "")}${st.shared === 1 ? ", shared" : inv.nodes.length > 1 ? " on " + esc(st.node) : ""}</span>`, p >= 90 ? `<span class="dash-bad">${Math.round(p)}% full</span>` : "")}
-      <div class="dash-mini wide">${bar(p, `${gib(st.disk)} / ${gib(st.maxdisk)} GiB`)}</div>`;
+      <div class="dash-mini wide">${bar(p, sizePair(st.disk, st.maxdisk))}</div>`;
   }).join("");
 
   const bridges = [...new Set(inv.nodes.flatMap(n => (n.bridges || []).map(b => b.iface)))];
@@ -734,9 +765,9 @@ document.addEventListener("input", e => {
 
 /* -- Golds: the library, and the bake panel above it -- */
 
-const bakeForm = { image: "", disk: null, storage: "", updates: true, features: ["aliases", "prompt", "fastfetch", "quietmotd"], region: true, language: "", format: "", keyboard: "", timezone: "", cis: 0 };
+const bakeForm = { image: "", mirror: null, node: "", bridge: "", vlan: null, addresses: "", gateway: "", dns: "", disk: null, storage: "", updates: true, features: ["aliases", "prompt", "fastfetch", "quietmotd"], region: true, language: "", format: "", keyboard: "", timezone: "", cis: 0 };
 const winForm = { iso: "", index: null, edition: "", disk: 64, storage: "", locale: "", keyboard: "", timezone: "", features: ["rdp", "ping", "svrmgr"] };
-const goldsUi = { bake: false, os: "linux", cleanup: false, cleanupPick: null, labelEdit: null };
+const goldsUi = { bake: false, os: "linux", cleanup: false, cleanupPick: null, labelEdit: null, au: null, placeOpen: false };
 let catalogCache = null;
 
 function openBake(os) { goldsUi.bake = true; goldsUi.os = os; state.blade = "golds"; $id("main").scrollTop = 0; render(); }
@@ -806,7 +837,8 @@ function goldDetailHtml(g) {
   const rg = m.region || {};
   const region = win
     ? [["Format", m.locale], ["Keyboard", m.keyboardLayout ? m.keyboardLayout + (m.inputLocale ? ` (${m.inputLocale})` : "") : ""], ["Time zone", m.timeZone], ["Applied", m.localeMode === "offline" ? "Offline, before first boot" : m.localeMode]]
-    : [["Language", rg.language], ["Format", rg.format], ["Keyboard", rg.keyboard], ["Time zone", rg.timezone], ["Applied", m.localeMode === "cloud-init" ? "By cloud-init" : m.localeMode]];
+    : [["Language", rg.language], ["Format", rg.format], ["Keyboard", rg.keyboard], ["Time zone", rg.timezone], ["Applied", m.localeMode === "cloud-init" ? "By cloud-init" : m.localeMode],
+      ["Package mirror", m.aptMirror ? m.aptMirror.split("/")[2] : ""]];
   const options = win
     ? (m.bakeOptions ? Object.entries(m.bakeOptions).map(([k, v]) => [BAKE_OPTION[k] || k, v]) : (m.policies || []).map(p => [p, true]))
     : (m.features || []).map(f => [f, true]);
@@ -830,6 +862,61 @@ function goldDetailHtml(g) {
 
 /* One card per kind of gold, collapsible like every other card: who it is, its build, the
    facts that tell it apart, what it is used by, and its actions; the sidecar opens under it. */
+/* Where this bake runs: node and network as chips at the foot of the bake form. A click opens a
+   small picker in place; what is picked holds for this bake only - Media's "Where bakes run"
+   keeps the defaults (the chip shows them until something else is picked). */
+function bakePlaceChips(r, s) {
+  const node = bakeForm.node || r.node || "";
+  const bridge = bakeForm.bridge || r.bridge || "";
+  const vlan = bakeForm.bridge ? bakeForm.vlan : (s && s.vlan);
+  const inv = cluster.inventory || { nodes: [], vnets: [] };
+  const nodes = inv.nodes.filter(n => n.status === "online").map(n => [n.node, n.node]);
+  const bridges = (inv.nodes.find(n => n.node === node)?.bridges || []).map(b => [b.iface, b.iface]).concat((inv.vnets || []).map(v => [v.vnet, v.vnet + " (SDN)"]));
+  const addr = bakeForm.addresses || (s && s.linux_address) || "";
+  const gw = bakeForm.addresses ? bakeForm.gateway : (s && s.linux_gateway) || "";
+  const dns = bakeForm.addresses ? bakeForm.dns : ((s && s.linux_dns) || []).join(", ");
+  const changed = !!(bakeForm.node || bakeForm.bridge || bakeForm.addresses);
+  const chip = (k, icon, label, value) => `<button type="button" class="chip-btn${goldsUi.placeOpen ? " on" : ""}" data-bake-place="${k}" aria-expanded="${goldsUi.placeOpen}">
+    <img src="${iconSrc(icon)}" alt=""><span class="k">${label}</span><b>${esc(value || "?")}</b></button>`;
+  return `<div class="bake-place">
+    ${chip("node", "servers.svg", "Node", node)}${chip("net", "vnet.svg", "Network", bridge + (vlan ? " · VLAN " + vlan : ""))}${chip("addr", "static-ip.svg", "Address", addr && addr.toLowerCase() !== "dhcp" ? addr : "DHCP")}
+    ${changed ? `<span class="pill tag" title="Media's defaults: ${esc(r.node)} · ${esc(r.bridge)}">this bake only</span>` : ""}
+    ${goldsUi.placeOpen ? `<div class="bake-place-pop" role="dialog" aria-label="Where this bake runs">
+      ${field(fieldLabel("servers.svg", "Node"), `<select id="bpNode">${opts(nodes, node)}</select>`)}
+      ${field(fieldLabel("vnet.svg", "Network"), `<select id="bpBridge">${opts(bridges, bridge)}</select>`)}
+      ${field(fieldLabel("vlan.svg", "VLAN"), `<input id="bpVlan" type="number" min="1" max="4094" placeholder="none" value="${vlan ?? ""}">`)}
+      ${field(`<span class="field-label"><img src="${iconSrc("static-ip.svg")}" alt="">Linux addresses${infoTip("Linux addresses", "For this bake: DHCP (type dhcp), one address (10.10.0.60/24) or a range (10.10.0.60-69/24) - the bake takes the first one no running bake holds. Empty keeps Media's.")}</span>`,
+        `<input id="bpAddr" placeholder="${esc((s && s.linux_address) || "DHCP")}" value="${esc(bakeForm.addresses || "")}">`)}
+      ${field(fieldLabel("vnet.svg", "Gateway"), `<input id="bpGw" placeholder="${esc((s && s.linux_gateway) || "10.10.0.1")}" value="${esc(bakeForm.addresses ? bakeForm.gateway : "")}">`)}
+      ${field(fieldLabel("dns.svg", "DNS"), `<input id="bpDns" placeholder="${esc(((s && s.linux_dns) || []).join(", ") || "10.10.0.1")}" value="${esc(bakeForm.addresses ? bakeForm.dns : "")}">`)}
+      <div class="bake-place-acts">${changed ? `<button class="btn sm" type="button" id="bpReset">Media's defaults</button>` : ""}<button class="btn sm primary" type="button" id="bpDone">Done</button></div>
+    </div>` : ""}</div>`;
+}
+
+function wireBakePlace(main) {
+  const again = () => renderServerBlade("golds", main);
+  main.querySelectorAll("[data-bake-place]").forEach(b => b.addEventListener("click", () => { goldsUi.placeOpen = !goldsUi.placeOpen; again(); }));
+  const n = $id("bpNode"), br = $id("bpBridge"), v = $id("bpVlan");
+  // Another node: its bridges and storages are other ones - the bridge goes back to the default.
+  if (n) n.addEventListener("change", () => { bakeForm.node = n.value; bakeForm.bridge = ""; bakeForm.vlan = null; bakeForm.storage = ""; again(); });
+  if (br) br.addEventListener("change", () => { bakeForm.bridge = br.value; again(); });
+  if (v) v.addEventListener("change", () => { const x = parseInt(v.value, 10); bakeForm.vlan = Number.isFinite(x) ? x : null; if (!bakeForm.bridge && br) bakeForm.bridge = br.value; });
+  // Addresses, gateway and DNS go together: typed in here, they are this bake's.
+  const ad = $id("bpAddr"), g = $id("bpGw"), d = $id("bpDns");
+  const net = () => { bakeForm.addresses = ad.value.trim(); bakeForm.gateway = g.value.trim(); bakeForm.dns = d.value.trim(); };
+  [ad, g, d].forEach(el => { if (el) el.addEventListener("change", net); });
+  const reset = $id("bpReset"); if (reset) reset.addEventListener("click", () => { Object.assign(bakeForm, { node: "", bridge: "", vlan: null, storage: "", addresses: "", gateway: "", dns: "" }); again(); });
+  const done = $id("bpDone"); if (done) done.addEventListener("click", () => { if (ad) net(); goldsUi.placeOpen = false; again(); });
+}
+
+/* Keep current on a Windows gold's card: it follows its ISO's product (Media → Windows updates). */
+function keepCurrentToggle(g) {
+  const k = goldsUi.au && goldsUi.au.golds && goldsUi.au.golds[g.id];
+  if (!k || g.os !== "windows" || g.status !== "ready") return "";
+  const tip = k.can ? `Follows ${k.product}, on ${k.build} now: every newer Patch Tuesday build gives a new ISO and a new gold, baked with this gold's settings in a maintenance window.` : k.why;
+  return toggle(`data-keep-current="${esc(g.id)}"`, `Keep current${infoTip("Keep current", tip)}`, !!k.on, !k.can && !k.on, "", "gold-keep");
+}
+
 function goldRowHtml(t) {
   const g = t.head, m = goldManifest(g), img = findImage(g.image_id);
   const tone = { ready: "ok", baking: "run", failed: "bad" }[g.status] || "idle";
@@ -873,6 +960,7 @@ function goldRowHtml(t) {
         <div class="gold-usage" title="${picked.length ? esc(picked.join(", ")) : "No designed VM builds from it"}"><b>${g.used_by || 0}</b> built · <b>${picked.length}</b> picked</div>
       </div>
       <div class="card-actions gold-acts">
+        ${keepCurrentToggle(g)}
         <span class="pill status ${tone}">${esc(g.status)}</span>
         ${g.job_id ? `<button class="btn icon sm" type="button" data-job-open="${esc(g.job_id)}" title="Bake log" aria-label="Bake log"><img src="${iconSrc("log.svg")}" alt=""></button>` : ""}
         ${goldRemoveBtn(g)}
@@ -986,8 +1074,11 @@ function cleanupPanel(golds) {
 }
 
 async function bladeGolds(main, stale) {
-  const [catalog, golds, bake] = await Promise.all([catalogCache || api("GET", "/catalog"), api("GET", "/golds"), api("GET", "/settings/bake")]);
+  const [catalog, golds, bake, au] = await Promise.all([catalogCache || api("GET", "/catalog"), api("GET", "/golds"),
+    api("GET", "/settings/bake" + (bakeForm.node ? "?node=" + encodeURIComponent(bakeForm.node) : "")), api("GET", "/auto-update").catch(() => null),
+    cluster.inventory ? null : refreshInventory()]);
   if (stale()) return;
+  goldsUi.au = au;
   catalogCache = catalog; cluster.golds = golds;
   if (!bakeForm.language) {
     bakeForm.language = catalog.region.language || "en-US"; bakeForm.format = catalog.region.locale || bakeForm.language;
@@ -999,6 +1090,15 @@ async function bladeGolds(main, stale) {
   const cisBench = (catalog.cis || {})[img.id] || null;
   const cisLevel = cisBench ? bakeForm.cis : 0;
   const locales = Object.entries(catalog.locales).sort((a, b) => a[1].localeCompare(b[1]));
+  // Ubuntu and Debian: the country package mirror (New-Vhdx's mirror menu). It opens on the
+  // country of the studio's region preselection when that country has one.
+  const aptDistro = img.family === "debian" ? img.distro : "";
+  const mirrors = aptDistro ? (catalog.mirrors || []).filter(m => m[aptDistro]) : [];
+  if (bakeForm.mirror == null) {
+    const cc = String(catalog.region.locale || catalog.region.language || "").split("-").pop().toLowerCase();
+    bakeForm.mirror = (catalog.mirrors || []).some(m => m.code === (cc === "uk" ? "gb" : cc)) ? (cc === "uk" ? "gb" : cc) : "";
+  }
+  const mirrorPick = mirrors.some(m => m.code === bakeForm.mirror) ? bakeForm.mirror : "";
   const r = bake.resolved || {};
   const ready = golds.filter(g => g.status === "ready");
   const tiles = goldTiles(golds, catalog);
@@ -1011,17 +1111,20 @@ async function bladeGolds(main, stale) {
       <div class="grid-2">
         ${field(fieldLabel("iso-media.svg", "Image"), `<select id="bkImage">${opts(catalog.linux.map(i => [i.id, i.name]), img.id)}</select>
           <span class="hint">${esc(img.url.split("/").pop())} · Secure Boot ${img.secure_boot ? "on" : "off"}</span>`)}
+        ${aptDistro ? field(`<span class="field-label"><img src="${iconSrc("download.svg")}" alt="">Package mirror${infoTip("Package mirror", "Where apt takes packages from - in the bake and on every VM from this gold. The image's own default is archive.ubuntu.com or deb.debian.org; a country mirror is usually faster. Security updates keep coming from the distribution's own security host. Only countries with a mirror for this distribution are listed.")}</span>`,
+          cisLevel ? `<select id="bkMirror" disabled title="Country mirrors serve http only; CIS needs https sources">${opts([["", "Default (https) - CIS needs https sources"]], "")}</select>`
+          : `<select id="bkMirror">${opts([["", "Default (the image's own)"]].concat(mirrors.map(m => [m.code, `${m.name} - ${m[aptDistro]}`])), mirrorPick)}</select>`) : ""}
       </div>
       <div class="grid-2 disk-row">${diskField("bk", Math.max(bakeForm.disk || img.disk_gb, img.disk_gb, cisLevel === 2 ? 40 : 0), Math.max(img.disk_gb, cisLevel === 2 ? 40 : 0), bake.disk_storages || [], bakeForm.storage || r.disk_storage)}</div>
       <div class="field-group">Baked in</div>
-      <div class="toggle-grid">${stoggle("bkUpdates", "Install updates", bakeForm.updates, "package upgrade during the bake")}
-        ${feats.map(f => stoggle("bkF_" + f.id, f.label, bakeForm.features.includes(f.id))).join("")}</div>
+      <div class="toggle-grid">${toggle('id="bkUpdates"', `Install updates${infoTip("Install updates", "Every package upgraded to the newest version during the bake, so the gold - and every VM cloned from it - starts current.")}`, bakeForm.updates)}
+        ${feats.map(f => toggle(`id="bkF_${esc(f.id)}"`, `${esc(f.label)}${f.tip ? infoTip(f.label, f.tip) : ""}`, bakeForm.features.includes(f.id))).join("")}</div>
       ${cisBench ? `<div class="field-group">Hardening</div>
       <div class="field-like">${`<span class="field-label"><img src="${iconSrc("security.svg")}" alt="">CIS benchmark${infoTip(cisBench.name + " v" + cisBench.version,
         "Level 1 and Level 2 Server, applied in the bake and checked after a reboot - the score and every rule's evidence stay with the gold. Level 2 adds the audit rules, an outbound firewall (DNS, NTP, HTTP/S, DHCP only), its own volumes for /home, /var, /var/tmp, /var/log and /var/log/audit (40 GB disk at least), and turns off squashfs and overlay: no snaps, no containers. Self-assessed - not a CIS certification.")}</span>`}
         <div class="cis-level-row"><div class="ov-seg" role="group" aria-label="CIS level">${[[0, "Off"], [1, "Level 1 Server"], [2, "Level 2 Server"]].map(([n, l]) =>
           `<button type="button" class="btn${cisLevel === n ? " on" : ""}" data-cis="${n}">${l}</button>`).join("")}</div>
-          <button type="button" class="btn icon cis-rules-btn" data-cis-rules="${esc(img.id)}" data-cis-level="${cisLevel || 2}" title="The rules of ${esc(cisBench.name + " v" + cisBench.version)}" aria-label="Show the CIS rules"><img src="${iconSrc("cis-rules.svg")}" alt=""></button></div></div>` : ""}
+          <button type="button" class="btn cis-rules-btn" data-cis-rules="${esc(img.id)}" data-cis-level="${cisLevel || 2}" title="The rules of ${esc(cisBench.name + " v" + cisBench.version)}" aria-label="Policy Catalog"><img src="${iconSrc("cis-rules.svg")}" alt=""> Policy Catalog</button></div></div>` : ""}
       <div class="field-group">Region</div>
       <div class="toggle-grid">${stoggle("bkRegion", "Set the region", bakeForm.region)}</div>
       <div class="grid-2" id="bkRegionFields" style="margin-top:12px" ${bakeForm.region ? "" : "hidden"}>
@@ -1031,7 +1134,7 @@ async function bladeGolds(main, stale) {
         ${field(fieldLabel("language.svg", "Time zone"), `<select id="bkTz">${opts(catalog.timezones.map(z => [z.id, z.id]), bakeForm.timezone)}</select>`)}
       </div>
       <p class="hint" id="bkRegionOff" ${bakeForm.region ? "hidden" : ""}>Off: the image keeps its own - usually en_US, UTC and a US keyboard.</p>
-      ${actions(bake.problem ? `<span class="hint err gs-actions-note">${esc(bake.problem)}</span>` : `<span class="hint gs-actions-note">Bakes on <b>${esc(r.node)}</b> · disk on <b>${esc(r.disk_storage)}</b> · network <b>${esc(r.bridge)}</b></span><button class="btn ghost" type="button" data-goto="media" title="Media → Where bakes run">Change</button>`,
+      ${actions(bake.problem ? `<span class="hint err gs-actions-note">${esc(bake.problem)}</span>` : bakePlaceChips(r, bake.settings),
         act("bkStart", "gold-image.svg", "Bake", true))}`;
 
   const bakePanel = !goldsUi.bake ? "" : `<div class="card bake-panel">
@@ -1068,6 +1171,10 @@ async function bladeGolds(main, stale) {
   main.querySelectorAll("[data-bake-os]").forEach(b => b.addEventListener("click", () => openBake(b.dataset.bakeOs)));
   main.querySelectorAll("[data-bake-open]").forEach(b => b.addEventListener("click", () => openBake(b.dataset.bakeOpen)));
   const rerender = () => renderServerBlade("golds", main);
+  main.querySelectorAll("[data-keep-current]").forEach(c => c.addEventListener("change", async () => {
+    try { await api("POST", `/golds/${encodeURIComponent(c.dataset.keepCurrent)}/keep-current`, { on: c.checked }); toast(c.checked ? "Keeps current - follows newer builds in a maintenance window" : "Stays on its build"); rerender(); }
+    catch (e) { c.checked = !c.checked; toast(e.message, true); }
+  }));
   on("cleanupOpen", "click", () => { goldsUi.cleanup = true; goldsUi.cleanupPick = null; rerender(); });
   on("cleanupClose", "click", () => { goldsUi.cleanup = false; rerender(); });
   main.querySelectorAll("[data-cleanup]").forEach(c => c.addEventListener("change", () => {
@@ -1116,6 +1223,8 @@ async function bladeGolds(main, stale) {
     } else {
       bakeForm.image = g.image_id; bakeForm.disk = m.diskSizeGB || null; bakeForm.updates = !!(m.updatesApplied ?? m.updates); if (m.features) bakeForm.features = m.features;
       bakeForm.cis = (m.cis && m.cis.level) || 0;
+      const host = m.aptMirror ? m.aptMirror.split("/")[2] : "";
+      bakeForm.mirror = host ? ((catalog.mirrors || []).find(x => x.ubuntu === host || x.debian === host) || {}).code || "" : "";
       const region = m.schema ? (m.language ? { language: m.language, format: m.locale, keyboard: m.keyboardLayout, timezone: m.timeZone } : null) : m.region;
       bakeForm.region = !!region;
       if (region) Object.assign(bakeForm, { language: region.language, format: region.format || region.language, keyboard: region.keyboard || region.language, timezone: region.timezone || bakeForm.timezone });
@@ -1132,6 +1241,7 @@ async function bladeGolds(main, stale) {
     bakeForm.disk = newImage ? null : (parseInt($id("bkDisk").value, 10) || null);
     bakeForm.storage = ($id("bkStorage") || {}).value || bakeForm.storage;
     bakeForm.features = catalog.features.filter(f => $id("bkF_" + f.id)?.checked).map(f => f.id).concat(bakeForm.features.filter(f => !$id("bkF_" + f)));
+    if ($id("bkMirror") && !$id("bkMirror").disabled) bakeForm.mirror = $id("bkMirror").value;
     bakeForm.region = $id("bkRegion").checked;
     bakeForm.language = $id("bkLang").value; bakeForm.format = $id("bkFormat").value; bakeForm.keyboard = $id("bkKeyboard").value; bakeForm.timezone = $id("bkTz").value;
   };
@@ -1142,13 +1252,17 @@ async function bladeGolds(main, stale) {
   });
   wireProvisioning(main, bakeForm, bake.disk_storages || [], () => { keep(); renderServerBlade("golds", main); });
   if ($id("bkStorage") && $id("bkStorage").tagName === "SELECT") $id("bkStorage").addEventListener("change", () => { keep(); });
+  wireBakePlace(main);
   $id("bkStart").addEventListener("click", async () => {
     keep();
     try {
       const { id } = await api("POST", "/golds", { image: bakeForm.image, updates: bakeForm.updates, disk_gb: bakeForm.disk || img.disk_gb, disk_storage: bakeForm.storage || null,
         features: bakeForm.features.filter(f => feats.some(x => x.id === f)),
         region: bakeForm.region ? { language: bakeForm.language, format: bakeForm.format, keyboard: bakeForm.keyboard, timezone: bakeForm.timezone } : null,
-        cis: cisLevel ? { level: cisLevel, exceptions: [] } : null });
+        cis: cisLevel ? { level: cisLevel, exceptions: [] } : null, mirror: aptDistro && !cisLevel ? ($id("bkMirror") || {}).value || "" : "",
+        node: bakeForm.node || null, bridge: bakeForm.bridge || null, vlan: bakeForm.bridge ? bakeForm.vlan : null,
+        addresses: bakeForm.addresses || null, gateway: bakeForm.addresses ? bakeForm.gateway || null : null,
+        dns: bakeForm.addresses && bakeForm.dns ? bakeForm.dns.split(/[,;\s]+/).filter(Boolean) : null });
       goldsUi.bake = false;
       openJob(id);
     } catch (e) { toast(e.message, true); }
@@ -1348,7 +1462,7 @@ function openJob(id) { jobSelected = id; state.blade = "jobs"; render(); }
    line by line. Rebuilding it on every render threw the log away and replayed it - the
    flicker - and cost a round trip before anything showed. */
 let jobsPoll = null, jobFilter = "all", jobsCache = [];
-const JOB_KIND = { bake: "Linux gold", "windows-bake": "Windows gold", media: "Windows media", fod: "Features on Demand", winpe: "WinPE", virtio: "virtio-win", deploy: "Deploy", "cluster-check": "Cluster check", acme: "Certificate" };
+const JOB_KIND = { "auto-update": "Windows update", bake: "Linux gold", "windows-bake": "Windows gold", media: "Windows media", fod: "Features on Demand", winpe: "WinPE", virtio: "virtio-win", deploy: "Deploy", "cluster-check": "Cluster check", acme: "Certificate" };
 const JOB_FILTERS = [["all", "All"], ["running", "Running"], ["failed", "Failed"], ["succeeded", "Succeeded"]];
 function clock(iso) { return iso ? new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: clockFmt !== "24h" }) : ""; }
 function dayOf(iso) {
@@ -1650,7 +1764,7 @@ async function openCisReport(goldId) {
     ov.querySelector(".cis-list").innerHTML = rows();
   };
   ov.innerHTML = `<div class="modal cis-modal" role="dialog" aria-modal="true" aria-labelledby="cisTitle">
-    <div class="cis-head"><span class="confirm-icon"><img src="${iconSrc("security.svg")}" alt=""></span>
+    <div class="cis-head"><span class="card-icon"><img src="${iconSrc("security.svg")}" alt=""></span>
       <div><h2 id="cisTitle">${esc(rep.benchmark)} v${esc(rep.version)} · Level ${esc(rep.level)} Server</h2>
       <div class="hint">Checked ${esc(when(rep.checked))} · self-assessed by the studio - not a CIS certification</div></div>
       <div class="cis-score"><b>${score}%</b><span>of the applicable automated rules pass</span></div></div>
@@ -1702,7 +1816,7 @@ async function openCisRules(image, level) {
   const ov = document.createElement("div");
   ov.className = "overlay open cis-overlay";
   ov.innerHTML = `<div class="modal cis-modal" role="dialog" aria-modal="true" aria-labelledby="cisRulesTitle">
-    <div class="cis-head"><span class="confirm-icon"><img src="${iconSrc("security.svg")}" alt=""></span>
+    <div class="cis-head"><span class="card-icon"><img src="${iconSrc("security.svg")}" alt=""></span>
       <div><h2 id="cisRulesTitle">${esc(rep.benchmark)} v${esc(rep.version)}</h2></div></div>
     <div class="cis-bar"><div class="ov-seg cis-lv" role="group" aria-label="Level"></div><div class="ov-seg cis-tabs" role="group" aria-label="Filter"></div>
       <input type="search" class="cis-search" placeholder="Search number, title, decision" aria-label="Search"></div>
@@ -1863,7 +1977,7 @@ function logLine(text) {
   div.dataset.tag = tag; div.dataset.msg = msg;
   // Serial console lines arrive as "| text" - the bar is the log's way of saying "echoed".
   const echoed = msg.startsWith("| ");
-  div.className = "ln " + (TAG_CLASS[tag] || "t-error") + (echoed ? " echoed" : "") + (/^PVS-/.test(msg) ? " marker" : "");
+  div.className = "ln " + (TAG_CLASS[tag] || "t-error") + (echoed ? " echoed" : "") + "";
   div.innerHTML = `<span class="ln-f">${esc(clk)}</span><span class="ln-f">[</span><span class="ln-tag">${esc(tag)}</span><span class="ln-f">]</span><span class="ln-msg">${esc(echoed ? msg.slice(2) : msg)}</span>`;
   return div;
 }
@@ -1930,9 +2044,72 @@ async function fillUupPickers(stale) {
     sel.innerHTML = `<b class="mono">${esc(b.build)}</b> <span class="hint">Windows Server 2025 · en-US · newest · ${esc(new Date(b.created * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }))}</span>`;
   } catch (e) { if (!stale() && $id("peUupHint")) { $id("peUupHint").hidden = false; $id("peUupHint").textContent = "The UUP dump catalog did not answer: " + e.message; } }
 }
+/* -- Media: Windows updates - golds with Keep current follow their ISO's product -- */
+
+const AU_STEP = { pending: "waits for a window", iso: "building the ISO", bake: "baking golds", cleanup: "cleaning up", done: "done", failed: "failed", stopped: "new base build - stays put" };
+const AU_DOT = { pending: "idle", iso: "run", bake: "run", cleanup: "run", done: "ok", failed: "bad", stopped: "warn" };
+
+function autoUpdateCard(au) {
+  const s = au.settings, runs = au.runs || [];
+  const following = Object.entries(au.golds || {}).filter(([, g]) => g.on);
+  const active = runs.filter(r => !["done", "failed", "stopped"].includes(r.step));
+  const failed = runs.find(r => r.step === "failed");
+  const meta = active.length ? `${esc(active[0].product)} ${esc(active[0].to)} - ${AU_STEP[active[0].step]}`
+    : !following.length ? "no gold keeps current" : `${following.length} gold${following.length === 1 ? "" : "s"} keep current · ${au.next_window ? "next window " + esc(fmtWhen(au.next_window)) : "no maintenance window"}`;
+  const badge = active.some(r => r.job) ? `<span class="pill status run">running</span>` : failed ? `<span class="pill status warn">failed</span>` : "";
+  const stepText = r => {
+    if (r.step === "bake") { const g = r.golds || []; return `baking golds (${g.filter(x => x.to && !x.job).length} of ${g.length})`; }
+    if (r.step === "failed") return `failed while ${{ pending: "starting", iso: "building the ISO", bake: "baking", cleanup: "cleaning up" }[r.failed_step] || "running"}`;
+    if (r.step === "pending" && r.force) return "starts when nothing else runs";
+    return AU_STEP[r.step] || r.step;
+  };
+  const rows = runs.map(r => `<tr>
+    <td><b>${esc(r.product)}</b><div class="hint mono">${esc((r.source_iso || "").split("/").pop())}</div></td>
+    <td class="mono">${esc(r.from)} → ${esc(r.to)}</td>
+    <td class="muted">${esc(r.release)}</td>
+    <td><span class="au-step"><span class="dot ${AU_DOT[r.step] || "idle"}"></span>${esc(stepText(r))}</span>${r.error ? `<div class="hint ${r.step === "failed" ? "err" : ""}">${esc(r.error)}</div>` : ""}</td>
+    <td class="muted">${(r.golds || []).length}</td>
+    <td class="row-actions">${r.job ? `<button class="btn sm" type="button" data-job-open="${esc(r.job)}"><img src="${iconSrc("log.svg")}" alt=""> Log</button>` : ""}
+      ${["pending", "bake", "cleanup"].includes(r.step) && !r.job && !r.force ? `<button class="btn sm" type="button" data-au-start="${esc(r.id)}"><img src="${iconSrc("update.svg")}" alt=""> Start now</button>` : ""}
+      ${r.step === "failed" ? `<button class="btn sm" type="button" data-au-retry="${esc(r.id)}"><img src="${iconSrc("update.svg")}" alt=""> Retry</button>` : ""}
+      ${["done", "failed", "stopped"].includes(r.step) ? `<button class="btn icon sm" type="button" data-au-dismiss="${esc(r.id)}" title="Remove from the list" aria-label="Remove from the list">${chipRemoveIcon()}</button>` : ""}</td></tr>`).join("");
+  const gold = id => (cluster.golds || []).find(g => g.id === id);
+  const followRows = following.map(([id, g]) => { const x = gold(id); return `<tr><td class="mono">${esc(id)}</td><td>${esc(x ? x.image_id : "")}</td><td>${esc(g.product || "")}</td><td class="mono">${esc(g.build || "")}</td></tr>`; }).join("");
+  return gsCard("md-au", "update.svg", `Windows updates ${infoTip("Windows updates", "Golds with Keep current on (on their card under Golds) follow the product their ISO was built from. A newer Patch Tuesday build of the same product and base build gives one new ISO with the same editions and language; each following gold is baked again from it with its own settings, then the old ISO goes and older golds beyond the kept number are removed - not ones with linked clones or pinned by a design. The check runs every six hours; the work runs in a maintenance window (Studio settings).")}`, meta, `
+    <div class="grid-3">
+      ${field(`<span class="field-label"><img src="${iconSrc("gold-image.svg")}" alt="">Golds kept per kind${infoTip("Golds kept", "After an update: the newest golds of each kind (image, language, disk size) that stay. 2 keeps the one before as a way back.")}</span>`,
+        `<input id="auKeep" type="number" min="1" max="10" value="${s.keep_golds}">`)}
+    </div>
+    <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="auPreviews"', `Include preview releases${infoTip("Preview releases", "Off: only the Patch Tuesday release of each month (B). On: also the optional non-security release later in the month. Insider builds are never followed.")}`, !!s.include_previews)}</div>
+    ${following.length ? `<div class="field-group">Keep current</div><div class="table-wrap"><table class="data"><thead><tr><th>Gold</th><th>Image</th><th>Product</th><th>Build</th></tr></thead><tbody>${followRows}</tbody></table></div>` : ""}
+    ${runs.length ? `<div class="field-group">Runs</div><div class="table-wrap"><table class="data"><thead><tr><th>Product</th><th>Build</th><th>Release</th><th>Step</th><th>Golds</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
+    ${actions(`<button class="btn" type="button" id="auCheck"><img src="${iconSrc("update.svg")}" alt=""> Check now</button>`, act("auSave", "save.svg", "Save", true))}`, "", active.length > 0 || !!failed, badge);
+}
+
+function wireAutoUpdate(main) {
+  const again = () => renderServerBlade("media", main);
+  const on = (id, fn) => { const el = $id(id); if (el) el.addEventListener("click", fn); };
+  on("auSave", async () => {
+    try { await api("PUT", "/auto-update", { keep_golds: parseInt($id("auKeep").value, 10) || 2, include_previews: $id("auPreviews").checked }); toast("Saved"); again(); }
+    catch (e) { toast(e.message, true); }
+  });
+  on("auCheck", async e => {
+    const b = e.currentTarget; b.disabled = true;
+    try { const r = await api("POST", "/auto-update/check"); toast(r.found ? `${r.found} newer build(s) found` : "No newer build for the golds that keep current"); again(); }
+    catch (err) { toast(err.message, true); b.disabled = false; }
+  });
+  const each = (attr, fn) => main.querySelectorAll(`[${attr}]`).forEach(b => b.addEventListener("click", async () => {
+    try { await fn(b.getAttribute(attr)); again(); } catch (e) { toast(e.message, true); }
+  }));
+  each("data-au-start", async id => { await api("POST", `/auto-update/runs/${encodeURIComponent(id)}/start`); toast("Starts as soon as nothing else runs"); });
+  each("data-au-retry", async id => { await api("POST", `/auto-update/runs/${encodeURIComponent(id)}/retry`); toast("Retries as soon as nothing else runs"); });
+  each("data-au-dismiss", async id => { await api("DELETE", `/auto-update/runs/${encodeURIComponent(id)}`); });
+}
+
 async function bladeMedia(main, stale) {
-  const [win, isos, bake, c, fod, region] = await Promise.all([api("GET", "/settings/windows"), api("GET", "/windows/isos").catch(e => ({ error: e.message, isos: [] })),
-    api("GET", "/settings/bake"), refreshInventory(), api("GET", "/settings/fod").catch(() => null), api("GET", "/settings/region").catch(() => ({}))]);
+  const [win, isos, bake, c, fod, region, au] = await Promise.all([api("GET", "/settings/windows"), api("GET", "/windows/isos").catch(e => ({ error: e.message, isos: [] })),
+    api("GET", "/settings/bake"), refreshInventory(), api("GET", "/settings/fod").catch(() => null), api("GET", "/settings/region").catch(() => ({})),
+    api("GET", "/auto-update").catch(() => null)]);
   // FoD satellites in the studio's preselected language (Studio settings), en-US without one.
   const fodLang = region.language || "en-US";
   if (stale()) return;
@@ -1943,6 +2120,21 @@ async function bladeMedia(main, stale) {
   if (!mediaUi.peFrom) mediaUi.peFrom = pe.volid && pe.source_iso && !pe.source_iso.startsWith("uup:") ? "iso" : "uup";
   /* Proxmox's list of virtio-win releases broken for Windows guests - the server refuses them too. */
   const vioBad = r => { const n = parseInt(String(r || "").replace(/^0\.1\./, ""), 10); return (n >= 215 && n <= 262) || n === 285; };
+  /* The release in use and where it stands: in PVE, being fetched, an older copy only, or
+     fetched by the next bake. */
+  const vioMeta = () => {
+    const set = win.settings.virtio, vio = set === "stable" ? win.stable : set === "latest" ? win.latest : set;
+    const head = esc(set) + (vio && vio !== set ? ` (${esc(vio)})` : "");
+    const job = (cluster.jobs || []).find(j => j.kind === "virtio" && (j.status === "running" || j.status === "queued"));
+    const pct = job && job.progress && typeof job.progress.pct === "number" ? ` ${Math.round(job.progress.pct)}%` : "";
+    const here = (win.present || []).slice().sort((a, b) => vioNewer(a, b) ? -1 : 1);
+    const where = win.settings.iso_storage || (bake.resolved || {}).iso_storage || "PVE";
+    const st = job ? `<span class="dot run"></span><span class="vio-run">fetching${pct}</span>`
+      : vio && here.includes(vio) ? `<span class="dot ok"></span><span class="vio-ok">in ${esc(where)}</span>`
+      : here.length ? `<span class="dot warn"></span><span class="vio-warn">local copy is ${esc(here[0])}</span>`
+      : `<span class="dot idle"></span>fetched at next bake`;
+    return `<span class="vio-meta">${head} · ${st}</span>`;
+  };
   const vioChoices = [["stable", `stable${win.stable ? " (" + win.stable + ")" : ""}${vioBad(win.stable) ? " · broken per Proxmox" : ""}`],
     ["latest", `latest${win.latest ? " (" + win.latest + ")" : ""}${vioBad(win.latest) ? " · broken per Proxmox" : ""}`]]
     .concat(win.releases.map(r => [r, r + (vioBad(r) ? " · broken per Proxmox" : win.present.includes(r) ? " · in PVE" : "")]));
@@ -1992,24 +2184,32 @@ async function bladeMedia(main, stale) {
       ${actions(act("peBuildUup", "download.svg", pe.volid ? "Rebuild WinPE" : "Build WinPE", !pe.volid))}`
       : `<div class="grid-2">${field(fieldLabel("iso-media.svg", "Distil from"), `<select id="peIso">${readable.length ? opts(readable.map(i => [i.volid, i.file]), pe.source_iso || readable[0].volid) : '<option value="">No readable Windows ISO in PVE yet</option>'}</select>`)}</div>
       ${actions(act("peBuild", "os-window.svg", pe.volid ? "Rebuild WinPE" : "Build WinPE", !pe.volid))}`}`, "", !pe.volid)}
-    ${gsCard("gs-virtio", "integration.svg", "Windows: virtio-win", `${win.settings.virtio}${win.settings.virtio === "stable" && win.stable ? " (" + win.stable + ")" : ""}`, `
+    ${gsCard("gs-virtio", "integration.svg", "Windows: virtio-win", vioMeta(), `
       <div class="grid-2">${field(fieldLabel("update.svg", "Release baked into Windows golds"), `<select id="vioSel">${opts(vioChoices, win.settings.virtio)}</select>
         <span class="hint">Drivers and QEMU guest agent. "stable" follows the virtio-win project's stable channel; a pinned release stays put.</span>`)}</div>
       ${actions(act("vioFetch", "download.svg", "Fetch into PVE now"), act("vioSave", "save.svg", "Save", true))}`, "", false)}
+    ${au ? autoUpdateCard(au) : ""}
     ${gsCard("gd-where", "settings.svg", "Where bakes run", `${esc(r.node || "")} · ${esc(r.disk_storage || "")} · ${esc(r.bridge || "")}`, `
       <div class="grid-3">
         ${field(fieldLabel("servers.svg", "Node"), `<select id="bsNode">${opts(inv.nodes.filter(n => n.status === "online").map(n => [n.node, n.node]), s.node, auto(r.node))}</select>`)}
         ${field(fieldLabel("disk.svg", "Gold disks (images)"), `<select id="bsDisk">${opts(stor("images"), s.disk_storage, auto(r.disk_storage))}</select>`)}
         ${field(fieldLabel("storage.svg", "Cloud image cache (import)"), `<select id="bsImport">${opts(stor("import"), s.import_storage, auto(r.import_storage))}</select>`)}
-        ${field(fieldLabel("iso-media.svg", "Seed ISOs (iso)"), `<select id="bsIso">${opts(stor("iso"), s.iso_storage, auto(r.iso_storage))}</select>`)}
-        ${field(fieldLabel("vnet.svg", "Bake network"), `<select id="bsBridge">${opts(bridges, s.bridge, auto(r.bridge))}</select>`)}
-        ${field(fieldLabel("vlan.svg", "VLAN tag"), `<input id="bsVlan" type="number" min="1" max="4094" placeholder="none" value="${s.vlan ?? ""}">`)}
+        ${field(fieldLabel("iso-media.svg", "ISOs: WinPE, virtio-win, media (iso)"), `<select id="bsIso">${opts(stor("iso"), s.iso_storage, auto(r.iso_storage))}</select>`)}
         ${field(fieldLabel("cpu.svg", "CPU type (Linux)"), `<input id="bsCpu" value="${esc(s.cpu)}">`)}
         ${field(fieldLabel("cpu.svg", "CPU type (Windows)"), `<input id="bsCpuWin" value="${esc(s.cpu_windows)}">`)}
         ${field(fieldLabel("ram.svg", "Memory (MiB)"), `<input id="bsMem" type="number" min="1024" step="512" value="${s.memory_mb}">`)}
         ${field(fieldLabel("cpu.svg", "Cores"), `<input id="bsCores" type="number" min="1" value="${s.cores}">`)}
       </div>
-      <div class="tip-box"><img src="${iconSrc("help.svg")}" alt=""><div>The bake VM needs DHCP and internet access on its network (Linux). "Auto" prefers shared storage, so one gold serves every node.</div></div>
+      <div class="field-group">Bake network</div>
+      <div class="grid-3">
+        ${field(fieldLabel("vnet.svg", "Network"), `<select id="bsBridge">${opts(bridges, s.bridge, auto(r.bridge))}</select>`)}
+        ${field(fieldLabel("vlan.svg", "VLAN tag"), `<input id="bsVlan" type="number" min="1" max="4094" placeholder="none" value="${s.vlan ?? ""}">`)}
+        ${field(`<span class="field-label"><img src="${iconSrc("static-ip.svg")}" alt="">Linux addresses${infoTip("Linux bake addresses", "For a bake network without DHCP: one address (10.10.0.60/24) or a range (10.10.0.60-69/24). Each Linux bake takes the first address no running bake holds, so a range of 4 lets 4 bakes run side by side. Reserve them for the bakes. Empty: DHCP. Windows bakes stay offline and need none.")}</span>`,
+          `<input id="bsLinAddr" placeholder="DHCP - or 10.10.0.60-69/24" value="${esc(s.linux_address || "")}">`)}
+        ${field(fieldLabel("vnet.svg", "Gateway"), `<input id="bsLinGw" placeholder="10.10.0.1" value="${esc(s.linux_gateway || "")}">`)}
+        ${field(fieldLabel("dns.svg", "DNS"), `<input id="bsLinDns" placeholder="10.10.0.1" value="${esc((s.linux_dns || []).join(", "))}">`)}
+      </div>
+      <div class="tip-box"><img src="${iconSrc("help.svg")}" alt=""><div>The Linux bake VM needs internet access on its network - by DHCP, or by the addresses above. "Auto" prefers shared storage, so one gold serves every node.</div></div>
       ${actions(bake.problem ? `<span class="hint err gs-actions-note">${esc(bake.problem)}</span>` : "", act("bsSave", "save.svg", "Save", true))}`, "", false)}`;
 
   const on = (id, ev, fn) => { const el = $id(id); if (el) el.addEventListener(ev, fn); };
@@ -2046,13 +2246,16 @@ async function bladeMedia(main, stale) {
     try { await api("PUT", "/settings/windows", { ...win.settings, virtio: $id("vioSel").value }); const { id } = await api("POST", "/virtio/fetch"); openJob(id); }
     catch (e) { toast(e.message, true); }
   });
+  wireAutoUpdate(main);
   on("bsSave", "click", async () => {
     const vlan = parseInt($id("bsVlan").value, 10);
     try {
       await api("PUT", "/settings/bake", { node: $id("bsNode").value, disk_storage: $id("bsDisk").value, import_storage: $id("bsImport").value,
         iso_storage: $id("bsIso").value, bridge: $id("bsBridge").value, vlan: Number.isFinite(vlan) ? vlan : null,
         cpu: $id("bsCpu").value.trim(), cpu_windows: $id("bsCpuWin").value.trim(), memory_mb: parseInt($id("bsMem").value, 10) || 4096,
-        cores: parseInt($id("bsCores").value, 10) || 2, timeout_min: s.timeout_min });
+        cores: parseInt($id("bsCores").value, 10) || 2, timeout_min: s.timeout_min,
+        linux_address: $id("bsLinAddr").value.trim(), linux_gateway: $id("bsLinGw").value.trim(),
+        linux_dns: $id("bsLinDns").value.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean) });
       toast("Saved"); renderServerBlade("media", main);
     } catch (e) { toast(e.message, true); }
   });
@@ -2090,12 +2293,12 @@ function versionCard(v) {
       return `<li class="${mine ? "cur" : ahead ? "nxt" : ""}"><div class="ver-h"><b class="mono">${esc(r.version)}</b><span>${esc(when(r.published))}${mine ? " · installed" : ""}</span></div>${notes(r)}</li>`;
     }).join("")}</ul>` : ""}
     ${verChannel(v)}
-    <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="upAuto"', `Install updates automatically${infoTip("Automatic updates", "Between 03:00 and 04:00, when a newer release is out and no job runs, the studio installs it the same way as the button: it checks the release's SHA-256, a root helper in the container checks it again against GitHub, swaps the binary (the old one stays as pve-vm-studio.prev) and restarts the studio. Sessions survive the restart.")}`, !!v.auto)}</div>
+    <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="upAuto"', `Install updates automatically${infoTip("Automatic updates", "In a maintenance window (Maintenance windows), when a newer release is out and no job runs, the studio installs it the same way as the button: it checks the release's SHA-256, a root helper in the container checks it again against GitHub, swaps the binary (the old one stays as pve-vm-studio.prev) and restarts the studio. Sessions survive the restart.")}`, !!v.auto)}</div>
     ${actions(`<span class="hint gs-actions-note">checked ${esc(when(v.checked))}</span>`,
       `${latest && latest.url ? `<a class="btn" href="${esc(latest.url)}" target="_blank" rel="noopener"><img src="${iconSrc("log.svg")}" alt=""> Release notes on GitHub</a>` : ""}
        <button class="btn" type="button" id="verCheck"><img src="${iconSrc("update.svg")}" alt=""> Check now</button>
        ${v.state === "update" ? `<button class="btn primary" type="button" id="verUpdate" data-tag="${esc(latest.tag)}"><img src="${iconSrcOnAccent("download.svg")}" alt=""> Update to ${esc(latest.version)}</button>` : ""}`)}`;
-  return gsCard("gs-version", "update.svg", "Studio: version", meta, body, "", true, state);
+  return gsCard("gs-version", "update.svg", "Version", meta, body, "", true, state);
 }
 
 /* Stable (releases) or Development (CI's build of every commit on main - untested). */
@@ -2123,17 +2326,249 @@ function versionCardDev(v) {
     ${d && (d.commits || []).length ? `<ul class="ver-tl">${d.commits.map((c, i) => `<li class="${i === 0 ? "nxt" : ""}"><div class="ver-h"><b class="mono">${esc(c.sha)}</b><span>${esc(when(c.date))}</span></div><ul class="ver-notes"><li>${esc(c.message)}</li></ul></li>`).join("")}
       <li class="cur"><div class="ver-h"><b class="mono">${esc((v.commit || "").replace(/-dirty$/, ""))}</b><span>installed</span></div></li></ul>` : ""}
     ${verChannel(v)}
-    <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="upAuto"', `Install updates automatically${infoTip("Automatic updates", "Between 03:00 and 04:00, when a newer build is out on this channel and no job runs, the studio installs it the same way as the button. On Development that is every new commit on main.")}`, !!v.auto)}</div>
+    <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="upAuto"', `Install updates automatically${infoTip("Automatic updates", "In a maintenance window, when a newer build is out on this channel and no job runs, the studio installs it the same way as the button. On Development that is every new commit on main.")}`, !!v.auto)}</div>
     ${actions(`<span class="hint gs-actions-note">checked ${esc(when(v.checked))}</span>`,
       `${d && d.release.url ? `<a class="btn" href="${esc(d.release.url)}" target="_blank" rel="noopener"><img src="${iconSrc("log.svg")}" alt=""> Build on GitHub</a>` : ""}
        <button class="btn" type="button" id="verCheck"><img src="${iconSrc("update.svg")}" alt=""> Check now</button>
        ${v.state === "update" ? `<button class="btn primary" type="button" id="verUpdate" data-tag="edge"><img src="${iconSrcOnAccent("download.svg")}" alt=""> Update to ${esc(d.commit)}</button>` : ""}`)}`;
-  return gsCard("gs-version", "update.svg", "Studio: version", meta, body, "", true, state);
+  return gsCard("gs-version", "update.svg", "Version", meta, body, "", true, state);
+}
+
+/* -- Studio settings: maintenance windows, mail, notifications -- */
+
+const MW_DAYS = [["mon", "Mon"], ["tue", "Tue"], ["wed", "Wed"], ["thu", "Thu"], ["fri", "Fri"], ["sat", "Sat"], ["sun", "Sun"]];
+/* The rows being edited: kept across repaints until saved. */
+const maintUi = { rows: null };
+
+function fmtWhen(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: clockFmt !== "24h" });
+}
+
+function maintRowsHtml() {
+  const rows = maintUi.rows || [];
+  if (!rows.length) return `<p class="hint mw-empty">No window - the studio never updates itself or Windows golds on its own.</p>`;
+  return rows.map((w, i) => `<div class="mw-row">
+    <div class="ov-seg mw-days" role="group" aria-label="Days">${MW_DAYS.map(([k, l]) => `<button type="button" class="btn${w.days.includes(k) ? " on" : ""}" data-mw-day="${i}" data-day="${k}" aria-pressed="${w.days.includes(k)}">${l}</button>`).join("")}</div>
+    <div class="mw-times"><input type="time" data-mw-start="${i}" value="${esc(w.start)}" aria-label="Start"><span class="mw-dash">to</span><input type="time" data-mw-end="${i}" value="${esc(w.end)}" aria-label="End"></div>
+    ${toggle(`data-mw-patch="${i}"`, `Patch week only${infoTip("Patch week only", "The window opens only from Patch Tuesday (the second Tuesday of the month) to the Monday after it.")}`, !!w.patch_week_only, false, "", "mw-patch")}
+    <button class="btn icon sm danger-text" type="button" data-mw-del="${i}" title="Remove this window" aria-label="Remove this window">${trashIcon()}</button>
+  </div>`).join("");
+}
+
+function maintCard(m) {
+  const meta = m.open ? `open now, until ${esc(m.open)}` : m.next ? `next ${esc(fmtWhen(m.next))}` : "none - nothing runs on its own";
+  const badge = m.open ? `<span class="pill status on">open</span>` : "";
+  return gsCard("gs-maint", "clock.svg", `Maintenance windows ${infoTip("Maintenance windows", "When the studio may do work nobody started: its own update (when Install updates automatically is on), then the Windows golds that keep current. Work starts only inside a window; at its end no new step starts, and one already running finishes. An end before the start runs past midnight. Times are the studio's" + (m.zone ? " (" + m.zone + ")" : "") + ".")}`, meta, `
+    <div id="mwRows" class="mw-rows">${maintRowsHtml()}</div>
+    ${actions(`<button class="btn" type="button" id="mwAdd"><img src="${iconSrc("clock.svg")}" alt=""> Add a window</button>`, act("mwSave", "save.svg", "Save", true))}`, "", false, badge);
+}
+
+function wireMaint(main) {
+  const box = $id("mwRows");
+  if (!box) return;
+  const repaint = () => { box.innerHTML = maintRowsHtml(); };
+  box.addEventListener("click", e => {
+    const d = e.target.closest("[data-mw-day]");
+    if (d) {
+      const w = maintUi.rows[+d.dataset.mwDay], k = d.dataset.day;
+      w.days = w.days.includes(k) ? w.days.filter(x => x !== k) : MW_DAYS.map(x => x[0]).filter(x => x === k || w.days.includes(x));
+      d.classList.toggle("on", w.days.includes(k)); d.setAttribute("aria-pressed", w.days.includes(k));
+      return;
+    }
+    const del = e.target.closest("[data-mw-del]");
+    if (del) { maintUi.rows.splice(+del.dataset.mwDel, 1); repaint(); }
+  });
+  box.addEventListener("change", e => {
+    const t = e.target;
+    if (t.dataset.mwStart != null) maintUi.rows[+t.dataset.mwStart].start = t.value;
+    else if (t.dataset.mwEnd != null) maintUi.rows[+t.dataset.mwEnd].end = t.value;
+    else if (t.dataset.mwPatch != null) maintUi.rows[+t.dataset.mwPatch].patch_week_only = t.checked;
+  });
+  const on = (id, fn) => { const el = $id(id); if (el) el.addEventListener("click", fn); };
+  on("mwAdd", () => { maintUi.rows.push({ days: MW_DAYS.map(x => x[0]), start: "01:00", end: "06:00", patch_week_only: false }); repaint(); });
+  on("mwSave", async () => {
+    try { await api("PUT", "/settings/maintenance", { windows: maintUi.rows }); maintUi.rows = null; toast("Saved"); renderServerBlade("studio", main); }
+    catch (err) { toast(err.message, true); }
+  });
+}
+
+function mailCard(m, notif) {
+  const s = m.settings, st = m.status || {};
+  const failed = s.enabled && st.last_error && (!st.last_ok || st.last_error_at > st.last_ok);
+  const on = !!s.enabled;
+  const meta = !on ? "off" : s.host ? `${esc(s.host)}:${s.port} · to ${esc(s.to.join(", ") || "nobody")}` : "on, not filled in";
+  const badge = failed ? `<span class="pill status warn" title="${esc(st.last_error)}">send failed</span>` : on && mailReady(s) ? `<span class="pill status on">on</span>` : "";
+  const dis = on ? "" : " disabled";
+  return gsCard("gs-mail", "users.svg", `Mail ${infoTip("Mail", "Notifications go to a smart host - Proxmox Mail Gateway, an Exchange relay, a Postfix - without signing in: the smart host has to accept mail from the studio's address. Switched on, every field is required.")}`, meta, `
+    <div class="toggle-grid" style="grid-template-columns:1fr">${toggle('id="mlEnabled"', "Send mail", on)}</div>
+    ${failed ? `<p class="hint err" style="margin-top:10px">Last send failed ${esc(when(st.last_error_at))}: ${esc(st.last_error)}</p>` : ""}
+    <div class="grid-3" id="mlFields" style="margin-top:12px">
+      ${field(fieldLabel("servers.svg", "Smart host"), `<input id="mlHost" placeholder="pmg.example.com" value="${esc(s.host)}"${dis}>`)}
+      ${field(fieldLabel("vnet.svg", "Port"), `<input id="mlPort" type="number" min="1" max="65535" value="${s.port || 25}"${dis}>`)}
+      ${field(`<span class="field-label"><img src="${iconSrc("security.svg")}" alt="">Security${infoTip("Security", "None: plain SMTP, usual for a relay inside the network (port 25). STARTTLS: upgrades the connection and refuses to send without it (port 25 or 587). TLS: encrypted from the start (port 465).")}</span>`,
+        `<select id="mlSec"${dis}>${opts([["none", "None"], ["starttls", "STARTTLS"], ["tls", "TLS"]], s.security || "none")}</select>`)}
+      ${field(fieldLabel("users.svg", "From"), `<input id="mlFrom" placeholder="pve-vm-studio@example.com" value="${esc(s.from)}"${dis}>`)}
+      ${field(fieldLabel("users.svg", "To"), `<input id="mlTo" placeholder="admins@example.com" value="${esc((s.to || []).join(", "))}"${dis}>`)}
+      ${field(fieldLabel("monitor.svg", "Theme"), `<div class="ml-theme"><select id="mlTheme">${opts((m.themes || []).map(t => [t.id, t.name]), s.theme || "proxmox_dark")}</select>
+        <button class="btn" type="button" id="mlPreview"><img src="${iconSrc("search.svg")}" alt=""> Preview</button></div>`)}
+    </div>
+    <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="mlVerify"', `Check the smart host's certificate${infoTip("Certificate check", "Off for a smart host whose certificate the studio cannot verify - one it made itself, or from an internal CA. Only matters with STARTTLS or TLS.")}`, s.verify_cert !== false, !on)}</div>
+    ${mailLog(m.log || [], notif)}
+    ${actions(`<button class="btn" type="button" id="mlTest"${dis}><img src="${iconSrc("users.svg")}" alt=""> Send test mail</button>`, act("mlSave", "save.svg", "Save", true))}`, "", !on || !mailReady(s), badge);
+}
+
+/* What went to the smart host and what it answered - one row per mail, newest first, each
+   opening to its envelope and the SMTP reply in the job log's own lines. Only what the
+   studio saw: the envelope it sent, the final reply (or why there was none), the time. */
+function mailLog(rows, notif) {
+  const label = Object.fromEntries(((notif && notif.events) || []).map(e => [e.key, e.label]));
+  label.test = "Test mail";
+  const failed = rows.filter(r => !r.ok).length;
+  const meta = rows.length ? `${rows.length} newest${failed ? ` · ${failed} not sent` : ""}` : "";
+  const t = iso => new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  const ln = (at, tag, cls, msg) => `<div class="ln t-${cls}"><span class="ln-f">${t(at)}</span><span class="ln-f">[</span><span class="ln-tag">${tag}</span><span class="ln-f">]</span><span class="ln-msg">${esc(msg)}</span></div>`;
+  const code = r => r.code == null ? "—" : String(r.code);
+  const tone = r => r.ok ? "ok" : r.code != null && r.code < 500 ? "warn" : "bad";
+  const body = rows.length ? `<div class="ml-log">${rows.map(r => `
+    <details class="job-step ml-row s-${tone(r)}">
+      <summary><span class="job-dot"></span>
+        <span class="ml-main"><span class="step-name">${esc(r.subject)}</span><span class="step-n">${esc(label[r.event] || r.event)} · to ${esc(r.recipients.join(", "))}</span></span>
+        <span class="ml-code c-${tone(r)}">${code(r)}</span>
+        <span class="step-took">${esc(when(r.at))}</span></summary>
+      <div class="job-log">
+        ${ln(r.at, "mail ", "get", `${r.sender} → ${r.recipients.join(", ")}`)}
+        ${ln(r.at, "smtp ", "run", `${r.host} · ${r.security === "none" ? "plain SMTP" : r.security.toUpperCase()} · ${r.took_ms} ms`)}
+        ${r.ok ? (r.reply || "").split("\n").map(l => ln(r.at, "o.k. ", "ok", `${r.code} ${l}`)).join("")
+          : `${r.reply ? r.reply.split("\n").map(l => ln(r.at, "smtp ", "warn", `${r.code} ${l}`)).join("") : ""}${ln(r.at, "error", "error", r.error)}`}
+      </div>
+    </details>`).join("")}</div>` : `<p class="hint">Nothing sent yet.</p>`;
+  return `<div class="section collapsible ${isNestedOpen("gs-mail-log", false) ? "" : "collapsed"}" style="margin-top:12px"><div class="section-head" data-nested="gs-mail-log"><span class="section-chevron">${chevron()}</span>
+    <img src="${iconSrc("log.svg")}" alt=""> Sent mail<span class="section-meta">${meta}</span></div><div class="section-body">${body}</div></div>`;
+}
+
+/* A sample mail in each of the studio's themes: the theme picker inside switches the
+   frame, "Use this theme" puts it into the card (Save keeps it). */
+function openMailPreview(themes, current, use) {
+  let theme = current || "proxmox_dark";
+  const ov = document.createElement("div");
+  ov.className = "overlay open";
+  ov.innerHTML = `<div class="modal ml-preview" role="dialog" aria-modal="true" aria-labelledby="mlPvTitle">
+    <div class="ml-pv-head"><span class="card-icon"><img src="${iconSrc("users.svg")}" alt=""></span><h2 id="mlPvTitle">Mail preview</h2>
+      <select id="mlPvTheme" aria-label="Theme">${opts(themes.map(t => [t.id, t.name]), theme)}</select></div>
+    <iframe class="ml-pv-frame" title="Sample mail" sandbox></iframe>
+    <div class="actions"><button class="btn" type="button" data-pv-close>Close</button>
+      <button class="btn primary" type="button" data-pv-use><img src="${iconSrcOnAccent("save.svg")}" alt=""> Use this theme</button></div>
+  </div>`;
+  const frame = ov.querySelector("iframe");
+  const load = async () => {
+    try {
+      const r = await fetch("/api/mail/preview?theme=" + encodeURIComponent(theme), { credentials: "same-origin" });
+      frame.srcdoc = await r.text();
+    } catch (e) { toast(e.message, true); }
+  };
+  const close = () => { document.removeEventListener("keydown", key, true); ov.remove(); };
+  const key = e => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+  ov.querySelector("#mlPvTheme").addEventListener("change", e => { theme = e.target.value; load(); });
+  ov.addEventListener("click", e => {
+    if (e.target.closest("[data-pv-close]") || e.target === ov) return close();
+    if (e.target.closest("[data-pv-use]")) { use(theme); toast("Theme picked - Save keeps it"); close(); }
+  });
+  document.addEventListener("keydown", key, true);
+  document.body.appendChild(ov);
+  load();
+}
+
+/* Mail can go out: switched on and every field there. */
+function mailReady(s) { return !!(s && s.enabled && s.host && s.port && s.from && (s.to || []).length); }
+
+function mailForm(m) {
+  return {
+    enabled: $id("mlEnabled").checked,
+    host: $id("mlHost").value.trim(), port: parseInt($id("mlPort").value, 10) || 0, security: $id("mlSec").value,
+    verify_cert: $id("mlVerify").checked, from: $id("mlFrom").value.trim(),
+    to: $id("mlTo").value.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean), timeout_sec: (m && m.settings.timeout_sec) || 30,
+    theme: $id("mlTheme") ? $id("mlTheme").value : "proxmox_dark",
+  };
+}
+
+/* Switched on, every field is required: the empty or wrong ones get the red border and the
+   save does not go out. Returns whether all is filled in. */
+function mailMarkInvalid(f) {
+  const mail = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+  const bad = {
+    mlHost: f.enabled && !f.host,
+    mlPort: f.enabled && !(f.port >= 1 && f.port <= 65535),
+    mlFrom: f.enabled && !mail(f.from),
+    mlTo: f.enabled && (!f.to.length || !f.to.every(mail)),
+  };
+  Object.entries(bad).forEach(([id, b]) => { const el = $id(id); if (el) { el.classList.toggle("is-invalid", b); el.setAttribute("aria-invalid", b ? "true" : "false"); } });
+  return !Object.values(bad).some(Boolean);
+}
+
+function wireMail(main, m) {
+  const on = (id, fn) => { const el = $id(id); if (el) el.addEventListener("click", fn); };
+  let tried = false;
+  const enable = () => {
+    const en = $id("mlEnabled").checked;
+    ["mlHost", "mlPort", "mlSec", "mlFrom", "mlTo", "mlVerify", "mlTest"].forEach(id => {
+      const el = $id(id); if (!el) return;
+      el.disabled = !en;
+      const t = el.closest(".toggle"); if (t) t.classList.toggle("disabled", !en);
+    });
+    if (!en) mailMarkInvalid({ ...mailForm(m), enabled: false });
+    else if (tried) mailMarkInvalid(mailForm(m));
+  };
+  const t = $id("mlEnabled"); if (t) t.addEventListener("change", enable);
+  const box = $id("mlFields"); if (box) box.addEventListener("input", () => { if (tried) mailMarkInvalid(mailForm(m)); });
+  on("mlSave", async () => {
+    const f = mailForm(m);
+    tried = true;
+    if (!mailMarkInvalid(f)) return toast("Fill in the marked fields - mail is switched on", true);
+    try { await api("PUT", "/settings/mail", f); toast(f.enabled ? "Saved - mail is on" : "Saved - mail is off"); renderServerBlade("studio", main); } catch (e) { toast(e.message, true); }
+  });
+  on("mlPreview", () => openMailPreview(m.themes || [], $id("mlTheme").value, id => { $id("mlTheme").value = id; }));
+  on("mlTest", async e => {
+    const f = mailForm(m);
+    tried = true;
+    if (!mailMarkInvalid({ ...f, enabled: true })) return toast("Fill in the marked fields first", true);
+    const b = e.currentTarget; b.disabled = true;
+    try { const r = await api("POST", "/mail/test", f); toast("Sent - the smart host said: " + (r.reply || "OK")); }
+    catch (err) { toast(err.message, true); }
+    finally { b.disabled = false; }
+    // The log has the new row - with the answer, or why there was none.
+    state.nestedOpen["gs-mail-log"] = true;
+    renderServerBlade("studio", main);
+  });
+}
+
+function notifyCard(n, mail) {
+  const ev = n.events || [];
+  const groups = [...new Set(ev.map(e => e.group))];
+  const onCount = ev.filter(e => e.on).length;
+  const ready = mailReady(mail);
+  return gsCard("gs-notify", "update.svg", `Notifications ${infoTip("Notifications", "Which events send a mail. On by default: what happens while nobody watches - automatic work - and every failure.")}`,
+    ready ? `${onCount} of ${ev.length} on` : "needs mail", `
+    ${ready ? "" : `<div class="notify-off-banner">${warnBanner("Notifications go out by mail - switch Mail on and fill it in first.")}</div>`}
+    <div class="notify-groups${ready ? "" : " is-off"}" ${ready ? "" : 'aria-disabled="true"'}>${groups.map(g => `<div class="field-group">${esc(g)}</div>
+      <div class="toggle-grid">${ev.filter(e => e.group === g).map(e => toggle(`data-notify="${esc(e.key)}"`, esc(e.label), e.on, !ready)).join("")}</div>`).join("")}</div>`, "", false);
+}
+
+function wireNotify(main, n) {
+  if (!n) return;
+  main.querySelectorAll("[data-notify]").forEach(c => c.addEventListener("change", async () => {
+    const events = {};
+    main.querySelectorAll("[data-notify]").forEach(x => { events[x.dataset.notify] = x.checked; });
+    try { await api("PUT", "/settings/notify", { events }); toast(c.checked ? "Mails for it" : "No mail for it"); } catch (e) { toast(e.message, true); }
+  }));
 }
 
 async function bladeStudio(main, stale) {
-  const [server, t, region, cat, worker, ver] = await Promise.all([api("GET", "/settings/server"), api("GET", "/tls"), api("GET", "/settings/region"), catalogCache || api("GET", "/catalog"),
-    api("GET", "/settings/worker").catch(() => ({ memory_mb: 8192, cores: 4 })), api("GET", "/studio/version").catch(() => null)]);
+  const [server, t, region, cat, worker, ver, maint, mail, notif] = await Promise.all([api("GET", "/settings/server"), api("GET", "/tls"), api("GET", "/settings/region"), catalogCache || api("GET", "/catalog"),
+    api("GET", "/settings/worker").catch(() => ({ memory_mb: 4096, cores: 4 })), api("GET", "/studio/version").catch(() => null),
+    api("GET", "/settings/maintenance").catch(() => null), api("GET", "/settings/mail").catch(() => null), api("GET", "/settings/notify").catch(() => null)]);
+  if (maint && !maintUi.rows) maintUi.rows = maint.settings.windows.map(w => ({ ...w, days: [...w.days] }));
   catalogCache = cat;
   if (stale()) return;
   const c = t.certificate, st = t.settings;
@@ -2146,33 +2581,11 @@ async function bladeStudio(main, stale) {
       <span class="pill">DNS name: ${esc(server.settings.fqdn || "not set")}</span>
       ${c ? `<span class="pill status ${c.days_left < 21 ? "warn" : "on"}">${esc(mode)} · ${c.days_left} days left</span>` : `<span class="pill status off">No certificate</span>`}
     </div>
-    ${gsCard("gs-dns", "dns.svg", "Studio: DNS name", server.settings.fqdn || "not set", `
+    ${gsCard("gs-dns", "dns.svg", "DNS name", server.settings.fqdn || "not set", `
       <div class="grid-2">${field(fieldLabel("dns.svg", "Fully qualified name"), `<input id="stFqdn" placeholder="pve-vm-studio.example.com" value="${esc(server.settings.fqdn)}">
         <span class="hint">What people type to reach the studio; the certificate is issued for it. It needs an A record for ${esc(server.suggested.filter(n => /^\d/.test(n)).join(", "))}.</span>`)}</div>
       ${actions(act("stFqdnSave", "save.svg", "Save", true))}`, "", !server.settings.fqdn)}
-    ${gsCard("gs-clock", "clock.svg", "Studio: time format", clockFmt === "24h" ? "24-hour" : "12-hour", `
-      <div class="grid-2">${field(fieldLabel("clock.svg", "Times show as"), `<select id="stClock">${opts([["12h", "12-hour - 3:45 PM"], ["24h", "24-hour - 15:45"]], clockFmt)}</select>
-        <span class="hint">For everyone using the studio: jobs, the dashboard, certificates. Job logs always use 24-hour.</span>`)}</div>
-      ${actions(act("stClockSave", "save.svg", "Save", true))}`, "", false)}
-    ${gsCard("gs-worker", "ram.svg", "Studio: media worker", `${worker.cores} cores · ${worker.memory_mb / 1024} GB`, `
-      <div class="grid-2">
-        ${field(`<span class="field-label"><img src="${iconSrc("cpu.svg")}" alt="">Cores${infoTip("Media worker", "The WinPE VM that applies the cumulative update to a Windows media build with DISM. It lives only while the build runs.")}</span>`,
-          `<input id="wkCores" type="number" min="1" max="64" value="${worker.cores}">`)}
-        ${field(fieldLabel("ram.svg", "Memory (MiB)"), `<input id="wkMem" type="number" min="2048" max="262144" step="1024" value="${worker.memory_mb}">`)}
-      </div>
-      ${actions(act("wkSave", "save.svg", "Save", true))}`, "", false)}
-    ${gsCard("gs-confirm", "trash.svg", `Studio: confirmations ${infoTip("Confirmations", "All on by default. \"Don't ask again\" in a delete dialog switches its question off here - remembered per browser, not for everyone.")}`, Object.keys(CONFIRM_KINDS).some(skipConfirm) ? "some skipped in this browser" : "asks before every delete", `
-      <div class="toggle-grid">${Object.entries(CONFIRM_KINDS).map(([k, l]) => toggle(`id="cf_${k}"`, `Ask before ${esc(l.toLowerCase())}`, !skipConfirm(k))).join("")}</div>`, "", false)}
-    ${gsCard("gs-region", "language.svg", "Studio: region preselection", region.language ? `${esc(region.language)} · formats ${esc(region.locale || region.language)} · ${esc(region.timezone || "time zone of the browser")}` : "not set - English (United States)", `
-      <div class="grid-2">
-        ${field(fieldLabel("language.svg", "Language"), `<select id="rgLang">${opts(regionLocales(cat), region.language || "en-US")}</select>`)}
-        ${field(fieldLabel("language.svg", "Formats"), `<select id="rgFormat">${opts(regionLocales(cat), region.locale || region.language || "en-US")}</select>`)}
-        ${field(fieldLabel("language.svg", "Keyboard"), `<select id="rgKeyboard">${opts(regionLocales(cat), region.keyboard || region.language || "en-US")}</select>`)}
-        ${field(fieldLabel("clock.svg", "Time zone"), `<select id="rgTz">${opts(cat.timezones.map(z => [z.id, z.id]), region.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC")}</select>`)}
-      </div>
-      <p class="hint" style="margin-top:8px">Preselected - not enforced: new Linux and Windows bakes and Windows media downloads start with these, and each can still pick something else.</p>
-      ${actions(act("rgSave", "save.svg", "Save", true))}`, "", false)}
-    ${gsCard("gs-cert", "certificate.svg", "Studio: certificate", c ? `${mode} · ${c.days_left} days left` : "none", `
+    ${gsCard("gs-cert", "certificate.svg", "Certificate", c ? `${mode} · ${c.days_left} days left` : "none", `
       ${c ? `<div class="kv-grid"><div>In use</div><div class="kv-val">${esc(mode)}</div><div>Names</div><div class="kv-val">${esc(c.names.join(", "))}</div>
         <div>Issuer</div><div class="kv-val">${esc(c.issuer)}</div><div>Valid until</div><div class="kv-val">${esc(when(c.not_after))} (${c.days_left} days)</div>
         ${st.mode === "acme" ? `<div>Renewal</div><div class="kv-val">automatic, checked twice a day${st.last_check ? " · last " + esc(when(st.last_check)) : ""}</div>` : ""}</div>` : ""}
@@ -2198,7 +2611,33 @@ async function bladeStudio(main, stale) {
         <div class="grid-2">${field(fieldLabel("certificate.svg", "Certificate (PEM, with its chain)"), `<textarea id="imCert" placeholder="-----BEGIN CERTIFICATE-----"></textarea><input type="file" id="imCertFile" accept=".pem,.crt,.cer">`)}
           ${field(fieldLabel("key.svg", "Private key (PEM)"), `<textarea id="imKey" placeholder="-----BEGIN PRIVATE KEY-----"></textarea><input type="file" id="imKeyFile" accept=".pem,.key">`)}</div>
         ${actions(act("ssGo", "update.svg", "New self-signed certificate"), act("imGo", "certificate.svg", "Import", true))}</div></div>`, "", false)}
+    ${gsCard("gs-clock", "clock.svg", "Time format", clockFmt === "24h" ? "24-hour" : "12-hour", `
+      <div class="grid-2">${field(fieldLabel("clock.svg", "Times show as"), `<select id="stClock">${opts([["12h", "12-hour - 3:45 PM"], ["24h", "24-hour - 15:45"]], clockFmt)}</select>
+        <span class="hint">For everyone using the studio: jobs, the dashboard, certificates. Job logs always use 24-hour.</span>`)}</div>
+      ${actions(act("stClockSave", "save.svg", "Save", true))}`, "", false)}
+    ${gsCard("gs-worker", "ram.svg", "Media worker", `${worker.cores} cores · ${worker.memory_mb / 1024} GB`, `
+      <div class="grid-2">
+        ${field(`<span class="field-label"><img src="${iconSrc("cpu.svg")}" alt="">Cores${infoTip("Media worker", "The WinPE VM that applies the cumulative update to a Windows media build with DISM. It lives only while the build runs.")}</span>`,
+          `<input id="wkCores" type="number" min="1" max="64" value="${worker.cores}">`)}
+        ${field(fieldLabel("ram.svg", "Memory (MiB)"), `<input id="wkMem" type="number" min="2048" max="262144" step="1024" value="${worker.memory_mb}">`)}
+      </div>
+      ${actions(act("wkSave", "save.svg", "Save", true))}`, "", false)}
+    ${gsCard("gs-confirm", "trash.svg", `Confirmations ${infoTip("Confirmations", "All on by default. \"Don't ask again\" in a delete dialog switches its question off here - remembered per browser, not for everyone.")}`, Object.keys(CONFIRM_KINDS).some(skipConfirm) ? "some skipped in this browser" : "asks before every delete", `
+      <div class="toggle-grid">${Object.entries(CONFIRM_KINDS).map(([k, l]) => toggle(`id="cf_${k}"`, `Ask before ${esc(l.toLowerCase())}`, !skipConfirm(k))).join("")}</div>`, "", false)}
+    ${gsCard("gs-region", "language.svg", "Region preselection", region.language ? `${esc(region.language)} · formats ${esc(region.locale || region.language)} · ${esc(region.timezone || "time zone of the browser")}` : "not set - English (United States)", `
+      <div class="grid-2">
+        ${field(fieldLabel("language.svg", "Language"), `<select id="rgLang">${opts(regionLocales(cat), region.language || "en-US")}</select>`)}
+        ${field(fieldLabel("language.svg", "Formats"), `<select id="rgFormat">${opts(regionLocales(cat), region.locale || region.language || "en-US")}</select>`)}
+        ${field(fieldLabel("language.svg", "Keyboard"), `<select id="rgKeyboard">${opts(regionLocales(cat), region.keyboard || region.language || "en-US")}</select>`)}
+        ${field(fieldLabel("clock.svg", "Time zone"), `<select id="rgTz">${opts(cat.timezones.map(z => [z.id, z.id]), region.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC")}</select>`)}
+      </div>
+      <p class="hint" style="margin-top:8px">Preselected - not enforced: new Linux and Windows bakes and Windows media downloads start with these, and each can still pick something else.</p>
+      ${actions(act("rgSave", "save.svg", "Save", true))}`, "", false)}
+    ${maint ? maintCard(maint) : ""}
+    ${mail ? mailCard(mail, notif) : ""}
+    ${notif ? notifyCard(notif, mail && mail.settings) : ""}
     ${versionCard(ver)}`;
+  wireMaint(main); wireMail(main, mail); wireNotify(main, notif);
   if (acmeForm.challenge === "dns-01" && acmeForm.dns_provider && $id("leHelp")) {
     api("GET", "/tls/providers/" + encodeURIComponent(acmeForm.dns_provider)).then(r => { if ($id("leHelp")) $id("leHelp").innerHTML = highlightHelp(r.help); })
       .catch(e => { if ($id("leHelp")) $id("leHelp").textContent = e.message; });
@@ -2215,7 +2654,7 @@ async function bladeStudio(main, stale) {
       await api("GET", "/studio/version?fresh=1"); renderServerBlade("studio", main);
     } catch (err) { toast(err.message, true); }
   }));
-  on("upAuto", "change", async e => { try { await api("PUT", "/settings/update", { auto: e.target.checked, channel: (ver && ver.channel) || "stable" }); toast(e.target.checked ? "Updates install at night" : "Updates wait for you"); } catch (err) { toast(err.message, true); } });
+  on("upAuto", "change", async e => { try { await api("PUT", "/settings/update", { auto: e.target.checked, channel: (ver && ver.channel) || "stable" }); toast(e.target.checked ? "Updates install in a maintenance window" : "Updates wait for you"); } catch (err) { toast(err.message, true); } });
   on("stFqdnSave", "click", async () => { try { await api("PUT", "/settings/server", { ...server.settings, fqdn: $id("stFqdn").value }); toast("Saved"); render(); } catch (e) { toast(e.message, true); } });
   Object.keys(CONFIRM_KINDS).forEach(k => on("cf_" + k, "change", e => { setSkipConfirm(k, !e.target.checked); toast(e.target.checked ? "Asks again" : "Won't ask"); }));
   on("rgSave", "click", async () => {
@@ -2227,7 +2666,7 @@ async function bladeStudio(main, stale) {
   });
   on("wkSave", "click", async () => {
     try {
-      await api("PUT", "/settings/worker", { memory_mb: parseInt($id("wkMem").value, 10) || 8192, cores: parseInt($id("wkCores").value, 10) || 4 });
+      await api("PUT", "/settings/worker", { memory_mb: parseInt($id("wkMem").value, 10) || 4096, cores: parseInt($id("wkCores").value, 10) || 4 });
       toast("Saved"); render();
     } catch (e) { toast(e.message, true); }
   });
