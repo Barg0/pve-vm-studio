@@ -46,6 +46,11 @@ pub struct WinPe {
     /// a pass reaches a virtio-scsi disk without the virtio ISO; "" for a WinPE built before.
     #[serde(default)]
     pub vioscsi: String,
+    /// The virtio-win release whose NetKVM driver is inside (X:\pvs\drivers\netkvm): the
+    /// media worker's network. WinPE's own e1000 driver is gone from newer builds (vNext);
+    /// "" for a WinPE built before - its worker keeps an e1000 NIC.
+    #[serde(default)]
+    pub netkvm: String,
 }
 
 const STARTNET: &str = r#"@echo off
@@ -306,7 +311,7 @@ async fn finish(
 ) -> Result<WinPe> {
     let at = |f: f64| span.0 + (span.1 - span.0) * f;
     pr.stage(at(0.0), at(0.4), "startnet.cmd into the Setup environment");
-    let embedded = make_ours(log, dir, &st.pe, virtio).await?;
+    let (embedded, netkvm) = make_ours(log, dir, &st.pe, virtio).await?;
     tokio::fs::create_dir_all(st.root.join("sources")).await?;
     tokio::fs::rename(&st.pe, st.root.join("sources/boot.wim")).await?;
     log.ok("startnet.cmd and winpeshl.ini are in; WinPE runs our passes instead of Setup").await;
@@ -331,14 +336,16 @@ async fn finish(
         built: chrono::Utc::now().to_rfc3339(),
         build: st.build,
         vioscsi: embedded,
+        netkvm,
     };
     settings::save(db, "winpe", &pe).await?;
     Ok(pe)
 }
 
 /// Our part of a Setup environment image: startnet.cmd and winpeshl.ini (WinPE runs our
-/// passes, not Setup) and vioscsi from virtio-win. Returns the virtio-win release in it.
-async fn make_ours(log: &JobLog, dir: &Path, wim: &Path, virtio: Option<(&str, &Path)>) -> Result<String> {
+/// passes, not Setup) and vioscsi and NetKVM from virtio-win. Returns the virtio-win release
+/// of each driver in it ("" for one that is not).
+async fn make_ours(log: &JobLog, dir: &Path, wim: &Path, virtio: Option<(&str, &Path)>) -> Result<(String, String)> {
     let files = dir.join("files");
     tokio::fs::create_dir_all(&files).await?;
     tokio::fs::write(files.join("startnet.cmd"), crlf(STARTNET)).await?;
@@ -350,11 +357,13 @@ async fn make_ours(log: &JobLog, dir: &Path, wim: &Path, virtio: Option<(&str, &
     );
     // vioscsi for this WinPE's build into the image: the deploy pass reaches the VM's
     // virtio-scsi disk with no virtio ISO attached (drvload X:\pvs\drivers\vioscsi\...).
-    let mut embedded = String::new();
+    // NetKVM too: the media worker's network (drvload X:\pvs\drivers\netkvm\...) - newer
+    // WinPE builds carry no e1000 driver.
+    let (mut embedded, mut netkvm) = (String::new(), String::new());
     if let Some((release, viso)) = virtio {
         let drivers = dir.join("drivers");
         let out = format!("-o{}", drivers.display());
-        run(log, "7z", &["x", "-y", "-bd", &out, &viso.display().to_string(), "vioscsi/2k25/amd64", "vioscsi/w11/amd64"]).await?;
+        run(log, "7z", &["x", "-y", "-bd", &out, &viso.display().to_string(), "vioscsi/2k25/amd64", "vioscsi/w11/amd64", "NetKVM/2k25/amd64", "NetKVM/w11/amd64", "-x!*.pdb"]).await?;
         if drivers.join("vioscsi").exists() {
             cmds += &format!("add {} /pvs/drivers/vioscsi\n", drivers.join("vioscsi").display());
             embedded = release.to_owned();
@@ -362,9 +371,16 @@ async fn make_ours(log: &JobLog, dir: &Path, wim: &Path, virtio: Option<(&str, &
         } else {
             log.warn(format!("virtio-win {release} has no vioscsi for 2k25/w11 - the passes keep attaching the virtio ISO")).await;
         }
+        if drivers.join("NetKVM").exists() {
+            cmds += &format!("add {} /pvs/drivers/netkvm\n", drivers.join("NetKVM").display());
+            netkvm = release.to_owned();
+            log.ok(format!("NetKVM from virtio-win {release} goes into WinPE")).await;
+        } else {
+            log.warn(format!("virtio-win {release} has no NetKVM for 2k25/w11 - the media worker needs WinPE's own e1000 driver")).await;
+        }
     }
     wim_update(wim, &cmds).await?;
-    Ok(embedded)
+    Ok((embedded, netkvm))
 }
 
 /// The ISO around a WinPE root (boot files, sources/boot.wim), booting without a key press.

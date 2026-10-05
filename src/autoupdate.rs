@@ -108,7 +108,7 @@ pub fn winpe_state(pe: &crate::winpe::WinPe, newest: Option<(&str, &str)>, virti
     if newest.is_some_and(|(b, uuid)| if pe.source_iso.starts_with("uup:") { !from_set(uuid) } else { version(b) > version(&pe.build) }) {
         return "outdated";
     }
-    if virtio.is_some_and(|v| v != pe.vioscsi) {
+    if virtio.is_some_and(|v| v != pe.vioscsi || v != pe.netkvm) {
         return "virtio";
     }
     if newest.is_none() { "unknown" } else { "current" }
@@ -827,7 +827,7 @@ mod tests {
 
     #[test]
     fn winpe_states() {
-        let pe = |volid: &str, build: &str, vio: &str, src: &str| crate::winpe::WinPe { volid: volid.into(), build: build.into(), vioscsi: vio.into(), source_iso: src.into(), ..Default::default() };
+        let pe = |volid: &str, build: &str, vio: &str, src: &str| crate::winpe::WinPe { volid: volid.into(), build: build.into(), vioscsi: vio.into(), netkvm: vio.into(), source_iso: src.into(), ..Default::default() };
         let newest = ("29667.1000", "73639666");
         let set = "uup:73639666 MetadataESD_ServerStandardCore_en-us.esd en-us";
         assert_eq!(winpe_state(&pe("", "", "", ""), Some(newest), None), "missing");

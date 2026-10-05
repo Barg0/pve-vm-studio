@@ -593,7 +593,9 @@ fn worker_cmd(url: &str, pin: &str, indexes: usize, chain: &[String], image: &[S
 fn worker_head(what: &str, url: &str, pin: &str) -> String {
     let mut s = String::new();
     s += &format!("@echo off\r\nrem PVE VM Studio {what}.\r\n");
-    s += "setlocal enabledelayedexpansion\r\nset ERR=0\r\necho PVS-WORKER-START > COM1\r\nwpeutil InitializeNetwork > nul 2>&1\r\n";
+    s += "setlocal enabledelayedexpansion\r\nset ERR=0\r\necho PVS-WORKER-START > COM1\r\n";
+    // NetKVM first, when WinPE carries it (the worker's NIC is virtio then).
+    s += "for %%v in (2k25 w11) do if exist X:\\pvs\\drivers\\netkvm\\%%v\\amd64\\netkvm.inf (drvload X:\\pvs\\drivers\\netkvm\\%%v\\amd64\\netkvm.inf > nul 2>&1 & goto :nic)\r\n:nic\r\nwpeutil InitializeNetwork > nul 2>&1\r\n";
     s += "copy /y %1\\pvs\\curl.exe X:\\curl.exe > nul || (echo PVS-NO-CURL > COM1 & goto :fail)\r\n";
     // -k because the certificate names the studio's DNS name, not its address - the pin is
     // what is checked: a server without the studio's key gets no byte.
@@ -734,7 +736,8 @@ pub(crate) async fn run_worker(
         pve.ensure_pool(GOLD_POOL, "PVE VM Studio: golds (templates) and the bakes that make them").await?;
         let guard = pve.vmid_guard().await;
         let vmid = pve.free_vmid_in(GOLD_IDS).await?;
-        let mut net0 = format!("e1000,bridge={}", p.bridge);
+        // virtio with the NetKVM driver WinPE carries; e1000 for a WinPE without it.
+        let mut net0 = format!("{},bridge={}", if w.pe.netkvm.is_empty() { "e1000" } else { "virtio" }, p.bridge);
         if let Some(v) = p.vlan {
             net0 += &format!(",tag={v}");
         }
