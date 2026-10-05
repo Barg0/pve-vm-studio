@@ -394,11 +394,36 @@ pub fn studio_ip() -> Result<String> {
 /// Each step logs to a file of its own (DISM's dism.log rotates and loses the early steps),
 /// sent back to the studio whatever the verdict: an error line DISM logs in a step that
 /// succeeded is reported with that step, not counted from a log that lost half the run.
+/// Errors and warnings only (/LogLevel:2): at the default level a cumulative update's log
+/// is 500-800 MB of info lines per image. dism.log keeps the full detail of the last steps.
 fn dism_step(s: &mut String, what: &str, log: &str, dism: &str) {
-    s.push_str(&format!("echo PVS-UPD {what} > COM1\r\n{dism} /LogPath:W:\\logs\\{log}.log > COM1 2>&1\r\nset RC=!errorlevel!\r\nif \"!RC!\"==\"3010\" set RC=0\r\n"));
+    s.push_str(&format!("echo PVS-UPD {what} > COM1\r\n{dism} /LogPath:W:\\logs\\{log}.log /LogLevel:2 > COM1 2>&1\r\nset RC=!errorlevel!\r\nif \"!RC!\"==\"3010\" set RC=0\r\n"));
     s.push_str(&format!(
         "if \"!RC!\"==\"0\" (echo PVS-UPD-OK {what} > COM1) else (echo PVS-UPD-FAIL {what} !RC! > COM1 & set ERR=1)\r\n%C% -T W:\\logs\\{log}.log %U%/logs/{log}.log > nul 2>&1\r\n"
     ));
+}
+
+/// Keeps the DISM logs of the newest `keep` builds (one build: media-<run>.log and its
+/// media-<run>-<step>.log files), so the studio's disk does not fill up build by build.
+async fn prune_dism_logs(dir: &Path, keep: usize) {
+    let Ok(mut rd) = tokio::fs::read_dir(dir).await else { return };
+    let mut runs: std::collections::HashMap<String, (std::time::SystemTime, Vec<PathBuf>)> = Default::default();
+    while let Ok(Some(e)) = rd.next_entry().await {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(rest) = name.strip_prefix("media-") else { continue };
+        let run = rest.split(['-', '.']).next().unwrap_or("").to_owned();
+        let at = e.metadata().await.and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
+        let ent = runs.entry(run).or_insert((at, Vec::new()));
+        ent.0 = ent.0.max(at);
+        ent.1.push(e.path());
+    }
+    let mut by_age: Vec<_> = runs.into_values().collect();
+    by_age.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, files) in by_age.into_iter().skip(keep) {
+        for f in files {
+            let _ = tokio::fs::remove_file(f).await;
+        }
+    }
 }
 
 /// A step's log file name: the update's file name without its extension, per image.
@@ -822,6 +847,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             // reading, but the error lines come from each step's own log, named by its step.
             let keep_dir = work.parent().unwrap_or(work).join("dism-logs");
             tokio::fs::create_dir_all(&keep_dir).await?;
+            prune_dism_logs(&keep_dir, 5).await;
             let dism_log = share.join("dism.log");
             if dism_log.exists() {
                 tokio::fs::copy(&dism_log, keep_dir.join(format!("media-{}.log", &run_id[4..12]))).await?;
