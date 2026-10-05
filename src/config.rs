@@ -34,6 +34,10 @@ pub struct Config {
     #[serde(default = "default_iso_root")]
     pub iso_root: PathBuf,
     pub pve: PveConfig,
+    /// Troubleshooting tools in Studio settings (a "Debug tools" card): only set here, by
+    /// whoever runs the box - never switchable in the studio, off in every install.
+    #[serde(default)]
+    pub debug_tools: bool,
 }
 
 fn default_iso_root() -> PathBuf {

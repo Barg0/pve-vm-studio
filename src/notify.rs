@@ -27,6 +27,7 @@ pub static EVENTS: &[(&str, &str, &str, bool)] = &[
     ("deploy_failed", "VMs", "Deploy failed", true),
     ("media_built", "Media", "Windows media ISO built", true),
     ("winpe_built", "Media", "WinPE built", true),
+    ("virtio_updated", "Media", "virtio-win downloaded", true),
     ("fod_built", "Media", "Features on Demand ISO built", true),
     ("iso_newer", "Media", "Newer build for a built ISO", true),
     ("media_failed", "Media", "Media, WinPE, FoD or virtio-win failed", true),
@@ -274,6 +275,16 @@ pub async fn job_ended(app: AppState, id: String) {
             r.facts.extend(job_facts(&row));
             r.link = Some("#/media".into());
             send(&app, "fod_built", r).await;
+        }
+        "virtio" if ok => {
+            let release = params["release"].as_str().unwrap_or_default().to_owned();
+            let mut r = Report::new(format!("virtio-win {release} downloaded"), "integration", format!("virtio-win {release} is in PVE"), "DOWNLOADED", Tone::Success);
+            r.subtitle = row.title.clone();
+            r.facts = vec![fact("Release", release), fact("Channel", params["virtio"].as_str().unwrap_or_default().to_owned())];
+            r.facts.extend(job_facts(&row));
+            r.notice = Some((Tone::Accent, "New Windows golds and WinPE take it; golds baked before keep the release they were baked with.".into()));
+            r.link = Some("#/media".into());
+            send(&app, "virtio_updated", r).await;
         }
         "media" | "winpe" | "fod" | "virtio" if !ok => {
             let what = match row.kind.as_str() {

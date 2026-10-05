@@ -71,6 +71,7 @@ const TEXT: &[(&str, &str)] = &[
     ("UPD-OK", "Applied"),
     ("UPD-FAIL", "Failed"),
     ("CLEANUP", "Cleaning up image"),
+    ("HEALTH", "Scanning the component store"),
     ("COMMIT", "Saving image"),
     ("WINRE", "Servicing WinRE"),
     ("EXPORT", "Exporting the images"),
@@ -116,7 +117,11 @@ pub fn text(line: &str) -> String {
     // PVS-UPD[-OK|-FAIL] <image|winre> cleanup [code]: the component cleanup, not an update.
     let parts: Vec<&str> = args.split_whitespace().collect();
     if key.starts_with("UPD") && parts.get(1) == Some(&"cleanup") {
-        let at = if parts[0] == "winre" { "WinRE".to_owned() } else { format!("image {}", parts[0]) };
+        let at = match parts[0] {
+            "winre" => "WinRE".to_owned(),
+            "pe" => "WinPE".to_owned(),
+            n => format!("image {n}"),
+        };
         return match key {
             "UPD-OK" => format!("Cleaned up: {at}"),
             "UPD-FAIL" => format!("Cleanup failed: {at}, exit code {}", parts.get(2).unwrap_or(&"?")),

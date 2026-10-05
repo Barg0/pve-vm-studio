@@ -125,6 +125,14 @@ async fn main() -> Result<()> {
         .await?;
     sqlx::migrate!().run(&db).await?;
     tokio::fs::create_dir_all(config.data_dir.join("work")).await?;
+    // Debug tools off: none of them stays on from a time they were.
+    if !config.debug_tools {
+        let mut w: media::WorkerSettings = settings::load(&db, "worker").await.unwrap_or_default();
+        if w.keep_downloads {
+            w.keep_downloads = false;
+            settings::save(&db, "worker", &w).await?;
+        }
+    }
     // A gold whose bake was cut off by a restart never finished.
     sqlx::query("UPDATE golds SET status = 'failed' WHERE status = 'baking'").execute(&db).await?;
 
@@ -299,6 +307,12 @@ async fn clean_work(app: AppState) {
                 let Ok(meta) = e.metadata().await else { continue };
                 // The Windows media download cache waits six hours for a retry of a failed build.
                 let limit = if e.file_name() == "uup-files" { 6 * 3600 } else { 600 };
+                // Kept downloads (Media worker card) stay until the switch goes off.
+                if e.file_name() == "uup-files"
+                    && settings::load::<media::WorkerSettings>(&app.db, "worker").await.unwrap_or_default().keep_downloads
+                {
+                    continue;
+                }
                 let old = meta.modified().ok().and_then(|m| m.elapsed().ok()).is_some_and(|age| age.as_secs() > limit);
                 // lost+found belongs to the volume's file system, not to a job.
                 if !old || e.file_name() == "lost+found" || !app.jobs.idle().await {

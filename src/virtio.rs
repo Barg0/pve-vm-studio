@@ -21,11 +21,13 @@ pub struct WindowsSettings {
     pub virtio: String,
     /// Where the virtio ISO (and later the Windows ISOs) go; empty = the bake ISO storage.
     pub iso_storage: String,
+    /// The UUP product WinPE is built from: "ws-insider" (Windows Server vNext) or "ws2025".
+    pub winpe_from: String,
 }
 
 impl Default for WindowsSettings {
     fn default() -> Self {
-        Self { virtio: "stable".into(), iso_storage: String::new() }
+        Self { virtio: "stable".into(), iso_storage: String::new(), winpe_from: "ws-insider".into() }
     }
 }
 

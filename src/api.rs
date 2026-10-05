@@ -73,7 +73,7 @@ pub fn router() -> Router<AppState> {
         .route("/fod/build", post(build_fod))
         .route("/settings/worker", get(get_worker).put(put_worker))
         .route("/virtio/fetch", post(fetch_virtio))
-        .route("/windows/isos", get(windows_isos))
+        .route("/windows/isos", get(windows_isos).delete(delete_windows_iso))
         .route("/windows/images", get(windows_images))
         .route("/golds/windows", post(start_windows_bake))
         .route("/winpe", get(get_winpe))
@@ -943,12 +943,16 @@ async fn get_server(State(app): State<AppState>, _user: User) -> ApiResult<impl 
 
 async fn get_worker(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
     let s: media::WorkerSettings = settings::load(&app.db, "worker").await?;
-    Ok(Json(s))
+    let mut v = serde_json::to_value(&s).unwrap_or_default();
+    v["debug_tools"] = json!(app.config.debug_tools);
+    Ok(Json(v))
 }
 
 /// The media worker VM's memory and cores.
-async fn put_worker(State(app): State<AppState>, user: User, Json(s): Json<media::WorkerSettings>) -> ApiResult<impl IntoResponse> {
+async fn put_worker(State(app): State<AppState>, user: User, Json(mut s): Json<media::WorkerSettings>) -> ApiResult<impl IntoResponse> {
     require_admin(&app, &user).await?;
+    // A debug tool: only with debug_tools in config.toml.
+    s.keep_downloads &= app.config.debug_tools;
     if !(2048..=262_144).contains(&s.memory_mb) || !(1..=64).contains(&s.cores) {
         return Err(ApiError::bad_request("memory is 2048-262144 MiB, cores 1-64"));
     }
@@ -1121,12 +1125,20 @@ async fn get_windows(State(app): State<AppState>, _user: User) -> ApiResult<impl
         pe = winpe::WinPe::default();
         settings::save(&app.db, "winpe", &pe).await?;
     }
-    Ok(Json(json!({ "settings": s, "releases": releases, "stable": stable, "latest": latest, "present": present, "winpe": pe })))
+    // Where WinPE stands against the newest build of the product it is built from.
+    let newest = autoupdate::winpe_newest(&app).await;
+    let vio_now = autoupdate::virtio_now(&app).await;
+    let state = autoupdate::winpe_state(&pe, newest.as_ref().map(|n| (n.0.as_str(), n.1.as_str())), vio_now.as_deref());
+    let winpe_newest = newest.map(|(build, uuid, release)| json!({ "build": build, "uuid": uuid, "release": release }));
+    Ok(Json(json!({ "settings": s, "releases": releases, "stable": stable, "latest": latest, "present": present, "winpe": pe, "winpe_state": state, "winpe_newest": winpe_newest, "virtio_now": vio_now })))
 }
 
 async fn put_windows(State(app): State<AppState>, user: User, Json(s): Json<virtio::WindowsSettings>) -> ApiResult<impl IntoResponse> {
     user.require(&app, "/vms", "VM.Allocate").await?;
     virtio::resolve(&s.virtio).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    if !winpe::UUP_PRODUCTS.contains(&s.winpe_from.as_str()) {
+        return Err(ApiError::bad_request(format!("'{}' is not a product the studio builds WinPE from", s.winpe_from)));
+    }
     settings::save(&app.db, "windows", &s).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1204,12 +1216,20 @@ async fn put_fod(State(app): State<AppState>, user: User, Json(s): Json<fod::Fod
 
 async fn fetch_virtio(State(app): State<AppState>, user: User) -> ApiResult<impl IntoResponse> {
     user.require(&app, "/vms", "VM.Allocate").await?;
+    let job = spawn_virtio(&app, &user.session.user).await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
+}
+
+/// Downloads the virtio-win release the setting stands for into PVE: the Media page's, and
+/// the automatic virtio-win update's.
+pub async fn spawn_virtio(app: &AppState, by: &str) -> ApiResult<String> {
     let s: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
+    let release_now = virtio::resolve(&s.virtio).await.unwrap_or_default();
     let bake: BakeSettings = settings::load(&app.db, "bake").await?;
     let pve = app.pve.clone();
     let job = app
         .jobs
-        .spawn("virtio", "virtio-win drivers", &user.session.user, json!({ "virtio": s.virtio }), move |log| async move {
+        .spawn("virtio", "virtio-win drivers", by, json!({ "virtio": s.virtio, "release": release_now }), move |log| async move {
             let p = bake.resolve(&pve).await?;
             let release = virtio::resolve(&s.virtio).await?;
             log.line(format!("virtio-win {} resolves to {release}", s.virtio)).await;
@@ -1217,7 +1237,7 @@ async fn fetch_virtio(State(app): State<AppState>, user: User) -> ApiResult<impl
             virtio::fetch(&pve, &log, &p.node, &storage, &release).await.map(|_| ())
         })
         .await?;
-    Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
+    Ok(job)
 }
 
 // ---- Windows golds ----
@@ -1251,6 +1271,8 @@ async fn windows_isos(State(app): State<AppState>, _user: User) -> ApiResult<imp
     let bake: BakeSettings = settings::load(&app.db, "bake").await?;
     let p = bake.resolve(&app.pve).await?;
     let res = app.pve.resources().await?;
+    let pe: winpe::WinPe = settings::load(&app.db, "winpe").await?;
+    let fod: fod::FodSettings = settings::load(&app.db, "fod").await?;
     let mut out = Vec::new();
     for s in res.iter().filter(|r| r.kind == "storage" && r.node.as_deref() == Some(&p.node) && r.has_content("iso")) {
         let storage = s.storage.clone().unwrap_or_default();
@@ -1261,7 +1283,16 @@ async fn windows_isos(State(app): State<AppState>, _user: User) -> ApiResult<imp
                 continue;
             }
             let readable = iso_path(&app, &v.volid).is_some_and(|p| p.exists());
-            out.push(json!({ "volid": v.volid, "file": file, "size": v.size, "storage": storage, "readable": readable }));
+            // What it is: a WinPE or Features on Demand ISO the studio built (or uses as one)
+            // is no Windows install media - nothing to bake a gold from.
+            let kind = if file.starts_with("winpe-") || v.volid == pe.volid {
+                "winpe"
+            } else if file.starts_with("fod-") || [&fod.server, &fod.server2022, &fod.client].contains(&&v.volid) {
+                "fod"
+            } else {
+                "windows"
+            };
+            out.push(json!({ "volid": v.volid, "file": file, "size": v.size, "storage": storage, "readable": readable, "kind": kind }));
         }
     }
     Ok(Json(json!({ "node": p.node, "isos": out, "iso_root": app.config.iso_root })))
@@ -1270,6 +1301,39 @@ async fn windows_isos(State(app): State<AppState>, _user: User) -> ApiResult<imp
 #[derive(Deserialize)]
 struct IsoQuery {
     volid: String,
+}
+
+/// Deletes an ISO from PVE - not the WinPE every bake boots, not one a running job reads.
+/// A Features on Demand slot that pointed at it is emptied; golds baked from it stay.
+async fn delete_windows_iso(State(app): State<AppState>, user: User, axum::extract::Query(q): axum::extract::Query<IsoQuery>) -> ApiResult<impl IntoResponse> {
+    let Some((storage, file)) = q.volid.split_once(':').filter(|(_, f)| f.starts_with("iso/") && f.ends_with(".iso")) else {
+        return Err(ApiError::bad_request("not an ISO volume"));
+    };
+    user.require(&app, &format!("/storage/{storage}"), "Datastore.Allocate").await?;
+    let pe: winpe::WinPe = settings::load(&app.db, "winpe").await?;
+    if pe.volid == q.volid {
+        return Err(ApiError::bad_request(format!("{} is the WinPE every Windows bake boots - build another WinPE first", file.trim_start_matches("iso/"))));
+    }
+    let running: Vec<(String, String)> = sqlx::query_as("SELECT title, params FROM jobs WHERE status = 'running'").fetch_all(&app.db).await?;
+    if let Some((title, _)) = running.iter().find(|(_, p)| p.contains(&q.volid)) {
+        return Err(ApiError::new(StatusCode::CONFLICT, format!("{title} is running and reads it - wait for it, or abort it")));
+    }
+    let bake: BakeSettings = settings::load(&app.db, "bake").await?;
+    let p = bake.resolve(&app.pve).await?;
+    app.pve.delete_volume(&p.node, &q.volid).await?;
+    let mut fod: fod::FodSettings = settings::load(&app.db, "fod").await?;
+    let mut emptied = false;
+    for slot in [&mut fod.server, &mut fod.server2022, &mut fod.client] {
+        if *slot == q.volid {
+            slot.clear();
+            emptied = true;
+        }
+    }
+    if emptied {
+        settings::save(&app.db, "fod", &fod).await?;
+    }
+    tracing::info!("{} deleted ISO {}", user.session.user, q.volid);
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn windows_images(State(app): State<AppState>, _user: User, axum::extract::Query(q): axum::extract::Query<IsoQuery>) -> ApiResult<impl IntoResponse> {
@@ -1474,12 +1538,25 @@ struct UupProduct {
 
 /// The full builds of a product in the UUP dump catalog, newest first.
 async fn uup_builds(State(app): State<AppState>, _user: User, axum::extract::Query(q): axum::extract::Query<UupProduct>) -> ApiResult<impl IntoResponse> {
-    let product = if q.product.is_empty() { "Windows Server 2025" } else { q.product.as_str() };
-    if !matches!(product, "Windows Server 2025" | "Windows 11, version 26H2") {
-        return Err(ApiError::bad_request(format!("'{product}' is not a product the studio builds from")));
-    }
-    let builds = uup::builds(&app.web, product).await?;
-    Ok(Json(json!({ "product": product, "builds": builds.into_iter().take(12).collect::<Vec<_>>() })))
+    // WinPE comes from Windows Server vNext or Windows Server 2025 (WindowsSettings.winpe_from).
+    let p = winpe::UUP_PRODUCTS
+        .iter()
+        .filter_map(|id| uup::product(id))
+        .find(|p| q.product.is_empty() || q.product == p.id || q.product == p.name)
+        .ok_or_else(|| ApiError::bad_request(format!("'{}' is not a product the studio builds WinPE from", q.product)))?;
+    let product = p.name;
+    let builds: Vec<_> = uup::product_builds(&app.web, p, false)
+        .await?
+        .into_iter()
+        .take(12)
+        .map(|b| {
+            let release = uup::release_kind(p, b.created);
+            let mut v = serde_json::to_value(&b).unwrap_or_default();
+            v["release"] = json!(release);
+            v
+        })
+        .collect();
+    Ok(Json(json!({ "product": product, "builds": builds })))
 }
 
 #[derive(Deserialize)]
@@ -1503,18 +1580,26 @@ struct UupWinPe {
 /// WinPE from Microsoft's own files - no Windows ISO needed.
 async fn build_winpe_uup(State(app): State<AppState>, user: User, Json(q): Json<UupWinPe>) -> ApiResult<impl IntoResponse> {
     user.require(&app, "/vms", "VM.Allocate").await?;
+    let job = spawn_winpe_uup(&app, &user.session.user, &q.uuid, &q.lang, &q.build).await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
+}
+
+/// Starts a WinPE build from a UUP set: the Media page's, and the automatic WinPE update's.
+pub async fn spawn_winpe_uup(app: &AppState, by: &str, uuid: &str, lang: &str, build: &str) -> ApiResult<String> {
     let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
-    if !ok(&q.uuid) || !ok(&q.lang) {
+    if !ok(uuid) || !ok(lang) {
         return Err(ApiError::bad_request("not a UUP build id and language"));
     }
+    already_running(app, "winpe", "uup", uuid).await?;
     let bake: BakeSettings = settings::load(&app.db, "bake").await?;
     let win: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
     let (pve, db, web, work) = (app.pve.clone(), app.db.clone(), app.web.clone(), app.config.data_dir.join("work"));
     let iso_root = app.config.iso_root.clone();
-    let title = if q.build.is_empty() { "Build WinPE from Microsoft".to_owned() } else { format!("Build WinPE {} from Microsoft", q.build) };
+    let (uuid, lang, build) = (uuid.to_owned(), lang.to_owned(), build.to_owned());
+    let title = if build.is_empty() { "Build WinPE from Microsoft".to_owned() } else { format!("Build WinPE {} from Microsoft", build) };
     let job = app
         .jobs
-        .spawn("winpe", &title, &user.session.user, json!({ "uup": q.uuid, "lang": q.lang, "build": q.build }), move |log| async move {
+        .spawn("winpe", &title, by, json!({ "uup": uuid, "lang": lang, "build": build }), move |log| async move {
             let p = bake.resolve(&pve).await?;
             let storage = if win.iso_storage.is_empty() { p.iso_storage.clone() } else { win.iso_storage.clone() };
             let release = virtio::resolve(&win.virtio).await?;
@@ -1525,10 +1610,10 @@ async fn build_winpe_uup(State(app): State<AppState>, user: User, Json(q): Json<
             if vio.is_none() {
                 anyhow::bail!("{vio_volid} is not readable through the studio's ISO mount, and WinPE is never built without vioscsi{}", iso_unreadable_why(&iso_root, &vio_volid));
             }
-            winpe::build_uup(&pve, &db, &log, &web, &work, &q.uuid, &q.lang, &p.node, &storage, vio).await.map(|_| ())
+            winpe::build_uup(&pve, &db, &log, &web, &work, &uuid, &lang, &p.node, &storage, vio).await.map(|_| ())
         })
         .await?;
-    Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
+    Ok(job)
 }
 
 // ---- resource pools ----
@@ -1659,6 +1744,18 @@ async fn media_build(State(app): State<AppState>, user: User, Json(q): Json<Medi
     Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
 }
 
+/// How a worker VM reaches the studio: this very server, its key pinned.
+async fn worker_link(app: &AppState) -> ApiResult<media::Link> {
+    let port = app.config.listen.port();
+    Ok(if app.config.plain_http {
+        media::Link { base: format!("http://{{ip}}:{port}"), pin: String::new() }
+    } else {
+        let cert = tokio::fs::read(tls::Paths::new(&app.config.data_dir).cert).await.map_err(|e| ApiError::from(anyhow::anyhow!("reading the studio's certificate: {e}")))?;
+        let pin = media::cert_pin(&cert).ok_or_else(|| ApiError::from(anyhow::anyhow!("could not read the studio's certificate key")))?;
+        media::Link { base: format!("https://{{ip}}:{port}"), pin }
+    })
+}
+
 /// Starts a Windows media build: the blade's, and the auto-update's (`extra` goes into
 /// the job's params).
 pub async fn spawn_media_build(app: &AppState, by: &str, q: MediaBuild, extra: serde_json::Value) -> ApiResult<String> {
@@ -1670,15 +1767,7 @@ pub async fn spawn_media_build(app: &AppState, by: &str, q: MediaBuild, extra: s
     already_running(app, "media", "uuid", &q.uuid).await?;
     let bake: BakeSettings = settings::load(&app.db, "bake").await?;
     let (pve, db, web, work) = (app.pve.clone(), app.db.clone(), app.web.clone(), app.config.data_dir.join("work"));
-    // How the worker reaches the studio: this very server, its key pinned.
-    let port = app.config.listen.port();
-    let link = if app.config.plain_http {
-        media::Link { base: format!("http://{{ip}}:{port}"), pin: String::new() }
-    } else {
-        let cert = tokio::fs::read(tls::Paths::new(&app.config.data_dir).cert).await.map_err(|e| ApiError::from(anyhow::anyhow!("reading the studio's certificate: {e}")))?;
-        let pin = media::cert_pin(&cert).ok_or_else(|| ApiError::from(anyhow::anyhow!("could not read the studio's certificate key")))?;
-        media::Link { base: format!("https://{{ip}}:{port}"), pin }
-    };
+    let link = worker_link(app).await?;
     let title = format!("Build {} {} media ({})", p.name, q.build, uup::lang_tag(&q.lang));
     let mut params = json!({ "media": p.id, "build": q.build, "uuid": q.uuid, "lang": q.lang, "editions": q.editions });
     if let (Some(o), Some(e)) = (params.as_object_mut(), extra.as_object()) {

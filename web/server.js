@@ -497,6 +497,16 @@ const vioNewer = (a, b) => { const x = vioNum(a), y = vioNum(b); for (let i = 0;
 
 /* Windows: what every Windows bake needs, one row each - green or red, the name, its build -
    and a newer virtio-win when there is one. */
+/* WinPE against the newest Windows Server vNext build it is built from: what every bake, deploy
+   and media build boots, so an old one is worth a look. */
+function peHint(w) {
+  const n = w.winpe_newest, st = w.winpe_state;
+  const auto = "With Keep WinPE current on (Media → Windows updates), the studio rebuilds it in the next maintenance window.";
+  const from = (PE_PRODUCTS.find(p => p[0] === (w.settings || {}).winpe_from) || PE_PRODUCTS[0])[1];
+  if (st === "outdated" && n) return `<span class="pill status warn" title="${esc(from)} ${esc(n.build)} is out - WinPE is distilled from its WinRE. ${esc(auto)}">${esc(n.build)} available</span>`;
+  if (st === "virtio" && w.virtio_now) return `<span class="pill status warn" title="Its vioscsi driver is from virtio-win ${esc((w.winpe || {}).vioscsi || "none")}, the release in use is ${esc(w.virtio_now)}. ${esc(auto)}">virtio-win ${esc(w.virtio_now)} not in it</span>`;
+  return "";
+}
 function dashWindows() {
   const w = dashWin || {}, pe = w.winpe || {}, set = (w.settings || {}).virtio || "stable";
   const vio = set === "stable" ? w.stable : set === "latest" ? w.latest : set;
@@ -520,7 +530,7 @@ function dashWindows() {
       <span class="dash-wrow-val mono${v ? "" : " muted"}" title="${v ? esc(v) + (m && m.missing ? " - not in PVE any more; VMs take their capabilities from Windows Update until it is built again" : "") : "Capabilities come from Windows Update"}">${!v ? "Windows Update" : m && m.missing ? "missing" : esc(file)}</span></div>`;
   };
   return gsCard("dash-windows", "os-window.svg", "Windows", ready ? "ready to provision Windows VMs" : "not ready yet",
-    `<section class="dash-sec"><h5>Required</h5><div class="dash-wrows">${row(peOk, "WinPE", !pe.volid ? "missing" : pe.vioscsi ? esc(pe.build) : "no vioscsi - rebuild")}
+    `<section class="dash-sec"><h5>Required</h5><div class="dash-wrows">${row(peOk, "WinPE", !pe.volid ? "missing" : pe.vioscsi ? esc(pe.build) : "no vioscsi - rebuild", peHint(w))}
       ${row(!vio ? false : vioHere ? true : "idle", "virtio-win", vio ? esc(vio) : "unknown",
         update ? `<span class="pill status warn" title="${set === "stable" || set === "latest" ? "Newer than the release in use" : "The pinned release is older - change it under Media"}">${esc(update)} available</span>`
           : vio && !vioHere ? `<span class="hint" title="Not in PVE now - the first Windows bake downloads it">fetched by the first bake</span>` : "")}</div></section>
@@ -1015,6 +1025,7 @@ function wireProvisioning(root, form, storages, rerender) {
    release. The WinPE deploy pass installs RSAT and the Server Core App Compatibility pack
    from it straight into a new VM's disk - no Windows Update, no internet. Each slot can be
    built from Microsoft's own update packages (every FoD but the language ones). */
+const ISO_KIND_TAG = { winpe: "WinPE", fod: "Features on Demand" };
 const FOD_SLOTS = [
   ["server", "ws2025-datacenter-desktop", "Windows Server 2025", "Build 26100."],
   ["server2022", "ws2022-datacenter-desktop", "Windows Server 2022", "Build 20348."],
@@ -1022,7 +1033,7 @@ const FOD_SLOTS = [
 ];
 function fodCard(fod, isos, lang) {
   const s = fod.settings || {}, media = fod.media || {};
-  const list = (isos.isos || []).filter(i => i.readable);
+  const list = (isos.isos || []).filter(i => i.readable && i.kind !== "winpe");
   const state = key => {
     const m = media[key];
     if (!s[key]) return `<span class="pill status idle">Windows Update</span>`;
@@ -1286,6 +1297,8 @@ async function fillWinBake(catalog, stale) {
   try { [isos, win, bakeSet] = await Promise.all([api("GET", "/windows/isos"), api("GET", "/settings/windows"), api("GET", "/settings/bake")]); }
   catch (e) { if (!stale() && $id("winBakeBody")) $id("winBakeBody").innerHTML = warnBanner(esc(e.message)); return; }
   if (stale() || !$id("winBakeBody")) return;
+  // Only Windows install media - not the WinPE or Features on Demand ISOs.
+  isos.isos = isos.isos.filter(i => i.kind === "windows");
   const readable = isos.isos.filter(i => i.readable);
   if (!win.winpe || !win.winpe.volid) {
     $id("winBakeBody").innerHTML = `<div class="warn-banner"><div class="warn-banner-text">Windows bakes boot a WinPE - build it first under <b>Media</b>, straight from Microsoft or from a Windows ISO.</div></div><div class="row"><button class="btn" type="button" data-goto="media"><img src="${iconSrc("iso-media.svg")}" alt=""> Open Media</button></div>`;
@@ -1701,7 +1714,7 @@ function paintJobDelete(runs) {
 
 /* Asking before a delete: an overlay with the consequence, and "Don't ask again" for this
    kind of delete - remembered in this browser, switched back on under Studio settings. */
-const CONFIRM_KINDS = { jobs: "Deleting job history", golds: "Removing golds", clear: "Clearing VMs from view", abort: "Cancelling a running job" };
+const CONFIRM_KINDS = { jobs: "Deleting job history", golds: "Removing golds", clear: "Clearing VMs from view", abort: "Cancelling a running job", isos: "Deleting ISOs" };
 const skipConfirm = kind => { try { return localStorage.getItem("pvs.skipConfirm." + kind) === "1"; } catch { return false; } };
 function setSkipConfirm(kind, skip) { try { skip ? localStorage.setItem("pvs.skipConfirm." + kind, "1") : localStorage.removeItem("pvs.skipConfirm." + kind); } catch { /* this browser keeps nothing */ } }
 /* Resolves false (cancel), true (the main action) or "alt" (the second, smaller choice - e.g.
@@ -2025,9 +2038,10 @@ function actions(...buttons) { return `<div class="row gs-actions">${buttons.joi
 
 /* WinPE from Microsoft: the UUP dump catalog's builds and languages, asked once per page
    visit and kept - the catalog is slow, and its answer changes once a month. */
-const UUP_PRODUCTS = ["Windows Server 2025", "Windows 11, version 26H2"];
-/* WinPE comes from Windows Server 2025, en-US, always: it only boots the bakes. */
-const mediaUi = { peFrom: null, product: UUP_PRODUCTS[0], build: "" };
+/* WinPE comes from the newest Windows Server vNext or Windows Server 2025 build (picked in
+   WindowsSettings.winpe_from), en-US, always: it only boots the bakes. */
+const PE_PRODUCTS = [["ws-insider", "Windows Server vNext"], ["ws2025", "Windows Server 2025"]];
+const mediaUi = { peFrom: null, product: "", build: "" };
 const uupCache = { builds: {}, langs: {} };
 function peSourceLabel(src) {
   const m = /^uup:(\S+) (\S+) (\S+)$/.exec(src || "");
@@ -2039,9 +2053,11 @@ async function fillUupPickers(stale) {
     const list = uupCache.builds[mediaUi.product] || (uupCache.builds[mediaUi.product] = (await api("GET", "/uup/builds?product=" + encodeURIComponent(mediaUi.product))).builds);
     if (stale() || !$id("peBuildSel")) return;
     if (!list.length) { mediaUi.build = ""; sel.textContent = "The catalog lists no build"; return; }
-    const b = list[0];
+    // Server 2025: the newest Patch Tuesday build - not an optional preview. vNext: the newest.
+    const b = list.find(x => (x.release || "").endsWith(" B")) || list[0];
+    const name = (PE_PRODUCTS.find(p => p[0] === mediaUi.product) || [, mediaUi.product])[1];
     mediaUi.build = b.uuid;
-    sel.innerHTML = `<b class="mono">${esc(b.build)}</b> <span class="hint">Windows Server 2025 · en-US · newest · ${esc(new Date(b.created * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }))}</span>`;
+    sel.innerHTML = `<b class="mono">${esc(b.build)}</b> <span class="hint">${esc(name)} · en-US · ${b.release && b.release !== "Insider" ? esc(b.release) + " · " : ""}${esc(new Date(b.created * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }))}</span>`;
   } catch (e) { if (!stale() && $id("peUupHint")) { $id("peUupHint").hidden = false; $id("peUupHint").textContent = "The UUP dump catalog did not answer: " + e.message; } }
 }
 /* -- Media: Windows updates - golds with Keep current follow their ISO's product -- */
@@ -2080,6 +2096,8 @@ function autoUpdateCard(au) {
       ${field(`<span class="field-label"><img src="${iconSrc("gold-image.svg")}" alt="">Golds kept per kind${infoTip("Golds kept", "After an update: the newest golds of each kind (image, language, disk size) that stay. 2 keeps the one before as a way back.")}</span>`,
         `<input id="auKeep" type="number" min="1" max="10" value="${s.keep_golds}">`)}
     </div>
+    <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="auVirtio"', `Keep virtio-win current${infoTip("Keep virtio-win current", "With virtio-win on stable (or latest) under Media: in a maintenance window, a newer release of that channel is downloaded into PVE - and WinPE built again, so its storage driver is the new one. New Windows golds take it; golds baked before keep theirs.")}`, s.keep_virtio_current !== false)}</div>
+    <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="auWinpe"', `Keep WinPE current${infoTip("Keep WinPE current", "WinPE is what every Windows bake, deploy and media build boots. In a maintenance window, when the product WinPE is built from has a newer build than the WinPE - or virtio-win a newer release than its driver - the studio builds WinPE again - before the golds' updates run.")}`, s.keep_winpe_current !== false)}</div>
     <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="auPreviews"', `Include preview releases${infoTip("Preview releases", "Off: only the Patch Tuesday release of each month (B). On: also the optional non-security release later in the month. Insider builds are never followed.")}`, !!s.include_previews)}</div>
     ${following.length ? `<div class="field-group">Keep current</div><div class="table-wrap"><table class="data"><thead><tr><th>Gold</th><th>Image</th><th>Product</th><th>Build</th></tr></thead><tbody>${followRows}</tbody></table></div>` : ""}
     ${runs.length ? `<div class="field-group">Runs</div><div class="table-wrap"><table class="data"><thead><tr><th>Product</th><th>Build</th><th>Release</th><th>Step</th><th>Golds</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
@@ -2090,7 +2108,7 @@ function wireAutoUpdate(main) {
   const again = () => renderServerBlade("media", main);
   const on = (id, fn) => { const el = $id(id); if (el) el.addEventListener("click", fn); };
   on("auSave", async () => {
-    try { await api("PUT", "/auto-update", { keep_golds: parseInt($id("auKeep").value, 10) || 2, include_previews: $id("auPreviews").checked }); toast("Saved"); again(); }
+    try { await api("PUT", "/auto-update", { keep_golds: parseInt($id("auKeep").value, 10) || 2, include_previews: $id("auPreviews").checked, keep_winpe_current: $id("auWinpe").checked, keep_virtio_current: $id("auVirtio").checked }); toast("Saved"); again(); }
     catch (e) { toast(e.message, true); }
   });
   on("auCheck", async e => {
@@ -2146,6 +2164,7 @@ async function bladeMedia(main, stale) {
   const auto = v => v ? `Auto (${v})` : "Auto";
   const readable = isos.isos.filter(i => i.readable);
   const usedBy = volid => readyGolds().filter(g => goldManifest(g).sourceIso === volid).length;
+  mediaUi.product = win.settings.winpe_from || "ws-insider";
 
   main.innerHTML = bladeHead("media") + `
     <div class="chips">
@@ -2156,10 +2175,12 @@ async function bladeMedia(main, stale) {
     </div>
     ${gsCard("md-isos", "iso-media.svg", "Windows ISOs", isos.error ? "could not be read" : `${isos.isos.length} on ${esc(isos.node || "")}`, isos.error ? warnBanner(esc(isos.error)) : isos.isos.length ? `
       <div class="table-wrap"><table class="data"><thead><tr><th>ISO</th><th>Storage</th><th>Size</th><th>Studio can read it</th><th>Golds</th><th></th></tr></thead><tbody>
-      ${isos.isos.map(i => `<tr><td><div class="name-cell"><img src="${iconSrc("iso-media.svg")}" alt=""><b>${esc(i.file)}</b>${pe.source_iso === i.volid ? ' <span class="pill tag">WinPE source</span>' : ""}</div></td>
+      ${isos.isos.map(i => `<tr><td><div class="name-cell"><img src="${iconSrc("iso-media.svg")}" alt=""><b>${esc(i.file)}</b>${pe.source_iso === i.volid ? ' <span class="pill tag">WinPE source</span>' : ""}${ISO_KIND_TAG[i.kind] ? ` <span class="pill tag">${ISO_KIND_TAG[i.kind]}</span>` : ""}</div></td>
         <td class="mono">${esc(i.storage)}</td><td class="mono">${gib(i.size)} GiB</td><td>${pillOn(i.readable ? "yes" : "no", i.readable)}</td>
         <td class="muted">${usedBy(i.volid) || ""}</td>
-        <td class="row-actions">${i.readable ? `<button class="btn sm" type="button" data-iso-bake="${esc(i.volid)}"><img src="${iconSrc("gold-image.svg")}" alt=""> Bake a gold</button>` : ""}</td></tr>`).join("")}
+        <td class="row-actions">${i.readable && i.kind === "windows" ? `<button class="btn sm" type="button" data-iso-bake="${esc(i.volid)}"><img src="${iconSrc("gold-image.svg")}" alt=""> Bake a gold</button>` : ""}${pe.volid === i.volid
+          ? `<button class="btn icon sm" type="button" disabled title="The WinPE every Windows bake boots - build another WinPE first" aria-label="Delete - the WinPE in use">${trashIcon()}</button>`
+          : `<button class="btn icon sm danger-text" type="button" data-iso-delete="${esc(i.volid)}" title="Delete this ISO" aria-label="Delete ${esc(i.file)}">${trashIcon()}</button>`}</td></tr>`).join("")}
       </tbody></table></div>
       <div class="tip-box"><img src="${iconSrc("help.svg")}" alt=""><div>ISOs come from the bake node's ISO storages - upload one in Proxmox VE (a storage's <b>ISO Images → Upload</b> or <b>Download from URL</b>).
         The studio reads them through a read-only mount to list their editions.</div></div>`
@@ -2169,7 +2190,7 @@ async function bladeMedia(main, stale) {
       <p class="hint" style="margin-bottom:10px">The Setup environment (boot.wim <b>index 2</b>, the one that can service an offline image) with our startnet.cmd and the
       no-prompt EFI boot image. Every Windows bake boots it twice - to apply the image, and to customize it after sysprep. Build it from Microsoft's own files, or from a Windows ISO you uploaded.</p>
       ${pe.volid ? `<div class="kv-grid" style="margin-bottom:12px"><div>WinPE</div><div class="kv-val">${esc(pe.volid)}</div><div>Built from</div><div class="kv-val">${esc(peSourceLabel(pe.source_iso))}</div>
-        <div>Build</div><div class="kv-val">${esc(pe.build)}</div>
+        <div>Build</div><div class="kv-val">${esc(pe.build)} ${peHint(win)}</div>
         <div>vioscsi</div><div class="kv-val">${pe.vioscsi ? "virtio-win " + esc(pe.vioscsi) + " built in - VM builds need no virtio ISO" : "not built in - rebuild to carry it"}</div><div>Built</div><div class="kv-val">${esc(when(pe.built))} on ${esc(pe.node)}</div></div>` : ""}
       <div class="field-like" style="margin-bottom:12px">${fieldLabel("download.svg", "Build from")}
         <div class="ov-seg" role="group" aria-label="Build WinPE from">
@@ -2177,7 +2198,8 @@ async function bladeMedia(main, stale) {
         </div></div>
       ${mediaUi.peFrom === "uup" ? `
       <div class="grid-2">
-        ${field(`<span class="field-label"><img src="${iconSrc("update.svg")}" alt="">Build${infoTip("WinPE from Microsoft", "Always Windows Server 2025, en-US, the newest build the UUP dump catalog lists - WinPE only boots the bakes, whatever their language. The studio downloads its smallest edition's ESD (0.6-1.8 GB) straight from Microsoft and checks its SHA-1 - no Windows ISO needed. WinPE comes from the build's base (WinRE), so it carries the base build number; the bakes do not need it patched.")}</span>`,
+        ${field(`<span class="field-label"><img src="${iconSrc("os-server-core.svg")}" alt="">Product${infoTip("Why Windows Server vNext", "Insider builds ship their edition image at the full build, so the WinPE distilled from its WinRE always has the newest DISM - and DISM may be newer than the images it services, never older. Windows Server 2025's edition image is the release build (26100.1) in every set, so its WinPE stays at the September 2024 DISM. WinPE only boots the bakes and the media worker; the images it services are unaffected by the Insider label.")}</span>`, `<div class="pe-product"><select id="peProduct">${opts(PE_PRODUCTS, mediaUi.product)}</select>${mediaUi.product === "ws-insider" ? `<span class="pill status on">recommended</span>` : ""}</div>`)}
+        ${field(`<span class="field-label"><img src="${iconSrc("update.svg")}" alt="">Build${infoTip("WinPE from Microsoft", "Always en-US and the newest build the UUP dump catalog lists (for Windows Server 2025, the newest Patch Tuesday build) - WinPE only boots the bakes, whatever their language. The studio downloads a Core edition's ESD straight from Microsoft and checks its SHA-1 - no Windows ISO needed.")}</span>`,
           `<div class="pe-newest" id="peBuildSel" aria-live="polite">Asking the catalog…</div>`)}
       </div>
       <p class="hint err" id="peUupHint" hidden></p>
@@ -2225,6 +2247,13 @@ async function bladeMedia(main, stale) {
     try { const { id } = await api("POST", "/fod/build", { slot: b.dataset.fodBuild, lang: fodLang }); openJob(id); }
     catch (e) { toast(e.message, true); }
   }));
+  main.querySelectorAll("[data-iso-delete]").forEach(b => b.addEventListener("click", async () => {
+    const iso = isos.isos.find(i => i.volid === b.dataset.isoDelete); if (!iso) return;
+    const golds = usedBy(iso.volid);
+    if (!await confirmDelete("isos", `Delete ${iso.file}?`, [["del", `${iso.file} on ${iso.storage}`, gib(iso.size) + " GiB"]].concat(golds ? [["keep", "Golds baked from it", golds]] : []), "Delete ISO")) return;
+    try { await api("DELETE", "/windows/isos?volid=" + encodeURIComponent(iso.volid)); toast(`Deleted ${iso.file}`); renderServerBlade("media", main); }
+    catch (e) { toast(e.message, true); }
+  }));
   main.querySelectorAll("[data-iso-bake]").forEach(b => b.addEventListener("click", () => {
     winForm.iso = b.dataset.isoBake; winForm.index = null; winForm.edition = ""; openBake("windows");
   }));
@@ -2235,6 +2264,10 @@ async function bladeMedia(main, stale) {
     if (!uuid) return toast("Wait for the catalog's newest build", true);
     const build = (uupCache.builds[mediaUi.product] || []).find(b => b.uuid === uuid);
     try { const { id } = await api("POST", "/winpe/build-uup", { uuid, lang: "en-us", build: build ? build.build : "" }); openJob(id); }
+    catch (e) { toast(e.message, true); }
+  });
+  on("peProduct", "change", async () => {
+    try { await api("PUT", "/settings/windows", { ...win.settings, winpe_from: $id("peProduct").value }); renderServerBlade("media", main); }
     catch (e) { toast(e.message, true); }
   });
   on("peBuild", "click", async () => {
@@ -2299,6 +2332,17 @@ function versionCard(v) {
        <button class="btn" type="button" id="verCheck"><img src="${iconSrc("update.svg")}" alt=""> Check now</button>
        ${v.state === "update" ? `<button class="btn primary" type="button" id="verUpdate" data-tag="${esc(latest.tag)}"><img src="${iconSrcOnAccent("download.svg")}" alt=""> Update to ${esc(latest.version)}</button>` : ""}`)}`;
   return gsCard("gs-version", "update.svg", "Version", meta, body, "", true, state);
+}
+
+/* Troubleshooting tools - only with debug_tools = true in the studio's config.toml, so an
+   install never shows them and nobody switches them on from the browser. */
+function debugCard(worker) {
+  const on = [worker.keep_downloads && "downloads kept"].filter(Boolean);
+  return gsCard("gs-debug", "search.svg", `Debug tools ${infoTip("Debug tools", "For troubleshooting, shown because config.toml has debug_tools = true. Remove that line and restart the studio: the card goes and every tool switches off.")}`, on.length ? on.join(" · ") : "all off", `
+    <div class="toggle-grid" style="grid-template-columns:1fr">${toggle('id="dbgKeep"', `Keep downloads${infoTip("Keep downloads", "Every file a Windows media, WinPE or Features on Demand build downloads stays in the work volume (work/uup-files), and the next build of the same files downloads nothing. Off: a build uses them up and the rest goes after six idle hours.")}`, !!worker.keep_downloads)}</div>
+    ${actions(`<button class="btn" type="button" data-dbg-rebuild="winpe"><img src="${iconSrc("update.svg")}" alt=""> Rebuild last WinPE</button>`,
+      `<button class="btn" type="button" data-dbg-rebuild="media"><img src="${iconSrc("update.svg")}" alt=""> Rebuild last Windows media</button>`,
+      act("dbgSave", "save.svg", "Save", true))}`, "", false);
 }
 
 /* Stable (releases) or Development (CI's build of every commit on main - untested). */
@@ -2636,7 +2680,8 @@ async function bladeStudio(main, stale) {
     ${maint ? maintCard(maint) : ""}
     ${mail ? mailCard(mail, notif) : ""}
     ${notif ? notifyCard(notif, mail && mail.settings) : ""}
-    ${versionCard(ver)}`;
+    ${versionCard(ver)}
+    ${worker.debug_tools ? debugCard(worker) : ""}`;
   wireMaint(main); wireMail(main, mail); wireNotify(main, notif);
   if (acmeForm.challenge === "dns-01" && acmeForm.dns_provider && $id("leHelp")) {
     api("GET", "/tls/providers/" + encodeURIComponent(acmeForm.dns_provider)).then(r => { if ($id("leHelp")) $id("leHelp").innerHTML = highlightHelp(r.help); })
@@ -2666,10 +2711,27 @@ async function bladeStudio(main, stale) {
   });
   on("wkSave", "click", async () => {
     try {
-      await api("PUT", "/settings/worker", { memory_mb: parseInt($id("wkMem").value, 10) || 4096, cores: parseInt($id("wkCores").value, 10) || 4 });
+      await api("PUT", "/settings/worker", { memory_mb: parseInt($id("wkMem").value, 10) || 4096, cores: parseInt($id("wkCores").value, 10) || 2, keep_downloads: !!worker.keep_downloads });
       toast("Saved"); render();
     } catch (e) { toast(e.message, true); }
   });
+  on("dbgSave", "click", async () => {
+    try {
+      await api("PUT", "/settings/worker", { memory_mb: worker.memory_mb, cores: worker.cores, keep_downloads: $id("dbgKeep").checked });
+      toast("Saved"); render();
+    } catch (e) { toast(e.message, true); }
+  });
+  // The last build of a kind again, with its own parameters - from the kept downloads.
+  main.querySelectorAll("[data-dbg-rebuild]").forEach(b => b.addEventListener("click", async () => {
+    const kind = b.dataset.dbgRebuild;
+    try {
+      const jobs = await api("GET", "/jobs");
+      const last = (jobs || []).filter(j => j.kind === kind).sort((a, c) => (c.created_at || "").localeCompare(a.created_at || ""))[0];
+      if (!last) return toast(`No ${kind === "media" ? "Windows media" : "WinPE"} build to repeat yet`, true);
+      const r = await api("POST", `/jobs/${encodeURIComponent(last.id)}/retry`);
+      openJob(r.id);
+    } catch (e) { toast(e.message, true); }
+  }));
   on("stClockSave", "click", async () => {
     try { const clock = $id("stClock").value; await api("PUT", "/settings/server", { ...server.settings, clock }); clockFmt = clock; toast("Saved"); render(); } catch (e) { toast(e.message, true); }
   });

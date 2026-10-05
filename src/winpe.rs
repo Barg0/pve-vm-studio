@@ -9,6 +9,12 @@
 //!
 //! Which ISO it is distilled from is a setting (General → Windows). The result is uploaded
 //! into an ISO storage as winpe-<build>.iso (e.g. winpe-26100.1.iso) and reused by every bake.
+//!
+//! Built from Microsoft's files (UUP), it comes from the newest set of the product picked:
+//! Windows Server vNext (recommended) - an Insider set ships its edition ESD at the full
+//! build (no separate cumulative update), so its WinRE - and the WinPE distilled from it -
+//! is always that build, the newest DISM there is (DISM may be newer than the images it
+//! services, never older) - or Windows Server 2025, whose edition ESD is 26100.1 in every set.
 
 use std::path::{Path, PathBuf};
 
@@ -17,6 +23,12 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::{jobs::JobLog, progress::Progress, pve::Pve, settings, uup};
+
+/// The UUP products WinPE can be distilled from (WindowsSettings.winpe_from): Windows Server
+/// vNext, recommended - an Insider set ships its edition image at the full build, so its
+/// WinRE has the newest DISM - or Windows Server 2025, whose edition image is the release
+/// build (26100.1) in every set.
+pub const UUP_PRODUCTS: [&str; 2] = ["ws-insider", "ws2025"];
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -293,9 +305,42 @@ async fn finish(
     virtio: Option<(&str, &Path)>,
 ) -> Result<WinPe> {
     let at = |f: f64| span.0 + (span.1 - span.0) * f;
+    pr.stage(at(0.0), at(0.4), "startnet.cmd into the Setup environment");
+    let embedded = make_ours(log, dir, &st.pe, virtio).await?;
+    tokio::fs::create_dir_all(st.root.join("sources")).await?;
+    tokio::fs::rename(&st.pe, st.root.join("sources/boot.wim")).await?;
+    log.ok("startnet.cmd and winpeshl.ini are in; WinPE runs our passes instead of Setup").await;
+
+    pr.stage(at(0.4), at(0.6), "building the ISO");
+    let iso = dir.join("winpe.iso");
+    make_iso(log, &st.root, &iso).await?;
+
+    pr.stage(at(0.6), at(1.0), "uploading to PVE");
+    let name = format!("winpe-{}.iso", st.build);
+    let volid = format!("{iso_storage}:iso/{name}");
+    // A rebuild replaces the old one; bakes read it only while they run.
+    if pve.storage_content(node, iso_storage, "iso").await?.iter().any(|v| v.volid == volid) {
+        pve.delete_volume(node, &volid).await?;
+    }
+    let volid = pve.upload(node, iso_storage, "iso", &iso, &name).await?;
+    log.ok(format!("WinPE uploaded as {volid}")).await;
+    let pe = WinPe {
+        source_iso: source.to_owned(),
+        volid,
+        node: node.to_owned(),
+        built: chrono::Utc::now().to_rfc3339(),
+        build: st.build,
+        vioscsi: embedded,
+    };
+    settings::save(db, "winpe", &pe).await?;
+    Ok(pe)
+}
+
+/// Our part of a Setup environment image: startnet.cmd and winpeshl.ini (WinPE runs our
+/// passes, not Setup) and vioscsi from virtio-win. Returns the virtio-win release in it.
+async fn make_ours(log: &JobLog, dir: &Path, wim: &Path, virtio: Option<(&str, &Path)>) -> Result<String> {
     let files = dir.join("files");
     tokio::fs::create_dir_all(&files).await?;
-    pr.stage(at(0.0), at(0.4), "startnet.cmd into the Setup environment");
     tokio::fs::write(files.join("startnet.cmd"), crlf(STARTNET)).await?;
     tokio::fs::write(files.join("winpeshl.ini"), crlf(WINPESHL)).await?;
     let mut cmds = format!(
@@ -318,43 +363,23 @@ async fn finish(
             log.warn(format!("virtio-win {release} has no vioscsi for 2k25/w11 - the passes keep attaching the virtio ISO")).await;
         }
     }
-    wim_update(&st.pe, &cmds).await?;
-    tokio::fs::create_dir_all(st.root.join("sources")).await?;
-    tokio::fs::rename(&st.pe, st.root.join("sources/boot.wim")).await?;
-    log.ok("startnet.cmd and winpeshl.ini are in; WinPE runs our passes instead of Setup").await;
+    wim_update(wim, &cmds).await?;
+    Ok(embedded)
+}
 
-    pr.stage(at(0.4), at(0.6), "building the ISO");
-    let iso = dir.join("winpe.iso");
+/// The ISO around a WinPE root (boot files, sources/boot.wim), booting without a key press.
+async fn make_iso(log: &JobLog, root: &Path, iso: &Path) -> Result<()> {
     run(
         log,
         "xorriso",
         &[
             "-as", "mkisofs", "-quiet", "-iso-level", "3", "-J", "-joliet-long", "-R", "-V", "PVSWINPE",
             "-e", "efi/microsoft/boot/efisys_noprompt.bin", "-no-emul-boot",
-            "-o", &iso.display().to_string(), &st.root.display().to_string(),
+            "-o", &iso.display().to_string(), &root.display().to_string(),
         ],
     )
     .await?;
-
-    pr.stage(at(0.6), at(1.0), "uploading to PVE");
-    let name = format!("winpe-{}.iso", st.build);
-    let volid = format!("{iso_storage}:iso/{name}");
-    // A rebuild replaces the old one; bakes read it only while they run.
-    if pve.storage_content(node, iso_storage, "iso").await?.iter().any(|v| v.volid == volid) {
-        pve.delete_volume(node, &volid).await?;
-    }
-    let volid = pve.upload(node, iso_storage, "iso", &iso, &name).await?;
-    log.ok(format!("WinPE uploaded as {volid}")).await;
-    let pe = WinPe {
-        source_iso: source.to_owned(),
-        volid,
-        node: node.to_owned(),
-        built: chrono::Utc::now().to_rfc3339(),
-        build: st.build,
-        vioscsi: embedded,
-    };
-    settings::save(db, "winpe", &pe).await?;
-    Ok(pe)
+    Ok(())
 }
 
 /// Builds the WinPE ISO from `iso_path` (the source ISO, readable through the ISO mount)
@@ -413,12 +438,24 @@ pub async fn build_uup(
         log.ok(format!("{edition} carries the smallest Setup media and WinRE: {} ({:.1} GB)", esd.name, esd.size as f64 / 1e9)).await;
 
         pr.stage(2.0, 70.0, "downloading from Microsoft");
-        let path = dir.join(&esd.name);
-        uup::download(web, log, &mut pr, &esd, &path).await?;
+        // Into the set's download cache, where a media build of the same set looks too.
+        let dl = work.join("uup-files").join(uuid);
+        tokio::fs::create_dir_all(&dl).await?;
+        let mut one = vec![esd.clone()];
+        let (u, l, e) = (uuid.to_owned(), lang.to_owned(), edition.clone());
+        let refresh = || {
+            let (u, l, e) = (u.clone(), l.clone(), e.clone());
+            async move { uup::files(web, &u, &l, &e).await }
+        };
+        uup::download_all(web, log, &mut pr, &mut one, &dl, &refresh).await?;
+        let path = dl.join(&esd.name);
+        let keep = settings::load::<crate::media::WorkerSettings>(db, "worker").await.unwrap_or_default().keep_downloads;
 
         pr.stage(70.0, 85.0, "building the Setup environment");
         let st = stage_esd(log, &dir, &path).await?;
-        let _ = tokio::fs::remove_file(&path).await;
+        if !keep {
+            let _ = tokio::fs::remove_file(&path).await;
+        }
         let source = format!("uup:{uuid} {} {lang}", esd.name);
         finish(pve, db, log, &mut pr, (85.0, 100.0), &dir, st, &source, node, iso_storage, virtio).await
     }

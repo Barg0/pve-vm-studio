@@ -165,11 +165,15 @@ console:
 - **Windows media builds** — the worker that applies the cumulative update with DISM.
 
 You build it once and the studio keeps it on your ISO storage. It carries the
-virtio-win storage driver, so it sees the VM's disk.
+virtio-win storage driver, so it sees the VM's disk. Built from Microsoft, it comes from the
+newest Windows Server vNext (Insider) build — recommended: those ship at their full build, so
+WinPE always has the newest DISM — or from Windows Server 2025, whose WinPE stays at the
+release build. With **Keep WinPE current** on, the studio builds it again when a newer build
+or virtio-win release appears.
 
 To get going:
 
-1. **Media → Windows: WinPE** — build it straight from Microsoft (Server 2025, en-US), or
+1. **Media → Windows: WinPE** — build it straight from Microsoft (Server vNext or 2025, en-US), or
    distil it from a Windows ISO you have in PVE.
 2. **Media → Windows: virtio-win** — the driver release that goes into the golds. `stable`
    follows the virtio-win project; the studio fetches it on the first bake.

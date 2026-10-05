@@ -33,12 +33,85 @@ pub struct AutoUpdateSettings {
     pub keep_golds: u32,
     /// Also the optional non-security releases later in the month.
     pub include_previews: bool,
+    /// WinPE - what every bake, deploy and media build boots - rebuilt from the newest build
+    /// of the product it is built from in a maintenance window, before anything else of
+    /// the chain runs.
+    pub keep_winpe_current: bool,
+    /// virtio-win on "stable" (or "latest"): a newer release of that channel is downloaded
+    /// into PVE in a maintenance window - and WinPE built again, for its vioscsi driver.
+    pub keep_virtio_current: bool,
 }
 
 impl Default for AutoUpdateSettings {
     fn default() -> Self {
-        Self { keep_golds: 2, include_previews: false }
+        Self { keep_golds: 2, include_previews: false, keep_winpe_current: true, keep_virtio_current: true }
     }
+}
+
+/// The virtio-win release the setting stands for now ("stable" and "latest" followed),
+/// asked at most every six hours; None while the project's server does not answer.
+pub async fn virtio_now(app: &AppState) -> Option<String> {
+    type Now = Option<(std::time::Instant, String, Option<String>)>;
+    static CACHE: std::sync::Mutex<Now> = std::sync::Mutex::new(None);
+    let win: crate::virtio::WindowsSettings = settings::load(&app.db, "windows").await.unwrap_or_default();
+    if let Some((at, wanted, v)) = CACHE.lock().unwrap().clone()
+        && wanted == win.virtio
+        && at.elapsed() < std::time::Duration::from_secs(6 * 3600)
+    {
+        return v;
+    }
+    let v = crate::virtio::resolve(&win.virtio).await.ok();
+    *CACHE.lock().unwrap() = Some((std::time::Instant::now(), win.virtio.clone(), v.clone()));
+    v
+}
+
+// ---- WinPE ----
+
+/// The newest build WinPE is built from: (build, uuid, release) - Windows Server vNext's
+/// newest, or Windows Server 2025's newest Patch Tuesday ("B") build, as picked. Asked of
+/// UUP dump at most every six hours; None while the catalog does not answer.
+pub async fn winpe_newest(app: &AppState) -> Option<(String, String, String)> {
+    type Newest = Option<(std::time::Instant, String, Option<(String, String, String)>)>;
+    static CACHE: std::sync::Mutex<Newest> = std::sync::Mutex::new(None);
+    let win: crate::virtio::WindowsSettings = settings::load(&app.db, "windows").await.unwrap_or_default();
+    if let Some((at, from, v)) = CACHE.lock().unwrap().clone()
+        && from == win.winpe_from
+        && at.elapsed() < std::time::Duration::from_secs(6 * 3600)
+    {
+        return v;
+    }
+    let p = uup::product(&win.winpe_from)?;
+    let found = match uup::product_builds(&app.web, p, false).await {
+        Ok(list) => list
+            .into_iter()
+            .filter(|b| p.insider || uup::release_kind(p, b.created).ends_with(" B"))
+            .max_by_key(|b| version(&b.build))
+            .map(|b| (b.build.clone(), b.uuid.clone(), uup::release_kind(p, b.created))),
+        Err(e) => {
+            tracing::warn!("WinPE: asking UUP dump for the newest build: {e:#}");
+            return None;
+        }
+    };
+    *CACHE.lock().unwrap() = Some((std::time::Instant::now(), win.winpe_from.clone(), found.clone()));
+    found
+}
+
+/// Where the studio's WinPE stands: "missing", "outdated" (not built from the newest set of
+/// the product picked - `newest` is that set's (build, uuid)), "virtio" (its vioscsi is not the virtio-win
+/// release in use), "current" - or "unknown" without an answer from the catalog.
+pub fn winpe_state(pe: &crate::winpe::WinPe, newest: Option<(&str, &str)>, virtio: Option<&str>) -> &'static str {
+    if pe.volid.is_empty() {
+        return "missing";
+    }
+    // From a UUP set: the set decides ("uup:<uuid> ..."); from an ISO: its build.
+    let from_set = |uuid: &str| pe.source_iso.starts_with("uup:") && pe.source_iso.contains(uuid);
+    if newest.is_some_and(|(b, uuid)| if pe.source_iso.starts_with("uup:") { !from_set(uuid) } else { version(b) > version(&pe.build) }) {
+        return "outdated";
+    }
+    if virtio.is_some_and(|v| v != pe.vioscsi) {
+        return "virtio";
+    }
+    if newest.is_none() { "unknown" } else { "current" }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -540,6 +613,42 @@ async fn tick(app: &AppState, checked: &mut Option<std::time::Instant>, self_che
             }
         }
     }
+    let au: AutoUpdateSettings = settings::load(&app.db, "auto_update").await.unwrap_or_default();
+    // virtio-win next: the release its channel points at, into PVE - WinPE and the bakes take it.
+    let win: crate::virtio::WindowsSettings = settings::load(&app.db, "windows").await.unwrap_or_default();
+    let vio = if matches!(win.virtio.as_str(), "stable" | "latest") { virtio_now(app).await } else { None };
+    if open
+        && au.keep_virtio_current
+        && let Some(rel) = vio.as_deref()
+        && !virtio_present(app, &win, rel).await
+        && !tried(&app.db, "virtio", "automatic virtio-win update", "release", rel).await
+    {
+        match api::spawn_virtio(app, "automatic virtio-win update").await {
+            Ok(id) => {
+                tracing::info!("automatic virtio-win update to {rel} started (job {id})");
+                return Ok(());
+            }
+            Err(e) => tracing::warn!("automatic virtio-win update to {rel} could not start: {e:#}"),
+        }
+    }
+    // WinPE next: every media build and bake of the chain boots it, so it is current first -
+    // its build and its vioscsi driver.
+    if open && au.keep_winpe_current {
+        let pe: crate::winpe::WinPe = settings::load(&app.db, "winpe").await.unwrap_or_default();
+        let vio_for_pe = if au.keep_virtio_current { vio.as_deref() } else { None };
+        if let Some((build, uuid, release)) = winpe_newest(app).await
+            && matches!(winpe_state(&pe, Some((&build, &uuid)), vio_for_pe), "missing" | "outdated" | "virtio")
+            && !tried(&app.db, "winpe", "automatic WinPE update", "build", &build).await
+        {
+            match api::spawn_winpe_uup(app, "automatic WinPE update", &uuid, "en-us", &build).await {
+                Ok(id) => {
+                    tracing::info!("automatic WinPE update to {build} ({release}) started (job {id})");
+                    return Ok(());
+                }
+                Err(e) => tracing::warn!("automatic WinPE update to {build} could not start: {e:#}"),
+            }
+        }
+    }
     let mut runs = list_runs(&app.db).await?;
     // The oldest waiting run first; one step at a time across all of them.
     runs.reverse();
@@ -547,6 +656,29 @@ async fn tick(app: &AppState, checked: &mut Option<std::time::Instant>, self_che
         start_step(app, r).await?;
     }
     Ok(())
+}
+
+/// Whether an automatic job of `kind` for `value` (its params' `key`) failed in the last
+/// 20 hours - one try a day, not one every few minutes of the window.
+async fn tried(db: &SqlitePool, kind: &str, by: &str, key: &str, value: &str) -> bool {
+    let since = (chrono::Utc::now() - chrono::Duration::hours(20)).to_rfc3339();
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT params FROM jobs WHERE kind = ? AND status = 'failed' AND created_by = ? AND created_at > ?")
+        .bind(kind)
+        .bind(by)
+        .bind(since)
+        .fetch_all(db)
+        .await
+        .unwrap_or_default();
+    rows.iter().any(|(p,)| serde_json::from_str::<serde_json::Value>(p).is_ok_and(|v| v[key] == value))
+}
+
+/// Whether PVE holds virtio-win `release` on the bake node's ISO storage.
+async fn virtio_present(app: &AppState, win: &crate::virtio::WindowsSettings, release: &str) -> bool {
+    let bake: crate::settings::BakeSettings = settings::load(&app.db, "bake").await.unwrap_or_default();
+    let Ok(p) = bake.resolve(&app.pve).await else { return true };
+    let storage = if win.iso_storage.is_empty() { p.iso_storage.clone() } else { win.iso_storage.clone() };
+    let name = crate::virtio::iso_name(release);
+    app.pve.storage_content(&p.node, &storage, "iso").await.map(|v| v.iter().any(|x| x.volid.ends_with(&format!("/{name}")))).unwrap_or(true)
 }
 
 // ---- what the page asks ----
@@ -687,4 +819,24 @@ async fn mail_done(app: &AppState, run: &Run) {
     }
     r.link = Some("#/golds".into());
     notify::send(app, "update_done", r).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn winpe_states() {
+        let pe = |volid: &str, build: &str, vio: &str, src: &str| crate::winpe::WinPe { volid: volid.into(), build: build.into(), vioscsi: vio.into(), source_iso: src.into(), ..Default::default() };
+        let newest = ("29667.1000", "73639666");
+        let set = "uup:73639666 MetadataESD_ServerStandardCore_en-us.esd en-us";
+        assert_eq!(winpe_state(&pe("", "", "", ""), Some(newest), None), "missing");
+        assert_eq!(winpe_state(&pe("v", "29667.1000", "0.1.302-1", set), Some(newest), Some("0.1.302-1")), "current");
+        assert_eq!(winpe_state(&pe("v", "29659.1000", "0.1.302-1", "uup:7d583949 x en-us"), Some(newest), Some("0.1.302-1")), "outdated");
+        // A Server 2025 WinPE from before: another set - outdated.
+        assert_eq!(winpe_state(&pe("v", "26100.1", "0.1.302-1", "uup:649e1310 x en-us"), Some(newest), None), "outdated");
+        assert_eq!(winpe_state(&pe("v", "26100.1", "0.1.302-1", "local:iso/x.iso"), Some(newest), None), "outdated");
+        assert_eq!(winpe_state(&pe("v", "29667.1000", "0.1.285-1", set), Some(newest), Some("0.1.302-1")), "virtio");
+        assert_eq!(winpe_state(&pe("v", "29667.1000", "0.1.302-1", set), None, None), "unknown");
+    }
 }

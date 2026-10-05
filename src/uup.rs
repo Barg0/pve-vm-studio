@@ -192,21 +192,6 @@ pub async fn editions_named(web: &reqwest::Client, uuid: &str, lang: &str) -> Re
         .collect())
 }
 
-/// The full builds of a product, newest first: "Windows Server 2025 (26100.x)" entries
-/// only - not the cumulative updates listed beside them, which carry no install media.
-pub async fn builds(web: &reqwest::Client, product: &str) -> Result<Vec<Build>> {
-    let r = get(web, "listid.php", &[("search", product), ("sortByDate", "1")]).await?;
-    let list: Vec<Build> = match &r["builds"] {
-        serde_json::Value::Object(m) => m.values().filter_map(|b| serde_json::from_value(b.clone()).ok()).collect(),
-        serde_json::Value::Array(a) => a.iter().filter_map(|b| serde_json::from_value(b.clone()).ok()).collect(),
-        _ => vec![],
-    };
-    let prefix = format!("{product} (");
-    let mut out: Vec<Build> = list.into_iter().filter(|b| b.arch == "amd64" && b.title.starts_with(&prefix)).collect();
-    out.sort_by(|a, b| b.created.cmp(&a.created));
-    Ok(out)
-}
-
 /// The languages a build is offered in (lower case, "en-us").
 pub async fn languages(web: &reqwest::Client, uuid: &str) -> Result<Vec<String>> {
     let r = get(web, "listlangs.php", &[("id", uuid)]).await?;
@@ -270,21 +255,11 @@ pub fn winpe_edition(editions: &[String]) -> Option<String> {
     PREFER.iter().find_map(|p| editions.iter().find(|e| e.eq_ignore_ascii_case(p)).cloned()).or_else(|| editions.first().cloned())
 }
 
-/// An edition's own ESD among a build's files: <Edition>_<lang>.esd.
+/// An edition's own ESD among a build's files: <Edition>_<lang>.esd, or an Insider set's
+/// MetadataESD_<Edition>_<lang>.esd.
 pub fn edition_esd(files: &[File], edition: &str, lang: &str) -> Option<File> {
     let want = format!("{edition}_{lang}.esd").to_lowercase();
-    files.iter().find(|f| f.name.to_lowercase() == want).cloned()
-}
-
-/// Downloads one file from Microsoft's CDN to `dest`, measuring the bytes into the current
-/// stage of `pr`, then checks its SHA-1 against the catalog's.
-pub async fn download(web: &reqwest::Client, log: &JobLog, pr: &mut Progress, file: &File, dest: &Path) -> Result<()> {
-    let total = file.size.max(1);
-    log.run(format!("Downloading {} ({:.1} GB) from Microsoft", file.name, file.size as f64 / 1e9)).await;
-    download_with(web, log, file, dest, true, |got, rate| {
-        pr.within(got as f64 / total as f64, format!("{:.2} of {:.2} GB · {rate:.0} MB/s", got as f64 / 1e9, total as f64 / 1e9));
-    })
-    .await
+    files.iter().find(|f| f.name.to_lowercase() == want || f.name.to_lowercase() == format!("metadataesd_{want}")).cloned()
 }
 
 /// When a CDN link stops being handed out (its P1 parameter, epoch seconds). Microsoft's

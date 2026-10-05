@@ -480,6 +480,9 @@ fieldset.built-lock:disabled { opacity: .72; }
 .cf-go:hover { background: color-mix(in srgb, var(--danger) 12%, var(--bg)); }
 .cf-go img { width: 14px; height: 14px; }
 /* WinPE from Microsoft: the build is not a choice - the catalog's newest, shown where a field would be. */
+.pe-product { display: flex; align-items: center; gap: 8px; }
+.pe-product select { flex: 1; min-width: 0; }
+.pe-product .pill { height: 32px; display: inline-flex; align-items: center; box-sizing: border-box; }
 .pe-newest { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-lg);
   background: var(--bg-subtle); color: var(--fg); font-size: 13px; white-space: nowrap; overflow: hidden; }
 /* Let's Encrypt: production or staging, a switch the height of the fields beside it. */

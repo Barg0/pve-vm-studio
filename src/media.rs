@@ -93,7 +93,8 @@ async fn worker_put(axum::extract::Path((run, token, path)): axum::extract::Path
     use futures::StreamExt;
     use tokio::io::AsyncWriteExt;
     // What the worker sends back: the images, its package lists, DISM's log.
-    let list = path.strip_prefix("packages-").and_then(|r| r.strip_suffix(".txt")).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+    let list = path.strip_prefix("packages-").and_then(|r| r.strip_suffix(".txt")).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+        || path.strip_prefix("health-").and_then(|r| r.strip_suffix(".txt")).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
     let step_log = path.strip_prefix("logs/").and_then(|r| r.strip_suffix(".log")).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || "-_.%".contains(c)) && !n.contains(".."));
     if !matches!(path.as_str(), "serviced.wim" | "winre-serviced.wim" | "dism.log") && !list && !step_log {
         return axum::http::StatusCode::FORBIDDEN;
@@ -158,11 +159,15 @@ pub struct MediaIso {
 pub struct WorkerSettings {
     pub memory_mb: u32,
     pub cores: u32,
+    /// Debug tool (config.toml debug_tools): keep every downloaded file (work/uup-files)
+    /// after a build, so the next build of the same files downloads nothing. Off: a build
+    /// uses them up and the rest goes after six idle hours.
+    pub keep_downloads: bool,
 }
 
 impl Default for WorkerSettings {
     fn default() -> Self {
-        Self { memory_mb: 4096, cores: 4 }
+        Self { memory_mb: 4096, cores: 2, keep_downloads: false }
     }
 }
 
@@ -228,12 +233,12 @@ pub fn is_update(name: &str) -> bool {
     (n.starts_with("windows1") && n.contains("-kb") && (n.ends_with(".msu") || n.ends_with(".cab"))) || (n.starts_with("ssu-") && n.ends_with(".cab"))
 }
 
-fn is_aggregated(name: &str) -> bool {
+pub(crate) fn is_aggregated(name: &str) -> bool {
     name.to_lowercase().ends_with(".aggregatedmetadata.cab")
 }
 
 /// KB5125758 out of Windows11.0-KB5125758-x64.cab.
-fn kb_of(name: &str) -> Option<String> {
+pub(crate) fn kb_of(name: &str) -> Option<String> {
     let up = name.to_uppercase();
     let at = up.find("-KB")? + 1;
     let digits: String = up[at + 2..].chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -244,7 +249,7 @@ fn kb_of(name: &str) -> Option<String> {
 /// WinRE (the Safe OS dynamic update), or the media's sources\ folder (the Setup dynamic
 /// update - a CAB of files, not a package).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Target {
+pub(crate) enum Target {
     Image,
     WinRe,
     Setup,
@@ -254,12 +259,12 @@ enum Target {
 /// (SafeOSDUCompDB_KB…, SetupDUCompDB_KB…; the rest go into the image), and which are the
 /// cumulative update chain (outer.AggregatedMetadata_KB… - a checkpoint and the target).
 #[derive(Default)]
-struct UpdateInfo {
+pub(crate) struct UpdateInfo {
     targets: HashMap<String, Target>,
-    cumulative: Vec<String>,
+    pub(crate) cumulative: Vec<String>,
 }
 
-async fn update_targets(agg: &Path) -> UpdateInfo {
+pub(crate) async fn update_targets(agg: &Path) -> UpdateInfo {
     let mut out = UpdateInfo::default();
     let Ok(o) = tokio::process::Command::new("cabextract").arg("-l").arg(agg).output().await else { return out };
     for line in String::from_utf8_lossy(&o.stdout).lines() {
@@ -286,7 +291,7 @@ async fn update_targets(agg: &Path) -> UpdateInfo {
 /// updates and where no .msu exists. Order as Microsoft's servicing steps: the cumulative
 /// update chain first, oldest first (the checkpoint, then the update built on it), then the
 /// rest in KB order.
-fn pick_updates(files: &[uup::File], info: &UpdateInfo) -> Vec<(uup::File, Target)> {
+pub(crate) fn pick_updates(files: &[uup::File], info: &UpdateInfo) -> Vec<(uup::File, Target)> {
     let targets = &info.targets;
     let mut by_kb: Vec<(String, uup::File, Target)> = Vec::new();
     for f in files.iter().filter(|f| is_update(&f.name)) {
@@ -403,15 +408,56 @@ fn dism_step(s: &mut String, what: &str, log: &str, dism: &str) {
     ));
 }
 
-/// Keeps the DISM logs of the newest `keep` builds (one build: media-<run>.log and its
-/// media-<run>-<step>.log files), so the studio's disk does not fill up build by build.
+/// What the worker's DISM logs say: dism.log kept whole for reading (it rotates and holds
+/// only the last steps), and each step's error lines in the job, named by its step - the
+/// step's verdict follows from its markers. Files go to dism-logs/<kind>-<run>[-<step>].log.
+pub(crate) async fn report_dism_logs(log: &JobLog, work: &Path, share: &Path, kind: &str, run_id: &str) -> Result<()> {
+    let short = run_id.trim_start_matches("run-").chars().take(8).collect::<String>();
+    let keep_dir = work.parent().unwrap_or(work).join("dism-logs");
+    tokio::fs::create_dir_all(&keep_dir).await?;
+    prune_dism_logs(&keep_dir, 5).await;
+    let dism_log = share.join("dism.log");
+    if dism_log.exists() {
+        tokio::fs::copy(&dism_log, keep_dir.join(format!("{kind}-{short}.log"))).await?;
+    }
+    if let Ok(mut rd) = tokio::fs::read_dir(share.join("logs")).await {
+        let mut names = Vec::new();
+        while let Ok(Some(e)) = rd.next_entry().await {
+            names.push(e.file_name().to_string_lossy().into_owned());
+        }
+        names.sort();
+        for name in names {
+            let path = share.join("logs").join(&name);
+            let keep = keep_dir.join(format!("{kind}-{short}-{name}"));
+            tokio::fs::copy(&path, &keep).await?;
+            let text = String::from_utf8_lossy(&tokio::fs::read(&path).await?).into_owned();
+            let errors: Vec<&str> = text.lines().filter(|l| l.contains(", Error ")).collect();
+            if errors.is_empty() {
+                continue;
+            }
+            let step = name.trim_end_matches(".log");
+            // DISM logs error lines in steps that succeed (reverse deltas of superseded files, host
+            // components WinPE lacks) - the verdicts and the health scan below decide.
+            log.debug(format!("DISM logged {} error line(s) in {step}; the log is {}", errors.len(), keep.display())).await;
+            for l in errors.iter().take(10) {
+                log.debug(format!("{step} | {}", l.trim())).await;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Keeps the DISM logs of the newest `keep` builds (one build: <kind>-<run>.log and its
+/// <kind>-<run>-<step>.log files), so the studio's disk does not fill up build by build.
 async fn prune_dism_logs(dir: &Path, keep: usize) {
     let Ok(mut rd) = tokio::fs::read_dir(dir).await else { return };
     let mut runs: std::collections::HashMap<String, (std::time::SystemTime, Vec<PathBuf>)> = Default::default();
     while let Ok(Some(e)) = rd.next_entry().await {
         let name = e.file_name().to_string_lossy().into_owned();
-        let Some(rest) = name.strip_prefix("media-") else { continue };
-        let run = rest.split(['-', '.']).next().unwrap_or("").to_owned();
+        // <kind>-<run>[-<step>].log: every kind's runs together (winpe- ones from before too).
+        let mut parts = name.splitn(3, ['-', '.']);
+        let (Some(kind), Some(run)) = (parts.next(), parts.next()) else { continue };
+        let run = format!("{kind}-{run}");
         let at = e.metadata().await.and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH);
         let ent = runs.entry(run).or_insert((at, Vec::new()));
         ent.0 = ent.0.max(at);
@@ -426,18 +472,127 @@ async fn prune_dism_logs(dir: &Path, keep: usize) {
     }
 }
 
+/// DISM /ScanHealth on the mounted image, its answer sent back as health-<at>.txt for the
+/// studio to read (health_verdict) - the build takes no image Windows itself calls damaged.
+fn health_check(at: &str) -> String {
+    format!(
+        "echo PVS-HEALTH {at} > COM1\r\ndism /English /Image:W:\\mount /Cleanup-Image /ScanHealth /ScratchDir:W:\\scratch > W:\\health-{at}.txt 2>&1\r\n%C% -T W:\\health-{at}.txt %U%/health-{at}.txt > nul 2>&1\r\n"
+    )
+}
+
+/// What /ScanHealth said: Ok with its sentence, or Err with why the image is not healthy.
+pub(crate) fn health_verdict(text: &str) -> std::result::Result<String, String> {
+    let t = text.to_lowercase();
+    if t.contains("no component store corruption detected") {
+        Ok("no component store corruption detected".into())
+    } else if t.contains("not repairable") {
+        Err("the component store is damaged and not repairable".into())
+    } else if t.contains("is repairable") {
+        Err("the component store is damaged (repairable)".into())
+    } else {
+        // DISM's own words: its "Error: <n>" line and the sentence after it, else the last line.
+        let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("The DISM log file")).collect();
+        let why = match lines.iter().position(|l| l.starts_with("Error:")) {
+            Some(i) => lines[i..].iter().take(2).copied().collect::<Vec<_>>().join(" "),
+            None => lines.last().copied().unwrap_or("no answer").to_owned(),
+        };
+        Err(format!("the scan gave no verdict: {why}"))
+    }
+}
+
+/// boot.wim from a WinRE image: 1 is WinPE, 2 the Setup environment (Setup and its own DISM
+/// in X:\sources, from the media in `tree`). Returns how many Setup files went in.
+async fn build_boot_wim(log: &JobLog, tree: &Path, winre: &Path) -> Result<usize> {
+    let winre_s = winre.display().to_string();
+    let boot = tree.join("sources/boot.wim");
+    let boot_s = boot.display().to_string();
+    let _ = tokio::fs::remove_file(&boot).await;
+    run(log, "wimlib-imagex", &["export", &winre_s, "1", &boot_s, "Microsoft Windows PE", "Microsoft Windows PE", "--compress=maximum"]).await?;
+    run(log, "wimlib-imagex", &["info", &boot_s, "1", "--image-property", "FLAGS=9"]).await?;
+    winpe::wim_update(&boot, "delete --force /Windows/System32/winpeshl.ini\n").await?;
+    run(log, "wimlib-imagex", &["export", &winre_s, "1", &boot_s, "Microsoft Windows Setup", "Microsoft Windows Setup", "--boot"]).await?;
+    run(log, "wimlib-imagex", &["info", &boot_s, "2", "--image-property", "FLAGS=2"]).await?;
+    let (mut setup, n) = winpe::setup_source_cmds(tree).await?;
+    setup.insert_str(0, "delete --force /Windows/System32/winpeshl.ini\n");
+    winpe_update_index(&boot, 2, &setup).await?;
+    Ok(n)
+}
+
+/// Microsoft's step 28: the boot manager of the (serviced) boot.wim onto the media - every
+/// bootmgfw.efi / bootx64.efi / bootmgr.efi, and efi\microsoft\boot\boot.stl. Returns
+/// what it replaced.
+async fn boot_files_from(log: &JobLog, dir: &Path, tree: &Path) -> Result<Vec<String>> {
+    let x = dir.join("bootfiles");
+    let _ = tokio::fs::remove_dir_all(&x).await;
+    tokio::fs::create_dir_all(&x).await?;
+    let boot_s = tree.join("sources/boot.wim").display().to_string();
+    let dest = format!("--dest-dir={}", x.display());
+    // One by one: a path the image does not have fails the whole extract.
+    for f in ["/Windows/Boot/EFI/bootmgfw.efi", "/Windows/Boot/EFI/bootmgr.efi", "/Windows/Boot/EFI/boot.stl"] {
+        let _ = run(log, "wimlib-imagex", &["extract", &boot_s, "2", f, &dest, "--no-acls"]).await;
+    }
+    let mut replaced = Vec::new();
+    let mut stack = vec![tree.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let mut rd = tokio::fs::read_dir(&d).await?;
+        while let Some(e) = rd.next_entry().await? {
+            let path = e.path();
+            if e.file_type().await?.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            let from = match name.as_str() {
+                "bootmgfw.efi" | "bootx64.efi" => x.join("bootmgfw.efi"),
+                "bootmgr.efi" => x.join("bootmgr.efi"),
+                _ => continue,
+            };
+            if from.exists() {
+                tokio::fs::copy(&from, &path).await?;
+                replaced.push(path.strip_prefix(tree).unwrap_or(&path).display().to_string());
+            }
+        }
+    }
+    if x.join("boot.stl").exists() {
+        tokio::fs::create_dir_all(tree.join("efi/microsoft/boot")).await?;
+        tokio::fs::copy(x.join("boot.stl"), tree.join("efi/microsoft/boot/boot.stl")).await?;
+        replaced.push("efi/microsoft/boot/boot.stl".into());
+    }
+    let _ = tokio::fs::remove_dir_all(&x).await;
+    Ok(replaced)
+}
+
+/// The servicing stack out of a cumulative update's .msu (since 24H2 a WIM - MSWIM header -
+/// which wimlib opens and WinPE's expand.exe cannot) into `dest`. Returns its file name.
+pub(crate) async fn extract_ssu(log: &JobLog, msu: &Path, dest: &Path) -> Result<Option<String>> {
+    let listing = run(log, "wimlib-imagex", &["dir", &msu.display().to_string(), "1"]).await.unwrap_or_default();
+    let Some(path) = listing.lines().map(str::trim).find(|l| l.trim_start_matches('/').to_uppercase().starts_with("SSU-") && l.to_lowercase().ends_with(".cab")) else {
+        return Ok(None);
+    };
+    run(log, "wimlib-imagex", &["extract", &msu.display().to_string(), "1", path, &format!("--dest-dir={}", dest.display()), "--no-acls"]).await?;
+    Ok(Some(path.trim_start_matches('/').to_owned()))
+}
+
 /// A step's log file name: the update's file name without its extension, per image.
 fn log_name(at: &str, file: &str) -> String {
     let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
-    format!("{}-{stem}", if at == "winre" { "winre".to_owned() } else { format!("image{at}") })
+    format!("{}-{stem}", if at == "winre" { at.to_owned() } else { format!("image{at}") })
 }
 
 /// The worker's script: the install image's updates one at a time (each with its verdict),
 /// the package list of every image for the studio to check, the Safe OS update into WinRE,
 /// and DISM's own log back to the studio whatever happened.
 fn worker_cmd(url: &str, pin: &str, indexes: usize, chain: &[String], image: &[String], winre: &[String], ssu: Option<&str>) -> String {
+    let mut s = worker_head("media worker: install.wim + updates -> serviced install.wim", url, pin);
+    s += &worker_cmd_body(indexes, chain, image, winre, ssu);
+    s
+}
+
+/// Every worker script starts alike: COM1, the network, curl off the seed, the studio
+/// reached, the scratch disk W: with its folders.
+fn worker_head(what: &str, url: &str, pin: &str) -> String {
     let mut s = String::new();
-    s += "@echo off\r\nrem PVE VM Studio media worker: install.wim + updates -> serviced install.wim.\r\n";
+    s += &format!("@echo off\r\nrem PVE VM Studio {what}.\r\n");
     s += "setlocal enabledelayedexpansion\r\nset ERR=0\r\necho PVS-WORKER-START > COM1\r\nwpeutil InitializeNetwork > nul 2>&1\r\n";
     s += "copy /y %1\\pvs\\curl.exe X:\\curl.exe > nul || (echo PVS-NO-CURL > COM1 & goto :fail)\r\n";
     // -k because the certificate names the studio's DNS name, not its address - the pin is
@@ -453,6 +608,19 @@ fn worker_cmd(url: &str, pin: &str, indexes: usize, chain: &[String], image: &[S
     s += "if not defined OSDISK (echo PVS-NO-SCRATCH-DISK > COM1 & goto :fail)\r\n";
     s += "(\r\necho select disk %OSDISK%\r\necho online disk noerr\r\necho attributes disk clear readonly noerr\r\necho clean\r\necho convert gpt\r\necho create partition primary\r\necho format quick fs=ntfs label=Scratch\r\necho assign letter=W\r\n) > X:\\dp.txt\r\n";
     s += "diskpart /s X:\\dp.txt > nul 2>&1\r\nif not exist W:\\ (echo PVS-SCRATCH-FAILED > COM1 & goto :fail)\r\nmkdir W:\\mount W:\\scratch W:\\upd W:\\logs\r\n";
+    s
+}
+
+/// The end of every worker script: DISM's own log back to the studio, and the failure exit.
+fn worker_tail() -> String {
+    // DISM's own log - the why behind any error code - goes back in every case.
+    let mut s = String::from(":log\r\n%C% -T X:\\Windows\\Logs\\DISM\\dism.log %U%/dism.log > nul 2>&1\r\nexit /b 0\r\n");
+    s += ":fail\r\ncall :log\r\necho PVS-WORKER-FAILED > COM1\r\n";
+    s
+}
+
+fn worker_cmd_body(indexes: usize, chain: &[String], image: &[String], winre: &[String], ssu: Option<&str>) -> String {
+    let mut s = String::new();
     s += "echo PVS-COPY-IN > COM1\r\n%C% -o W:\\install.wim %U%/install.wim > COM1 2>&1 || goto :fail\r\n";
     if !winre.is_empty() {
         s += "%C% -o W:\\winre.wim %U%/winre.wim > COM1 2>&1 || goto :fail\r\n";
@@ -488,6 +656,9 @@ fn worker_cmd(url: &str, pin: &str, indexes: usize, chain: &[String], image: &[S
     // Microsoft's procedure cleans the install image without /ResetBase (the updates stay
     // removable), and only a pending operation (0x800F0806) is a warning, not a failure.
     dism_step(&mut s, "%1 cleanup", "image%1-cleanup", "dism /English /Image:W:\\mount /Cleanup-Image /StartComponentCleanup /ScratchDir:W:\\scratch");
+    // Windows' own verdict on the image: the component store scanned for corruption (about
+    // a minute an image). Not WinRE: DISM refuses /ScanHealth on a Windows PE image (error 50).
+    s += &health_check("%1");
     s += "dism /English /Image:W:\\mount /Get-Packages /Format:Table > W:\\packages-%1.txt 2>&1\r\n%C% -T W:\\packages-%1.txt %U%/packages-%1.txt > nul 2>&1\r\n";
     s += "echo PVS-COMMIT %1 > COM1\r\ndism /English /Unmount-Image /MountDir:W:\\mount /Commit /ScratchDir:W:\\scratch > COM1 2>&1 || exit /b 1\r\nexit /b 0\r\n";
 
@@ -510,10 +681,110 @@ fn worker_cmd(url: &str, pin: &str, indexes: usize, chain: &[String], image: &[S
         s += "dism /English /Export-Image /SourceImageFile:W:\\winre.wim /SourceIndex:1 /DestinationImageFile:W:\\winre-serviced.wim /Compress:max /Bootable /ScratchDir:W:\\scratch > COM1 2>&1 || exit /b 1\r\n";
         s += "%C% -T W:\\winre-serviced.wim %U%/winre-serviced.wim > COM1 2>&1 || exit /b 1\r\nexit /b 0\r\n";
     }
-    // DISM's own log - the why behind any error code - goes back in every case.
-    s += ":log\r\n%C% -T X:\\Windows\\Logs\\DISM\\dism.log %U%/dism.log > nul 2>&1\r\nexit /b 0\r\n";
-    s += ":fail\r\ncall :log\r\necho PVS-WORKER-FAILED > COM1\r\n";
+    s += &worker_tail();
     s
+}
+
+
+
+/// A worker VM's run: what it boots, what it is served, how long it may take.
+pub(crate) struct WorkerSpec<'a> {
+    /// Its id; the worker's side door serves `share` under it while it runs.
+    pub run_id: &'a str,
+    pub share: &'a Path,
+    /// The WinPE it boots.
+    pub pe: &'a winpe::WinPe,
+    /// curl.exe for its seed disk (from a Windows image of the same family).
+    pub curl: &'a [u8],
+    pub scratch_gb: u64,
+    pub minutes: u64,
+    /// For the VM's description: "media worker for Windows Server 2025 26100.33438".
+    pub what: String,
+}
+
+/// Runs one worker VM: boots the WinPE with a seed disk carrying `script(url, pin)` and
+/// curl, serves `share` to it over the studio's own HTTPS port until it is done, and
+/// removes the VM whatever happened. Returns the markers it wrote to COM1.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_worker(
+    pve: &Pve,
+    db: &SqlitePool,
+    log: &JobLog,
+    pr: &mut Progress,
+    work: &Path,
+    p: &Placement,
+    link: &Link,
+    w: WorkerSpec<'_>,
+    script: impl FnOnce(&str, &str) -> String,
+) -> Result<Vec<String>> {
+    let ip = studio_ip()?;
+    let short = w.run_id.trim_start_matches("run-").chars().take(8).collect::<String>();
+    let seed_name = format!("pvs-seed-worker-{short}");
+    let token: String = uuid::Uuid::new_v4().simple().to_string() + &uuid::Uuid::new_v4().simple().to_string();
+    let url = format!("{}/worker/{}/{token}", link.base.replace("{ip}", &ip), w.run_id);
+    tokio::fs::write(w.share.join("ping"), "ok").await?;
+    RUNS.lock().unwrap().insert(w.run_id.to_owned(), (token.clone(), w.share.to_path_buf()));
+    let mut vm: Option<u32> = None;
+    let result = async {
+        let cmd = script(&url, &link.pin);
+        let seed_disk = SeedDisk::build_bytes(work, &seed_name, "PVSSEED", &[("pvs/pe.cmd", cmd.as_bytes()), ("pvs/curl.exe", w.curl)]).await?;
+        log.ok(format!("Worker fetches from the studio at {} over {}", link.base.replace("{ip}", &ip), if link.pin.is_empty() { "HTTP" } else { "HTTPS, the studio's key pinned" })).await;
+        let size: WorkerSettings = settings::load(db, "worker").await?;
+        golds::check_node_memory(pve, log, &p.node, size.memory_mb).await?;
+        pve.ensure_pool(GOLD_POOL, "PVE VM Studio: golds (templates) and the bakes that make them").await?;
+        let guard = pve.vmid_guard().await;
+        let vmid = pve.free_vmid_in(GOLD_IDS).await?;
+        let mut net0 = format!("e1000,bridge={}", p.bridge);
+        if let Some(v) = p.vlan {
+            net0 += &format!(",tag={v}");
+        }
+        let vm_name = format!("worker-{short}");
+        log.line(format!(
+            "Creating worker VM {vmid} ({vm_name}): WinPE {}, {} GB memory, {} cores, {} GB scratch disk on {}",
+            w.pe.build,
+            size.memory_mb / 1024,
+            size.cores,
+            w.scratch_gb,
+            p.disk_storage
+        ))
+        .await;
+        let create = form![
+            ("vmid", vmid),
+            ("name", &vm_name),
+            ("pool", GOLD_POOL),
+            ("ostype", "win11"),
+            ("machine", "q35"),
+            ("bios", "ovmf"),
+            ("cpu", &p.cpu_windows),
+            ("cores", size.cores),
+            ("memory", size.memory_mb),
+            ("efidisk0", format!("{}:1,efitype=4m,pre-enrolled-keys=1", p.disk_storage)),
+            ("sata0", format!("{},media=cdrom", w.pe.volid)),
+            ("sata1", format!("{}:{},discard=on,ssd=1", p.disk_storage, w.scratch_gb)),
+            ("serial0", "socket"),
+            ("net0", net0),
+            ("boot", "order=sata0"),
+            ("tags", crate::tags::WORKER),
+            ("description", format!("PVE VM Studio: {} - removed when it is done.", w.what)),
+        ];
+        let created = pve.run_task(&format!("/nodes/{}/qemu", enc(&p.node)), create, |_| {}).await;
+        drop(guard);
+        if pve.vm_status(&p.node, vmid).await.is_ok() {
+            vm = Some(vmid);
+        }
+        created.context("creating the worker VM")?;
+        seed::attach(pve, &p.node, vmid, "sata2", &p.disk_storage, seed_disk, &seed_name).await.context("attaching the worker's seed disk")?;
+        windows::run_pass(pve, log, pr, &p.node, vmid, "worker", w.minutes).await
+    }
+    .await;
+    if let Some(vmid) = vm {
+        match pve.vm_destroy(&p.node, vmid).await {
+            Ok(()) => log.ok(format!("Worker VM {vmid} removed")).await,
+            Err(e) => log.warn(format!("Worker VM {vmid} could not be removed: {e:#}")).await,
+        }
+    }
+    RUNS.lock().unwrap().remove(w.run_id);
+    result
 }
 
 /// Builds the ISO. Returns what the blade's history records.
@@ -524,7 +795,6 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
     let dir: PathBuf = work.join(format!("media-{run_id}"));
     // What the worker fetches and sends back, served by worker_router while it runs.
     let share = dir.join("worker");
-    let mut worker: Option<u32> = None;
 
     let result: Result<MediaIso> = async {
         // Downloads go to a cache a failed build leaves behind: the next try keeps what is
@@ -633,19 +903,8 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         let winre_s = winre.display().to_string();
         run(log, "wimlib-imagex", &["export", &first_s, "2", &winre_s, "--compress=maximum", "--boot"]).await?;
 
-        // boot.wim: 1 is WinPE, 2 the Setup environment (Setup and its own DISM in X:\sources).
         log.line("Building boot.wim: WinPE and the Setup environment").await;
-        let boot = tree.join("sources/boot.wim");
-        let boot_s = boot.display().to_string();
-        let _ = tokio::fs::remove_file(&boot).await;
-        run(log, "wimlib-imagex", &["export", &winre_s, "1", &boot_s, "Microsoft Windows PE", "Microsoft Windows PE", "--compress=maximum"]).await?;
-        run(log, "wimlib-imagex", &["info", &boot_s, "1", "--image-property", "FLAGS=9"]).await?;
-        winpe::wim_update(&boot, "delete --force /Windows/System32/winpeshl.ini\n").await?;
-        run(log, "wimlib-imagex", &["export", &winre_s, "1", &boot_s, "Microsoft Windows Setup", "Microsoft Windows Setup", "--boot"]).await?;
-        run(log, "wimlib-imagex", &["info", &boot_s, "2", "--image-property", "FLAGS=2"]).await?;
-        let (mut setup, n) = winpe::setup_source_cmds(&tree).await?;
-        setup.insert_str(0, "delete --force /Windows/System32/winpeshl.ini\n");
-        winpe_update_index(&boot, 2, &setup).await?;
+        let n = build_boot_wim(log, &tree, &winre).await?;
         log.ok(format!("boot.wim: WinPE and the Setup environment ({n} Setup files)")).await;
 
         // install.wim: one image per edition, put together from its ESD (and, for a client
@@ -704,8 +963,10 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         }
         let target_rev = req.build.rsplit('.').next().unwrap_or_default().to_owned();
         log.ok(format!("install.wim: {} image(s) at build {}.{base_rev}; the catalog's build is {}", editions_out.len(), req.build.split('.').next().unwrap_or(""), req.build)).await;
-        // Downloaded ESDs are no longer needed once the images are out of them.
-        for f in files.iter().filter(|f| !is_update(&f.name)) {
+        // Downloaded ESDs are no longer needed once the images are out of them - unless the
+        // downloads are kept for the next build.
+        let keep: bool = settings::load::<WorkerSettings>(db, "worker").await.unwrap_or_default().keep_downloads;
+        for f in files.iter().filter(|f| !is_update(&f.name) && !keep) {
             let _ = tokio::fs::remove_file(dl.join(&f.name)).await;
             let _ = tokio::fs::remove_file(dl.join(&f.name).with_extension("esd")).await;
         }
@@ -719,7 +980,6 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         if behind {
             pr.stage(42.0, 90.0, "the worker applies the updates");
             applied = updates.iter().chain(&winre_updates).map(|u| u.name.clone()).collect();
-            let ip = studio_ip()?;
             let pe: winpe::WinPe = settings::load(db, "winpe").await?;
             if pe.volid.is_empty() {
                 bail!("the worker boots the studio's WinPE - build it under Media first");
@@ -742,7 +1002,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             if chain.len() > 1 {
                 tokio::fs::create_dir_all(share.join("upd/lcu")).await?;
                 for u in &chain {
-                    move_file(&dl.join(&u.name), &share.join("upd/lcu").join(&u.name)).await?;
+                    take_file(&dl.join(&u.name), &share.join("upd/lcu").join(&u.name), keep).await?;
                     chain_names.push(u.name.clone());
                 }
                 if let Some(t) = &target {
@@ -754,13 +1014,13 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             }
             for (i, u) in updates.iter().filter(|u| chain.len() <= 1 || !in_chain(u)).enumerate() {
                 let n = format!("{:02}-{}", i + 1, u.name);
-                move_file(&dl.join(&u.name), &share.join("upd").join(&n)).await?;
+                take_file(&dl.join(&u.name), &share.join("upd").join(&n), keep).await?;
                 image_names.push(n);
             }
             let mut winre_names = Vec::new();
             for (i, u) in winre_updates.iter().enumerate() {
                 let n = format!("re{:02}-{}", i + 1, u.name);
-                move_file(&dl.join(&u.name), &share.join("upd").join(&n)).await?;
+                take_file(&dl.join(&u.name), &share.join("upd").join(&n), keep).await?;
                 winre_names.push(n);
             }
             if !winre_names.is_empty() {
@@ -770,110 +1030,42 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             let upd_gb = updates.iter().chain(&winre_updates).map(|u| u.size).sum::<u64>() as f64 / 1e9;
             let scratch_gb = ((wim_gb * 4.0 + upd_gb * 2.0 + 20.0).ceil() as u64).max(60);
 
-            let seed_name = format!("pvs-seed-media-{}", &run_id[4..12]);
-            let token: String = uuid::Uuid::new_v4().simple().to_string() + &uuid::Uuid::new_v4().simple().to_string();
-            let url = format!("{}/worker/{run_id}/{token}", link.base.replace("{ip}", &ip));
-            tokio::fs::write(share.join("ping"), "ok").await?;
-            RUNS.lock().unwrap().insert(run_id.clone(), (token.clone(), share.clone()));
             // WinRE's servicing stack: SSU-*.cab out of the cumulative update's .msu - since 24H2
             // a WIM (MSWIM header), which wimlib opens and WinPE's expand.exe cannot.
             let mut ssu_name: Option<String> = None;
             if !winre_names.is_empty()
-                && let Some(lcu) = image_names.iter().find(|n| n.to_lowercase().ends_with(".msu"))
+                // The servicing stack of the newest cumulative update - never a checkpoint's.
+                && let Some(lcu) = image_names
+                    .iter()
+                    .filter(|n| n.to_lowercase().ends_with(".msu"))
+                    .max_by_key(|n| kb_of(n).and_then(|k| k[2..].parse::<u64>().ok()).unwrap_or(0))
             {
                 let msu = share.join("upd").join(lcu.replace('/', std::path::MAIN_SEPARATOR_STR));
-                let listing = run(log, "wimlib-imagex", &["dir", &msu.display().to_string(), "1"]).await.unwrap_or_default();
-                if let Some(path) = listing.lines().map(str::trim).find(|l| l.trim_start_matches('/').to_uppercase().starts_with("SSU-") && l.to_lowercase().ends_with(".cab")) {
-                    let name = path.trim_start_matches('/').to_owned();
-                    run(log, "wimlib-imagex", &["extract", &msu.display().to_string(), "1", path, &format!("--dest-dir={}", share.join("upd").display()), "--no-acls"]).await?;
+                if let Some(name) = extract_ssu(log, &msu, &share.join("upd")).await? {
                     log.line(format!("WinRE's servicing stack: {name}, out of {}", lcu.rsplit('/').next().unwrap_or(lcu))).await;
                     ssu_name = Some(name);
                 } else {
                     log.line("No servicing stack inside the cumulative update - WinRE gets the Safe OS update alone").await;
                 }
             }
-            let cmd = worker_cmd(&url, &link.pin, base.len(), &chain_names, &image_names, &winre_names, ssu_name.as_deref());
-            let seed_disk = SeedDisk::build_bytes(work, &seed_name, "PVSSEED", &[("pvs/pe.cmd", cmd.as_bytes()), ("pvs/curl.exe", &curl)]).await?;
-            log.ok(format!("Worker fetches from the studio at {} over {}", link.base.replace("{ip}", &ip), if link.pin.is_empty() { "HTTP" } else { "HTTPS, the studio's key pinned" })).await;
-            let size: WorkerSettings = settings::load(db, "worker").await?;
-            golds::check_node_memory(pve, log, &p.node, size.memory_mb).await?;
-            pve.ensure_pool(GOLD_POOL, "PVE VM Studio: golds (templates) and the bakes that make them").await?;
-            let guard = pve.vmid_guard().await;
-            let vmid = pve.free_vmid_in(GOLD_IDS).await?;
-            let mut net0 = format!("e1000,bridge={}", p.bridge);
-            if let Some(v) = p.vlan {
-                net0 += &format!(",tag={v}");
-            }
             log.run(format!("Worker: {} update(s) into {} image(s) - a WinPE VM applies them with DISM", applied.len(), base.len())).await;
-            let vm_name = format!("media-{}", &run_id[4..12]);
-            log.line(format!(
-                "Creating worker VM {vmid} ({vm_name}): WinPE {}, {} GB memory, {} cores, {scratch_gb} GB scratch disk on {}",
-                pe.build,
-                size.memory_mb / 1024,
-                size.cores,
-                p.disk_storage
-            ))
-            .await;
-            let create = form![
-                ("vmid", vmid),
-                ("name", &vm_name),
-                ("pool", GOLD_POOL),
-                ("ostype", "win11"),
-                ("machine", "q35"),
-                ("bios", "ovmf"),
-                ("cpu", &p.cpu_windows),
-                ("cores", size.cores),
-                ("memory", size.memory_mb),
-                ("efidisk0", format!("{}:1,efitype=4m,pre-enrolled-keys=1", p.disk_storage)),
-                ("sata0", format!("{},media=cdrom", pe.volid)),
-                ("sata1", format!("{}:{scratch_gb},discard=on,ssd=1", p.disk_storage)),
-                ("serial0", "socket"),
-                ("net0", net0),
-                ("boot", "order=sata0"),
-                ("tags", crate::tags::WORKER),
-                ("description", format!("PVE VM Studio: media worker for {} {} - removed when it is done.", prod.name, req.build)),
-            ];
-            let created = pve.run_task(&format!("/nodes/{}/qemu", enc(&p.node)), create, |_| {}).await;
-            drop(guard);
-            if pve.vm_status(&p.node, vmid).await.is_ok() {
-                worker = Some(vmid);
-            }
-            created.context("creating the worker VM")?;
-            seed::attach(pve, &p.node, vmid, "sata2", &p.disk_storage, seed_disk, &seed_name).await.context("attaching the worker's seed disk")?;
-            log.line(format!("DISM: about 15-25 min per image")).await;
-            let minutes = 30 + 45 * base.len() as u64 + if winre_names.is_empty() { 0 } else { 15 };
-            let m = windows::run_pass(pve, log, &mut pr, &p.node, vmid, "worker", minutes).await?;
-            // DISM's own dism.log rotates and holds only the last steps - it is kept whole for
-            // reading, but the error lines come from each step's own log, named by its step.
-            let keep_dir = work.parent().unwrap_or(work).join("dism-logs");
-            tokio::fs::create_dir_all(&keep_dir).await?;
-            prune_dism_logs(&keep_dir, 5).await;
-            let dism_log = share.join("dism.log");
-            if dism_log.exists() {
-                tokio::fs::copy(&dism_log, keep_dir.join(format!("media-{}.log", &run_id[4..12]))).await?;
-            }
-            if let Ok(mut rd) = tokio::fs::read_dir(share.join("logs")).await {
-                let mut names = Vec::new();
-                while let Ok(Some(e)) = rd.next_entry().await {
-                    names.push(e.file_name().to_string_lossy().into_owned());
-                }
-                names.sort();
-                for name in names {
-                    let path = share.join("logs").join(&name);
-                    let keep = keep_dir.join(format!("media-{}-{name}", &run_id[4..12]));
-                    tokio::fs::copy(&path, &keep).await?;
-                    let text = String::from_utf8_lossy(&tokio::fs::read(&path).await?).into_owned();
-                    let errors: Vec<&str> = text.lines().filter(|l| l.contains(", Error ")).collect();
-                    if errors.is_empty() {
-                        continue;
-                    }
-                    let step = name.trim_end_matches(".log");
-                    log.line(format!("DISM logged {} error line(s) in {step} - its verdict follows; the log is {}", errors.len(), keep.display())).await;
-                    for l in errors.iter().take(30) {
-                        log.debug(format!("{step} | {}", l.trim())).await;
-                    }
-                }
-            }
+            log.line("DISM: about 15-30 min per image, health scan included").await;
+            let minutes = 60 + 60 * base.len() as u64 + if winre_names.is_empty() { 0 } else { 20 };
+            let spec = WorkerSpec {
+                run_id: &run_id,
+                share: &share,
+                pe: &pe,
+                curl: &curl,
+                scratch_gb,
+                minutes,
+                what: format!("media worker for {} {}", prod.name, req.build),
+            };
+            let (n_base, chain_n, image_n, winre_n, ssu_n) = (base.len(), chain_names.clone(), image_names.clone(), winre_names.clone(), ssu_name.clone());
+            let m = run_worker(pve, db, log, &mut pr, work, p, &link, spec, |url, pin| {
+                worker_cmd(url, pin, n_base, &chain_n, &image_n, &winre_n, ssu_n.as_deref())
+            })
+            .await?;
+            report_dism_logs(log, work, &share, "media", &run_id).await?;
             if !m.iter().any(|l| l == "PVS-WORKER-OK") {
                 bail!("the worker failed: {}", m.iter().rev().find(|l| l.contains("FAIL") || l.starts_with("PVS-NO")).or(m.last()).map(|l| crate::markers::text(l)).unwrap_or_else(|| "nothing on its serial console".into()));
             }
@@ -911,10 +1103,6 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                     _ => {}
                 }
             }
-            if let Some(vmid) = worker.take() {
-                pve.vm_destroy(&p.node, vmid).await?;
-                log.ok(format!("Worker VM {vmid} removed")).await;
-            }
             // The package lists: nothing half-installed in any image.
             for i in 1..=editions_out.len() {
                 let Ok(raw) = tokio::fs::read(share.join(format!("packages-{i}.txt"))).await else {
@@ -928,6 +1116,15 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             }
             if !failed.is_empty() {
                 bail!("update(s) failed in the install image: {} - DISM's log is kept under dism-logs", failed.join(", "));
+            }
+            // Health: Windows' own scan of every image's component store (not WinRE's - DISM
+            // refuses it on a Windows PE image, error 50).
+            for i in 1..=editions_out.len() {
+                let raw = tokio::fs::read(share.join(format!("health-{i}.txt"))).await.map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
+                match health_verdict(&raw) {
+                    Ok(v) => log.ok(format!("Image {i} is healthy: {v} (DISM /ScanHealth)")).await,
+                    Err(why) => bail!("image {i} is not healthy: {why} - DISM /ScanHealth"),
+                }
             }
             move_file(&share.join("serviced.wim"), &install).await.context("reading the serviced image the worker sent back")?;
             // The proof: every image now reports the catalog's build.
@@ -946,6 +1143,13 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                     winpe_update_index(&install, i, &format!("add '{re_s}' /Windows/System32/Recovery/winre.wim\n")).await?;
                 }
                 log.ok("WinRE in every image carries the Safe OS update").await;
+                // boot.wim is WinRE too (WinPE and the Setup environment): built again from the
+                // serviced one, so Setup boots the patched build - and the boot manager from it
+                // onto the media, as Microsoft's step 28.
+                build_boot_wim(log, &tree, &serviced_re).await?;
+                let b = winpe::image_build(log, &tree.join("sources/boot.wim"), "2").await?;
+                let copied = boot_files_from(log, &dir, &tree).await?;
+                log.ok(format!("boot.wim built again from the serviced WinRE: {b}; boot manager onto the media: {}", if copied.is_empty() { "nothing".into() } else { copied.join(", ") })).await;
             } else if !winre_names.is_empty() {
                 log.warn("WinRE keeps its base build - the Safe OS update did not go in").await;
             }
@@ -998,13 +1202,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
     }
     .await;
 
-    if let Some(vmid) = worker
-        && pve.vm_destroy(&p.node, vmid).await.is_ok()
-    {
-        log.line(format!("Removed worker VM {vmid}")).await;
-    }
     let _ = tokio::fs::remove_dir_all(&dir).await;
-    RUNS.lock().unwrap().remove(&run_id);
     let iso = result?;
     let mut list: Vec<MediaIso> = settings::load(db, "media_isos").await.unwrap_or_default();
     list.retain(|m| m.volid != iso.volid);
@@ -1050,11 +1248,14 @@ fn update_label(name: &str) -> String {
 }
 
 fn where_label(at: &str) -> String {
-    if at == "winre" { "WinRE".into() } else { format!("image {at}") }
+    match at {
+        "winre" => "WinRE".into(),
+        _ => format!("image {at}"),
+    }
 }
 
 /// DISM's exit code as Windows writes HRESULTs: -2146498530 is 0x800F081E.
-fn dism_code(raw: &str) -> String {
+pub(crate) fn dism_code(raw: &str) -> String {
     match raw.parse::<i64>() {
         Ok(n) if n < 0 => format!("0x{:08X}", n as i32 as u32),
         Ok(n) if n > 0xFFFF => format!("0x{n:08X}"),
@@ -1063,15 +1264,15 @@ fn dism_code(raw: &str) -> String {
     }
 }
 
-struct PackageReport {
-    summary: String,
-    broken: Vec<String>,
+pub(crate) struct PackageReport {
+    pub(crate) summary: String,
+    pub(crate) broken: Vec<String>,
 }
 
 /// An image's package list (dism /Get-Packages /Format:Table): how many in which state, the
 /// cumulative update levels (RollupFix), and anything left half-done. "Install Pending" is
 /// normal offline - the first boot finishes it.
-fn package_report(table: &str) -> PackageReport {
+pub(crate) fn package_report(table: &str) -> PackageReport {
     let mut states: Vec<(String, usize)> = Vec::new();
     let (mut rollups, mut broken) = (Vec::new(), Vec::new());
     for line in table.lines() {
@@ -1119,6 +1320,18 @@ async fn winpe_update_index(wim: &Path, index: usize, cmds: &str) -> Result<()> 
     Ok(())
 }
 
+/// A downloaded file into the worker's share: moved, or - downloads kept - hard-linked
+/// (copied across file systems), so the download stays where the next build finds it.
+pub(crate) async fn take_file(from: &Path, to: &Path, keep: bool) -> Result<()> {
+    if !keep {
+        return move_file(from, to).await;
+    }
+    if tokio::fs::hard_link(from, to).await.is_err() {
+        tokio::fs::copy(from, to).await.with_context(|| format!("copying {} to {}", from.display(), to.display()))?;
+    }
+    Ok(())
+}
+
 /// A rename when both sides share a file system (the studio's data and the share do), a
 /// copy otherwise.
 async fn move_file(from: &Path, to: &Path) -> Result<()> {
@@ -1137,6 +1350,17 @@ fn statvfs_free(path: &Path) -> Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn health_verdicts() {
+        let ok = "Deployment Image Servicing and Management tool\r\nVersion: 10.0.26100.1\r\n\r\nImage Version: 10.0.26100.33438\r\n\r\n[==========================100.0%==========================] No component store corruption detected.\r\nThe operation completed successfully.\r\n";
+        assert!(health_verdict(ok).is_ok());
+        assert!(health_verdict("[===100.0%===] The component store is repairable.\r\nThe operation completed successfully.").unwrap_err().contains("repairable"));
+        assert!(health_verdict("The component store is not repairable.").unwrap_err().contains("not repairable"));
+        assert!(health_verdict("Error: 5\r\n\r\nAccess is denied.").unwrap_err().contains("Access is denied."));
+        assert!(health_verdict("Error: 50\r\n\r\nThe request is not supported.\r\n\r\nThe DISM log file can be found at X:\\windows\\Logs\\DISM\\dism.log").unwrap_err().contains("Error: 50 The request is not supported."));
+        assert!(health_verdict("").is_err());
+    }
 
     fn f(name: &str) -> uup::File {
         uup::File { name: name.into(), url: String::new(), sha1: String::new(), size: 1 }
@@ -1192,6 +1416,7 @@ mod tests {
         let chain = vec!["Windows11.0-KB5043080-x64.msu".to_owned(), "Windows11.0-KB5124010-x64.msu".to_owned()];
         let image = vec!["lcu/Windows11.0-KB5124010-x64.msu".to_owned(), "01-Windows11.0-KB5121794-x64.cab".to_owned()];
         let cmd = worker_cmd("https://x/worker/r/t", "", 1, &chain, &image, &["re01-Windows11.0-KB5125758-x64.cab".to_owned()], Some("SSU-26100.9539-x64.cab"));
+        assert!(cmd.contains("/ScanHealth") && !cmd.contains("health-winre"), "every install image scanned, WinRE not");
         assert!(cmd.contains("-o W:\\upd\\SSU-26100.9539-x64.cab %U%/upd/SSU-26100.9539-x64.cab"));
         let ssu_at = cmd.find("/PackagePath:W:\\upd\\SSU-26100.9539-x64.cab").unwrap();
         let safeos_at = cmd.find("/PackagePath:W:\\upd\\re01-Windows11.0-KB5125758-x64.cab").unwrap();
