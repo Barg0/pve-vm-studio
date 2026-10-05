@@ -59,6 +59,12 @@ pub struct PveConfig {
     pub token_secret: String,
     /// The cluster's CA (a copy of /etc/pve/pve-root-ca.pem). Without it the system roots apply.
     pub ca_file: Option<PathBuf>,
+    /// The name PVE's certificate carries, when it is not the address in `url` - a node with
+    /// an ACME (Let's Encrypt) or uploaded certificate, e.g. "pve-01.example.com". The studio
+    /// still connects to `url`'s address (no DNS needed) and checks the certificate for
+    /// this name.
+    #[serde(default)]
+    pub tls_name: Option<String>,
     /// Skip certificate checks entirely. Development only.
     #[serde(default)]
     pub insecure: bool,

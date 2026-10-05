@@ -173,6 +173,9 @@ struct Inventory {
     storages: Vec<Resource>,
     vnets: Vec<Vnet>,
     guests: Vec<Resource>,
+    /// The node the studio reaches the PVE API through now, and how many it can fail over to.
+    api_via: String,
+    api_ways: usize,
 }
 
 #[derive(Serialize)]
@@ -187,6 +190,9 @@ struct NodeInfo {
     #[serde(flatten)]
     resource: Resource,
     ip: Option<String>,
+    /// The DNS name of the node's own certificate (ACME or uploaded) - the browser's links
+    /// to its web UI use it, as its address would not match that certificate.
+    web_name: Option<String>,
     bridges: Vec<Bridge>,
 }
 
@@ -215,7 +221,8 @@ async fn inventory(State(app): State<AppState>, user: User) -> ApiResult<Json<In
                 // An offline node cannot list its bridges; show it without them.
                 let bridges = if online { app.pve.bridges(&name).await.unwrap_or_default() } else { vec![] };
                 let ip = status.iter().find(|s| s.kind == "node" && s.name == name).and_then(|s| s.ip.clone());
-                nodes.push(NodeInfo { resource: r, ip, bridges });
+                let web_name = if online { app.pve.custom_cert_name(&name).await } else { None };
+                nodes.push(NodeInfo { resource: r, ip, web_name, bridges });
             }
             "storage" => storages.push(r),
             "qemu" | "lxc" => guests.push(r),
@@ -233,6 +240,8 @@ async fn inventory(State(app): State<AppState>, user: User) -> ApiResult<Json<In
         storages,
         vnets,
         guests,
+        api_via: app.pve.endpoint().label.clone(),
+        api_ways: app.pve.endpoint_count(),
     }))
 }
 

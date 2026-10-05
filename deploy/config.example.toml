@@ -17,4 +17,8 @@ token_secret = "00000000-0000-0000-0000-000000000000"
 # A copy of the cluster CA (/etc/pve/pve-root-ca.pem). The node certificate must name the
 # host used in `url`.
 ca_file = "/etc/pve-vm-studio/pve-root-ca.pem"
+# A node with its own certificate (ACME / Let's Encrypt, or uploaded) names only its DNS
+# name: keep the address in `url` and put that name here - the studio connects to the
+# address and checks the certificate for this name.
+# tls_name = "pve-01.example.com"
 # insecure = true   # skip certificate checks - development only

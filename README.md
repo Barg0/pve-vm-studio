@@ -95,6 +95,12 @@ What it does:
 3. Installs the studio as a service on port 443, with a self-signed certificate to begin with.
 4. Puts a link to the studio into **Datacenter → Notes**.
 
+The studio reaches the PVE API through the node it was installed on, by its address. In a
+cluster it learns the other nodes and continues through one of them when that node is down.
+A node with its own certificate (ACME / Let's Encrypt, or uploaded) is still reached by its
+address; the certificate is checked for the name on it (`tls_name` in
+`/etc/pve-vm-studio/config.toml`, which the installer fills in).
+
 Then open `https://<the container's address or DNS name>` and sign in with your PVE account
 (`root@pam` works, any other PVE user too).
 

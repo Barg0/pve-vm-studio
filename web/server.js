@@ -469,6 +469,9 @@ function dashSystem(inv) {
     : line("warn", "No certificate read yet");
   // This build against GitHub: the newest release decides; how far main is ahead is detail.
   const vr = dashVer;
+  // The node the studio talks to PVE through - another one takes over when it is down.
+  const via = /^https?:/.test(inv.api_via || "") ? (online.find(n => (inv.api_via || "").includes(n.ip)) || {}).node || inv.api_via.replace(/^https?:\/\/|:\d+\/?$/g, "") : inv.api_via;
+  const apiLine = inv.api_via ? line("ok", `PVE API through <b>${esc(via)}</b>`, inv.api_ways > 1 ? `<span class="muted" title="If it cannot be reached, the studio continues through another node">${inv.api_ways - 1} more node${inv.api_ways === 2 ? "" : "s"} as fallback</span>` : `<span class="muted" title="A cluster's other nodes take over when this one is down - a single node has none">no fallback</span>`) : "";
   const build = vr ? `v${esc(vr.version)}${vr.commit ? ` <span class="muted mono">${esc(vr.commit)}</span>` : ""}` : "";
   const verLine = !vr ? "" : vr.state === "update"
     ? line("warn", `PVE VM Studio ${build}`, `<a class="pill status warn" href="${esc(vr.url)}" target="_blank" rel="noopener" title="Release notes on GitHub">v${esc(vr.latest)} available</a>`)
@@ -480,7 +483,7 @@ function dashSystem(inv) {
     ${sec(inv.cluster ? "Cluster" : "Node", "", "", quorum + nodes)}
     ${sec("Storage for VMs", "", "", storage)}
     ${sec("Networks", "networks", "Networks", networks)}
-    ${sec("Studio", "studio", "Settings", verLine + studio)}
+    ${sec("Studio", "studio", "Settings", verLine + studio + apiLine)}
   </div>`, "", true);
 }
 

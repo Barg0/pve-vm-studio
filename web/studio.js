@@ -8419,9 +8419,11 @@ function liveVmPills(s) {
 function pveConsoleUrl(v) {
   const inv = typeof cluster !== "undefined" && cluster.inventory;
   const node = inv && inv.nodes.find(n => n.node === v.node);
-  if (!node || !node.ip || v.vmid == null) return "";
+  if (!node || !(node.web_name || node.ip) || v.vmid == null) return "";
   const q = new URLSearchParams({ console: "kvm", novnc: "1", vmid: String(v.vmid), vmname: v.name, node: v.node, resize: "off", cmd: "" });
-  return `https://${node.ip.includes(":") ? "[" + node.ip + "]" : node.ip}:8006/?${q}`;
+  // A node with its own certificate (ACME) by the name on it; else by its address.
+  const host = node.web_name || (node.ip.includes(":") ? "[" + node.ip + "]" : node.ip);
+  return `https://${host}:8006/?${q}`;
 }
 
 function renderVmOverview() {

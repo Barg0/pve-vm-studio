@@ -181,6 +181,7 @@ async fn main() -> Result<()> {
         config: Arc::new(config),
     };
 
+    tokio::spawn(pve_nodes_loop(state.clone()));
     tokio::spawn(reconcile_after_restart(state.clone()));
     tokio::spawn(warm_caches(state.clone()));
     tokio::spawn(clean_work(state.clone()));
@@ -350,6 +351,30 @@ async fn dir_size(path: &std::path::Path) -> u64 {
         }
     }
     total
+}
+
+/// The cluster's nodes as further ways to the PVE API (failover when the configured node is
+/// down): the ones known from before right away - so a restart with that node down still
+/// gets through - then asked of PVE every ten minutes.
+async fn pve_nodes_loop(app: AppState) {
+    let known: Vec<pve::NodeEndpoint> = settings::load(&app.db, "pve_nodes").await.unwrap_or_default();
+    app.pve.set_nodes(&known);
+    let mut last = known;
+    loop {
+        match app.pve.discover_nodes().await {
+            Ok(nodes) if nodes != last => {
+                tracing::info!("PVE reachable through {} node(s): {}", nodes.len(), nodes.iter().map(|n| if n.tls_name.is_empty() { format!("{} ({})", n.node, n.ip) } else { format!("{} ({} as {})", n.node, n.ip, n.tls_name) }).collect::<Vec<_>>().join(", "));
+                app.pve.set_nodes(&nodes);
+                if let Err(e) = settings::save(&app.db, "pve_nodes", &nodes).await {
+                    tracing::warn!("saving the PVE nodes: {e:#}");
+                }
+                last = nodes;
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("asking PVE for its nodes: {e:#}"),
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+    }
 }
 
 async fn warm_caches(app: AppState) {

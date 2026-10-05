@@ -34,18 +34,26 @@ pub async fn open(pve: &Pve, node: &str, vmid: u32) -> Result<mpsc::UnboundedRec
         .await
         .context("opening the serial console")?;
     let port = tp.port.as_u64().or_else(|| tp.port.as_str().and_then(|p| p.parse().ok())).ok_or_else(|| anyhow!("termproxy gave no port"))?;
+    // The same node termproxy was asked on: its ticket is valid there.
+    let ep = pve.endpoint();
     let url = format!(
         "{}/api2/json/nodes/{}/qemu/{vmid}/vncwebsocket?port={port}&vncticket={}",
-        pve.origin.replacen("https://", "wss://", 1),
+        ep.origin.replacen("https://", "wss://", 1),
         enc(node),
         enc(&tp.ticket)
     );
     let mut req = url.into_client_request()?;
     req.headers_mut().insert("Authorization", HeaderValue::from_str(pve.token_header())?);
     let connector = tokio_tungstenite::Connector::Rustls(pve.ws_tls.clone());
-    let (ws, _) = tokio_tungstenite::connect_async_tls_with_config(req, None, false, Some(connector))
-        .await
-        .context("connecting to the serial console")?;
+    // With tls_name: to the configured address, the certificate checked for the name.
+    let (ws, _) = match ep.connect_addr {
+        Some(addr) => {
+            let tcp = tokio::net::TcpStream::connect(addr).await.with_context(|| format!("connecting to the serial console at {addr}"))?;
+            tokio_tungstenite::client_async_tls_with_config(req, tcp, None, Some(connector)).await
+        }
+        None => tokio_tungstenite::connect_async_tls_with_config(req, None, false, Some(connector)).await,
+    }
+    .context("connecting to the serial console")?;
     let (mut tx, mut rx) = ws.split();
     tx.send(Message::text(format!("{}:{}\n", tp.user, tp.ticket))).await?;
     // termproxy answers the login with "OK" before the console's own output.

@@ -459,6 +459,13 @@ install() {
     # The node's own address: its certificate names it, and no DNS is needed to reach it.
     local node_ip config
     node_ip=$(hostname -I | awk '{print $1}')
+    # A node with its own certificate (ACME or uploaded) carries its DNS name only, not its
+    # address: the studio keeps connecting to the address and checks the certificate for
+    # that name (tls_name) - no DNS involved.
+    local tls_name="" custom=/etc/pve/local/pveproxy-ssl.pem
+    if [[ -f $custom ]]; then
+        tls_name=$(openssl x509 -in "$custom" -noout -ext subjectAltName 2>/dev/null | grep -o 'DNS:[^,]*' | head -1 | cut -d: -f2)
+    fi
     config=$(mktemp)
     cat >"$config" <<CFG
 # PVE VM Studio - written by install.sh on $(date -Is)
@@ -469,7 +476,7 @@ data_dir = "/var/lib/pve-vm-studio"
 fqdn = "$FQDN"
 
 [pve]
-url = "https://$node_ip:8006"
+url = "https://$node_ip:8006"$( [[ -n $tls_name ]] && printf '\ntls_name = "%s"' "$tls_name" )
 token_id = "$USER_ID!$TOKEN"
 token_secret = "$secret"
 ca_file = "/etc/pve-vm-studio/pve-root-ca.pem"

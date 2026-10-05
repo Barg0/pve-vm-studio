@@ -15,12 +15,12 @@ use crate::config::PveConfig;
 
 #[derive(Clone)]
 pub struct Pve {
-    http: reqwest::Client,
-    /// Uploads take as long as they take; everything else gets the short client.
-    upload_http: reqwest::Client,
-    base: String,
-    /// "https://node:8006", for the websocket the serial console runs over.
-    pub origin: String,
+    /// The nodes the API is reached through: the configured one first, then the cluster's
+    /// other nodes (learned from PVE, set_nodes). A node that cannot be reached hands the
+    /// request to the next one, and the studio stays there.
+    endpoints: std::sync::Arc<std::sync::RwLock<Vec<std::sync::Arc<Endpoint>>>>,
+    active: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    cfg: std::sync::Arc<PveConfig>,
     /// TLS for that websocket - the same trust as the API client.
     pub ws_tls: std::sync::Arc<rustls::ClientConfig>,
     token_header: String,
@@ -55,12 +55,57 @@ macro_rules! form {
     };
 }
 
-impl Pve {
-    pub fn new(cfg: &PveConfig) -> Result<Self> {
+/// One way to the API: a node's address, and the name its certificate is checked for.
+pub struct Endpoint {
+    /// The node's name, or the configured url for the configured one.
+    pub label: String,
+    http: reqwest::Client,
+    /// Uploads take as long as they take; everything else gets the short client.
+    upload_http: reqwest::Client,
+    base: String,
+    /// "https://node:8006", for the websocket the serial console runs over.
+    pub origin: String,
+    /// With a tls_name: the address every connection goes to, `origin` naming the
+    /// certificate's name instead.
+    pub connect_addr: Option<std::net::SocketAddr>,
+}
+
+/// A node the API can be reached through (kept in the studio's settings, "pve_nodes").
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeEndpoint {
+    pub node: String,
+    pub ip: String,
+    /// The DNS name of its own certificate (ACME or uploaded); "" while it runs on PVE's.
+    #[serde(default)]
+    pub tls_name: String,
+}
+
+impl Endpoint {
+    fn new(cfg: &PveConfig, label: &str, url_s: &str, tls_name: Option<&str>) -> Result<Self> {
+        // tls_name: requests name the certificate's name, but go to url's address - the
+        // certificate is checked for that name, and no DNS lookup is involved.
+        let url = reqwest::Url::parse(url_s).with_context(|| format!("[pve] url {url_s}"))?;
+        let port = url.port_or_known_default().unwrap_or(8006);
+        let tls_name = tls_name.map(str::trim).filter(|n| !n.is_empty());
+        let connect_addr = match tls_name {
+            Some(_) => {
+                use std::net::ToSocketAddrs;
+                let host = url.host_str().unwrap_or_default().trim_matches(['[', ']']);
+                Some((host, port).to_socket_addrs().with_context(|| format!("[pve] url {url_s}: no address"))?.next().ok_or_else(|| anyhow!("[pve] url {url_s}: no address"))?)
+            }
+            None => None,
+        };
+        let origin = match tls_name {
+            Some(name) => format!("https://{name}:{port}"),
+            None => url_s.trim_end_matches('/').to_owned(),
+        };
         let builder = |timeout: Option<Duration>| -> Result<reqwest::Client> {
             let mut b = reqwest::Client::builder()
                 .user_agent(concat!("pve-vm-studio/", env!("CARGO_PKG_VERSION")))
                 .connect_timeout(Duration::from_secs(15));
+            if let (Some(name), Some(addr)) = (tls_name, connect_addr) {
+                b = b.resolve(name, addr);
+            }
             if let Some(t) = timeout {
                 b = b.timeout(t);
             }
@@ -74,14 +119,69 @@ impl Pve {
             Ok(b.build()?)
         };
         Ok(Self {
+            label: label.to_owned(),
             http: builder(Some(Duration::from_secs(120)))?,
             upload_http: builder(None)?,
-            base: format!("{}/api2/json", cfg.url.trim_end_matches('/')),
-            origin: cfg.url.trim_end_matches('/').to_owned(),
+            base: format!("{origin}/api2/json"),
+            origin,
+            connect_addr,
+        })
+    }
+}
+
+impl Pve {
+    pub fn new(cfg: &PveConfig) -> Result<Self> {
+        let first = Endpoint::new(cfg, &cfg.url, &cfg.url, cfg.tls_name.as_deref())?;
+        Ok(Self {
+            endpoints: std::sync::Arc::new(std::sync::RwLock::new(vec![std::sync::Arc::new(first)])),
+            active: Default::default(),
+            cfg: std::sync::Arc::new(cfg.clone()),
             ws_tls: std::sync::Arc::new(ws_tls_config(cfg)?),
             token_header: format!("PVEAPIToken={}={}", cfg.token_id, cfg.token_secret),
             vmid_lock: Default::default(),
         })
+    }
+
+    /// The way to the API in use now.
+    pub fn endpoint(&self) -> std::sync::Arc<Endpoint> {
+        let eps = self.endpoints.read().unwrap();
+        eps[self.active.load(std::sync::atomic::Ordering::Relaxed) % eps.len()].clone()
+    }
+
+    pub fn endpoint_count(&self) -> usize {
+        self.endpoints.read().unwrap().len()
+    }
+
+    /// The cluster's other nodes as further ways to the API, behind the configured one.
+    /// The configured node itself (by its address) is not added twice.
+    pub fn set_nodes(&self, nodes: &[NodeEndpoint]) {
+        let configured = reqwest::Url::parse(&self.cfg.url).ok().and_then(|u| u.host_str().map(|h| h.trim_matches(['[', ']']).to_owned())).unwrap_or_default();
+        let current = self.endpoint().label.clone();
+        let mut eps = vec![self.endpoints.read().unwrap()[0].clone()];
+        for n in nodes.iter().filter(|n| !n.ip.is_empty() && n.ip != configured && n.tls_name != configured) {
+            let host = if n.ip.contains(':') { format!("[{}]", n.ip) } else { n.ip.clone() };
+            match Endpoint::new(&self.cfg, &n.node, &format!("https://{host}:8006"), (!n.tls_name.is_empty()).then_some(n.tls_name.as_str())) {
+                Ok(e) => eps.push(std::sync::Arc::new(e)),
+                Err(e) => tracing::warn!("PVE node {} as a way to the API: {e:#}", n.node),
+            }
+        }
+        let at = eps.iter().position(|e| e.label == current).unwrap_or(0);
+        *self.endpoints.write().unwrap() = eps;
+        self.active.store(at, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Every node of the cluster with its address and its certificate's name - for
+    /// set_nodes, asked of PVE through the way in use.
+    pub async fn discover_nodes(&self) -> Result<Vec<NodeEndpoint>> {
+        let status = self.cluster_status().await?;
+        let mut out = Vec::new();
+        for s in status.iter().filter(|s| s.kind == "node") {
+            let Some(ip) = s.ip.clone() else { continue };
+            let tls_name = if s.online == Some(1) { self.custom_cert_name(&s.name).await.unwrap_or_default() } else { String::new() };
+            out.push(NodeEndpoint { node: s.name.clone(), ip, tls_name });
+        }
+        out.sort_by(|a, b| a.node.cmp(&b.node));
+        Ok(out)
     }
 
     // ---- as the studio (token) ----
@@ -115,12 +215,8 @@ impl Pve {
     /// Logs a user in with their PVE credentials. `username` carries the realm (root@pam).
     pub async fn login(&self, username: &str, password: &str) -> Result<Ticket> {
         let form = [("username", username), ("password", password)];
-        let resp = self
-            .http
-            .post(format!("{}/access/ticket", self.base))
-            .form(&form)
-            .send()
-            .await?;
+        let ep = self.endpoint();
+        let resp = ep.http.post(format!("{}/access/ticket", ep.base)).form(&form).send().await?;
         if !resp.status().is_success() {
             return Err(anyhow!("PVE refused the login ({})", resp.status()));
         }
@@ -144,15 +240,18 @@ impl Pve {
         form: Option<Form>,
         auth: Auth<'_>,
     ) -> Result<T> {
-        let url = format!("{}{}", self.base, path);
         // pveproxy drops a kept-alive connection now and then ("connection closed before
         // message completed"). A read is simply asked again; a write is not - it may have
-        // happened.
+        // happened. A node that cannot be connected to at all got nothing: the request goes
+        // to the next node (failover), a write too.
         let attempts = if method == Method::GET { 3 } else { 1 };
         let mut attempt = 0;
+        let mut tried = 0;
+        let mut ep = self.endpoint();
         loop {
             attempt += 1;
-            let mut req = self.http.request(method.clone(), &url);
+            let url = format!("{}{}", ep.base, path);
+            let mut req = ep.http.request(method.clone(), &url);
             req = match auth {
                 Auth::Token => req.header(header::AUTHORIZATION, &self.token_header),
                 Auth::User(t) => req
@@ -164,12 +263,29 @@ impl Pve {
             }
             match req.send().await {
                 Ok(resp) => return decode(resp, &method, path).await,
+                Err(e) if e.is_connect() && tried + 1 < self.endpoints.read().unwrap().len() => {
+                    tried += 1;
+                    let next = self.failover(&ep);
+                    tracing::warn!("PVE through {} unreachable ({e}) - now through {}", ep.label, next.label);
+                    ep = next;
+                    attempt = 0;
+                }
                 Err(e) if attempt < attempts && (e.is_connect() || e.is_request() || e.is_timeout()) => {
                     tokio::time::sleep(Duration::from_millis(500 * attempt)).await;
                 }
-                Err(e) => return Err(anyhow::Error::from(e).context(format!("{method} {path}"))),
+                Err(e) => return Err(anyhow::Error::from(e).context(format!("{method} {path} (through {})", ep.label))),
             }
         }
+    }
+
+    /// The next way to the API after `failed` - made the one in use, unless another
+    /// request already moved on.
+    fn failover(&self, failed: &Endpoint) -> std::sync::Arc<Endpoint> {
+        let eps = self.endpoints.read().unwrap();
+        let at = eps.iter().position(|e| e.label == failed.label).unwrap_or(0);
+        let next = (at + 1) % eps.len();
+        let _ = self.active.compare_exchange(at, next, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed);
+        eps[self.active.load(std::sync::atomic::Ordering::Relaxed) % eps.len()].clone()
     }
 
     // ---- tasks ----
@@ -244,9 +360,10 @@ impl Pve {
             .text("content", content.to_owned())
             .part("filename", part);
         let path = format!("/nodes/{}/storage/{}/upload", enc(node), enc(storage));
-        let resp = self
+        let ep = self.endpoint();
+        let resp = ep
             .upload_http
-            .post(format!("{}{}", self.base, path))
+            .post(format!("{}{}", ep.base, path))
             .header(header::AUTHORIZATION, &self.token_header)
             .multipart(multipart)
             .send()
@@ -442,8 +559,9 @@ impl Pve {
     }
 }
 
-/// rustls for the serial console's websocket: the configured CA, or no checks at all when
-/// `insecure` is set (as for the API client).
+/// rustls for the serial console's websocket: the system's roots plus the configured CA, as
+/// for the API client (a PVE with an ACME certificate is signed by a public CA, not by its
+/// own), or no checks at all when `insecure` is set.
 fn ws_tls_config(cfg: &PveConfig) -> Result<rustls::ClientConfig> {
     let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
     let builder = rustls::ClientConfig::builder_with_provider(provider.clone()).with_safe_default_protocol_versions()?;
@@ -454,6 +572,10 @@ fn ws_tls_config(cfg: &PveConfig) -> Result<rustls::ClientConfig> {
             .with_no_client_auth());
     }
     let mut roots = rustls::RootCertStore::empty();
+    let (_, unreadable) = roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
+    if unreadable > 0 {
+        tracing::debug!("{unreadable} system root certificate(s) could not be read");
+    }
     if let Some(ca) = &cfg.ca_file {
         use rustls::pki_types::{pem::PemObject, CertificateDer};
         for c in CertificateDer::pem_file_iter(ca)? {
@@ -583,6 +705,16 @@ impl Resource {
     }
 }
 
+impl Pve {
+    /// The DNS name a node's own certificate (pveproxy-ssl.pem: ACME or uploaded) carries -
+    /// None while it runs on PVE's self-signed one, which names its address too.
+    pub async fn custom_cert_name(&self, node: &str) -> Option<String> {
+        let certs: Vec<serde_json::Value> = self.get(&format!("/nodes/{}/certificates/info", enc(node))).await.ok()?;
+        let custom = certs.iter().find(|c| c["filename"].as_str() == Some("pveproxy-ssl.pem"))?;
+        custom["san"].as_array()?.iter().filter_map(|s| s.as_str()).find(|s| s.parse::<std::net::IpAddr>().is_err() && *s != "localhost" && s.contains('.')).map(str::to_owned)
+    }
+}
+
 /// One row of GET /cluster/status: the cluster itself, or a node's membership.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusterStatus {
@@ -662,4 +794,43 @@ impl Pve {
 
 pub fn enc(s: &str) -> String {
     urlencoding::encode(s).into_owned()
+}
+
+#[cfg(test)]
+mod endpoint_tests {
+    use super::*;
+
+    fn pve() -> Pve {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        Pve::new(&PveConfig {
+            url: "https://10.10.0.10:8006".into(),
+            token_id: "t@pve!s".into(),
+            token_secret: "x".into(),
+            ca_file: None,
+            tls_name: Some("pve-01.example.com".into()),
+            insecure: false,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn nodes_behind_the_configured_one() {
+        let p = pve();
+        assert_eq!(p.endpoint().origin, "https://pve-01.example.com:8006");
+        let n = |node: &str, ip: &str, name: &str| NodeEndpoint { node: node.into(), ip: ip.into(), tls_name: name.into() };
+        // The configured node (by its address) is not added again; the others follow it.
+        p.set_nodes(&[n("pve-01", "10.10.0.10", "pve-01.example.com"), n("pve-02", "10.10.0.11", ""), n("pve-03", "10.10.0.12", "pve-03.example.com")]);
+        assert_eq!(p.endpoint_count(), 3);
+        let eps = p.endpoints.read().unwrap().clone();
+        assert_eq!(eps[1].origin, "https://10.10.0.11:8006");
+        assert_eq!((eps[2].origin.as_str(), eps[2].connect_addr), ("https://pve-03.example.com:8006", Some("10.10.0.12:8006".parse().unwrap())));
+        // Failing over moves on and stays; a refresh keeps the node in use.
+        let next = p.failover(&eps[0]);
+        assert_eq!(next.label, "pve-02");
+        p.set_nodes(&[n("pve-02", "10.10.0.11", ""), n("pve-03", "10.10.0.12", "pve-03.example.com")]);
+        assert_eq!(p.endpoint().label, "pve-02");
+        // Every way failed: round to the configured one again.
+        assert_eq!(p.failover(&p.endpoint()).label, "pve-03");
+        assert_eq!(p.failover(&p.endpoint()).label, "https://10.10.0.10:8006");
+    }
 }
