@@ -2330,7 +2330,7 @@ function versionCardDev(v) {
     ${actions(`<span class="hint gs-actions-note">checked ${esc(when(v.checked))}</span>`,
       `${d && d.release.url ? `<a class="btn" href="${esc(d.release.url)}" target="_blank" rel="noopener"><img src="${iconSrc("log.svg")}" alt=""> Build on GitHub</a>` : ""}
        <button class="btn" type="button" id="verCheck"><img src="${iconSrc("update.svg")}" alt=""> Check now</button>
-       ${v.state === "update" ? `<button class="btn primary" type="button" id="verUpdate" data-tag="edge"><img src="${iconSrcOnAccent("download.svg")}" alt=""> Update to ${esc(d.commit)}</button>` : ""}`)}`;
+       ${v.state === "update" ? `<button class="btn primary" type="button" id="verUpdate" data-tag="development"><img src="${iconSrcOnAccent("download.svg")}" alt=""> Update to ${esc(d.commit)}</button>` : ""}`)}`;
   return gsCard("gs-version", "update.svg", "Version", meta, body, "", true, state);
 }
 

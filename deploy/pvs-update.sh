@@ -20,8 +20,8 @@ status() {
     mv -f "$D/status.tmp" "$D/status"
 }
 fail() { status fail "$1"; rm -f "$D/pve-vm-studio.new" "$D/request.taken"; systemctl restart pve-vm-studio; exit 1; }
-# A release tag, or "edge" - the development channel's rolling pre-release of main.
-[[ $TAG =~ ^v?[0-9]+(\.[0-9]+){1,3}(-[A-Za-z0-9.]+)?$ || $TAG == edge ]] || fail "the updater refused the request: no release tag in it"
+# A release tag, or "development" - the development channel's rolling pre-release of main.
+[[ $TAG =~ ^v?[0-9]+(\.[0-9]+){1,3}(-[A-Za-z0-9.]+)?$ || $TAG == development ]] || fail "the updater refused the request: no release tag in it"
 [[ $JOB =~ ^[0-9a-f-]{36}$ ]] || JOB=""
 sums=$(curl -fsSL --max-time 60 "https://github.com/$REPO/releases/download/$TAG/SHA256SUMS") || fail "the updater could not fetch SHA256SUMS of $TAG from GitHub - nothing installed"
 want=$(awk -v a="$ASSET" '$2 == a || $2 == "*" a { print tolower($1); exit }' <<<"$sums")

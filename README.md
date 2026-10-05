@@ -64,7 +64,7 @@ Enable the content types under **Datacenter → Storage → Edit → Content** i
 
 > [!NOTE]
 > **There is no release yet.** Until the first one, the studio comes from the development
-> build: the newest commit on `main`, built by CI as the `edge` pre-release. After the install,
+> build: the newest commit on `main`, built by CI as the `development` pre-release. After the install,
 > set **Studio settings → Version → Channel** to **Development** — that is the channel that gets
 > updates for now. Stable stays empty until a release is out.
 
@@ -72,7 +72,7 @@ On any node of the cluster, as root:
 
 ```sh
 mkdir -p /root/pve-vm-studio && cd /root/pve-vm-studio
-base=https://github.com/Barg0/pve-vm-studio/releases/download/edge
+base=https://github.com/Barg0/pve-vm-studio/releases/download/development
 for f in install.sh pve-vm-studio.service pvs-update.sh pve-vm-studio-update.path pve-vm-studio-update.service; do
   curl -fsSLO "$base/$f"
 done

@@ -23,7 +23,7 @@ pub const ASSET: &str = "pve-vm-studio-x86_64";
 const SUMS: &str = "SHA256SUMS";
 
 /// The rolling pre-release CI publishes for every push to main (the development channel).
-pub const EDGE: &str = "edge";
+pub const DEVELOPMENT: &str = "development";
 
 /// Updates settings. Automatic installation is opt-in: off until an admin switches it on.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -128,11 +128,11 @@ pub async fn status(web: &reqwest::Client, fresh: bool, development: bool) -> Va
     // The development channel: CI's rolling pre-release of main's newest commit.
     let mut development_build = Value::Null;
     if development {
-        let edge = gh(web, &format!("/releases/tags/{EDGE}")).await;
-        if let Some(e) = &edge {
+        let dev = gh(web, &format!("/releases/tags/{DEVELOPMENT}")).await;
+        if let Some(e) = &dev {
             let rel = release_of(e);
             let text = format!("{} {}", e["name"].as_str().unwrap_or(""), e["body"].as_str().unwrap_or(""));
-            let built = edge_commit(&text).unwrap_or_default();
+            let built = dev_commit(&text).unwrap_or_default();
             // What changed between this build and the development build: its commits.
             let mut commits = Vec::new();
             let mut ahead = 0;
@@ -166,7 +166,7 @@ pub async fn status(web: &reqwest::Client, fresh: bool, development: bool) -> Va
 
 /// The commit a development build was made from: the first 40-hex word in its name or notes
 /// (CI writes "Development build <sha>").
-fn edge_commit(text: &str) -> Option<String> {
+fn dev_commit(text: &str) -> Option<String> {
     text.split(|c: char| !c.is_ascii_hexdigit()).find(|w| w.len() == 40).map(str::to_lowercase)
 }
 
@@ -198,8 +198,8 @@ async fn sha256_hex(path: &Path) -> Result<String> {
 /// The update job: waits for the other jobs, stages and checks the binary, hands over to the
 /// root helper - which restarts the studio, so a successful job ends in the next process.
 pub async fn run(web: reqwest::Client, data: PathBuf, log: JobLog, jobs: crate::jobs::Jobs, job_id: String, tag: String) -> Result<()> {
-    let st = status(&web, true, tag == EDGE).await;
-    let found = if tag == EDGE {
+    let st = status(&web, true, tag == DEVELOPMENT).await;
+    let found = if tag == DEVELOPMENT {
         Some(st["development"]["release"].clone()).filter(|r| !r.is_null())
     } else {
         st["releases"].as_array().and_then(|a| a.iter().find(|r| r["tag"].as_str() == Some(&tag))).cloned()
@@ -208,7 +208,7 @@ pub async fn run(web: reqwest::Client, data: PathBuf, log: JobLog, jobs: crate::
     if rel.asset_url.is_empty() || rel.sums_url.is_empty() {
         bail!("release {tag} has no {ASSET} or no {SUMS} asset");
     }
-    let target = if tag == EDGE { format!("development build {}", st["development"]["commit"].as_str().unwrap_or("")) } else { rel.version.clone() };
+    let target = if tag == DEVELOPMENT { format!("development build {}", st["development"]["commit"].as_str().unwrap_or("")) } else { rel.version.clone() };
     log.run(format!("Update to {target} - from {} ({})", env!("CARGO_PKG_VERSION"), env!("STUDIO_COMMIT"))).await;
     // Every other job first: the restart would cut them off.
     let mut said = false;

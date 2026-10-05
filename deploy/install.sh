@@ -8,7 +8,7 @@
 #
 # Next to this script: the pve-vm-studio binary (a release names it pve-vm-studio-x86_64)
 # and pve-vm-studio.service. Without a binary here it downloads the latest release's - or,
-# while there is no release yet, the development build (the rolling "edge" pre-release) -
+# while there is no release yet, the development build (the rolling "development" pre-release) -
 # or what PVS_BINARY_URL names.
 #
 # What it does, in order:
@@ -358,7 +358,7 @@ install() {
             local gh=https://github.com/Barg0/pve-vm-studio/releases
             PVS_BINARY_URL=$gh/latest/download/pve-vm-studio-x86_64
             if ! curl -fsIL --max-time 30 -o /dev/null "$PVS_BINARY_URL"; then
-                PVS_BINARY_URL=$gh/download/edge/pve-vm-studio-x86_64
+                PVS_BINARY_URL=$gh/download/development/pve-vm-studio-x86_64
                 log info "No release yet - installing the development build; updates come through Studio settings -> Version -> Development"
             fi
         fi

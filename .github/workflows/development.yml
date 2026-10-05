@@ -1,13 +1,13 @@
 # The development channel: every push to main is built and published as the rolling
-# pre-release "edge" - the studio's Version card (Development) offers it. Untested by design.
-name: edge
+# pre-release "development" - the studio's Version card (Development) offers it. Untested by design.
+name: development
 on:
   push:
     branches: [main]
 permissions:
   contents: write
 concurrency:
-  group: edge
+  group: development
   cancel-in-progress: true
 jobs:
   build:
@@ -29,11 +29,11 @@ jobs:
           cp deploy/install.sh deploy/update-lxc.sh deploy/pve-vm-studio.service deploy/pvs-update.sh \
              deploy/pve-vm-studio-update.path deploy/pve-vm-studio-update.service dist/
           (cd dist && sha256sum * > SHA256SUMS)
-      - name: Publish edge
+      - name: Publish development
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete edge --yes --cleanup-tag || true
-          gh release create edge dist/* --prerelease --target "$GITHUB_SHA" \
+          gh release delete development --yes --cleanup-tag || true
+          gh release create development dist/* --prerelease --target "$GITHUB_SHA" \
             --title "Development build $GITHUB_SHA" \
             --notes "Development build $GITHUB_SHA - main, untested. $(git log -1 --format=%s)"

@@ -526,7 +526,7 @@ async fn tick(app: &AppState, checked: &mut Option<std::time::Instant>, self_che
         let s: crate::update::UpdateSettings = settings::load(&app.db, "update").await.unwrap_or_default();
         if s.auto {
             let v = crate::update::status(&app.web, true, s.development()).await;
-            let tag = if s.development() { Some(crate::update::EDGE) } else { v["releases"][0]["tag"].as_str() };
+            let tag = if s.development() { Some(crate::update::DEVELOPMENT) } else { v["releases"][0]["tag"].as_str() };
             if v["state"] == "update"
                 && let Some(tag) = tag
             {
