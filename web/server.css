@@ -642,10 +642,10 @@ a.btn, a.btn:hover { text-decoration: none; }
 .ver-v { font-size: 18px; font-weight: 600; }
 .ver-arrow { color: var(--fg-muted); }
 .ver-tl { list-style: none; margin: 14px 0 0; padding: 0 0 0 14px; border-left: 1px solid var(--border-strong); }
-.ver-tl li { position: relative; padding: 0 0 12px 12px; }
-.ver-tl li::before { content: ""; position: absolute; left: -19px; top: 5px; width: 9px; height: 9px; border-radius: 50%; background: var(--border-strong); border: 2px solid var(--bg-elevated); }
-.ver-tl li.cur::before { background: var(--success); }
-.ver-tl li.nxt::before { background: var(--accent); }
+.ver-tl > li { position: relative; padding: 0 0 12px 12px; }
+.ver-tl > li::before { content: ""; position: absolute; left: -19px; top: 5px; width: 9px; height: 9px; border-radius: 50%; background: var(--border-strong); border: 2px solid var(--bg-elevated); }
+.ver-tl > li.cur::before { background: var(--success); }
+.ver-tl > li.nxt::before { background: var(--accent); }
 .ver-h { display: flex; gap: 8px; align-items: baseline; }
 .ver-h span { color: var(--fg-muted); font-size: 12px; }
 .ver-notes { margin: 4px 0 0; padding-left: 0; list-style: none; font-size: 12.5px; }

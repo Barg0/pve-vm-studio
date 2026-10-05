@@ -8291,7 +8291,8 @@ function renderOverviewCard(s) {
       <div class="ov-connect">
         ${(() => { const v = liveVm(s); const url = v && v.status === "ready" ? pveConsoleUrl(v) : "";
           return url ? `<a class="btn" href="${esc(url)}" target="_blank" rel="noopener" title="Proxmox VE console on ${esc(v.node)}"><img src="${iconSrc("rdp.svg")}" alt=""> Console</a>` : ""; })()}
-        ${cmds.map(c => `<button class="btn${c.primary ? " primary" : ""}" type="button" ${c.rdp
+        ${/* The primary (RDP, SSH) at the right end, where a row's main action sits. */
+          [...cmds.filter(c => !c.primary), ...cmds.filter(c => c.primary)].map(c => `<button class="btn${c.primary ? " primary" : ""}" type="button" ${c.rdp
           ? `data-ov-rdp="${esc(s._id)}" title="Download ${esc(ovRdpFileName(s))}"`
           : `data-ov-copy="${esc(c.cmd)}" title="Copy: ${esc(c.cmd)}"`}>
           <img src="${c.primary ? iconSrcKnockout(c.icon) : iconSrc(c.icon)}" alt=""> ${c.label}</button>`).join("")}
