@@ -30,7 +30,7 @@ LOG_FILE=/var/log/pve-vm-studio-install.log
 USER_ID=pve-vm-studio@pve
 TOKEN=studio
 ROLES=PVEVMAdmin,PVEDatastoreAdmin,PVESDNUser,PVEAuditor
-PACKAGES="ca-certificates xorriso lego 7zip wimtools dosfstools mtools cabextract genisoimage gcab"
+PACKAGES="ca-certificates curl xorriso lego 7zip wimtools dosfstools mtools cabextract genisoimage gcab"
 
 # ---------------------------------------------------------------------------------
 # Output - the studio's palette and the PowerShell log layout

@@ -1247,7 +1247,13 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                 }
             }
             // boot.wim to the cumulative update: the chain's .msu files, as the image gets them.
-            if behind {
+            // Off: a UUP set has no WinPE of its own - boot.wim is WinRE, and the cumulative
+            // update finds no WinPE foundation in it ("Unable to resolve Package: @Foundation;
+            // skipping ... CumulativeUpdate_KB5124010", 25H2 26200.9550, 2026-10-06): only its
+            // servicing stack went in, DISM still said success. The Safe OS update is WinRE's
+            // update, so boot.wim is built from the serviced WinRE instead.
+            const BOOT_LCU: bool = false;
+            if behind && BOOT_LCU {
                 extra.boot = image_names.iter().filter(|n| n.to_lowercase().ends_with(".msu")).cloned().collect();
                 if !extra.boot.is_empty() {
                     tokio::fs::copy(tree.join("sources/boot.wim"), share.join("boot.wim")).await?;
@@ -1469,6 +1475,11 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             // still boots a patched build. Either way the boot manager comes from it onto the
             // media, as Microsoft's step 28.
             let serviced_boot = share.join("boot-serviced.wim");
+            // Taken only when the cumulative update is really in it (its RollupFix package).
+            if boot_ok && serviced_boot.exists() && rollup_in(log, &serviced_boot, "2").await.is_none() {
+                log.warn("boot.wim: DISM reported the cumulative update installed, but the image carries none - built from the serviced WinRE instead").await;
+                boot_ok = false;
+            }
             let boot_from = if boot_ok && serviced_boot.exists() {
                 let boot = tree.join("sources/boot.wim");
                 move_file(&serviced_boot, &boot).await?;
@@ -1490,9 +1501,9 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                 let boot = tree.join("sources/boot.wim");
                 // What the Setup environment really carries: the WIM's own build field is only
                 // as new as whoever wrote it, the cumulative update's package is the fact.
-                let rollup = rollup_in(log, &boot, "2").await.unwrap_or_else(|| "none found".into());
+                let b = winpe::image_build(log, &boot, "2").await?;
                 let copied = boot_files_from(log, &dir, &tree).await?;
-                log.ok(format!("boot.wim, {how}: cumulative update {rollup} in the Setup environment; boot manager onto the media: {}", if copied.is_empty() { "nothing".into() } else { copied.join(", ") })).await;
+                log.ok(format!("boot.wim {how}: {b}; boot manager onto the media: {}", if copied.is_empty() { "nothing".into() } else { copied.join(", ") })).await;
             }
             if let Some(edge) = &edge_file
                 && !keep

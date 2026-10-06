@@ -19,7 +19,7 @@ HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 pct status "$VMID" | grep -q running || { echo "container $VMID is not running" >&2; exit 1; }
 
 # Packages a newer studio needs, installed when missing (the same list as install.sh).
-PACKAGES="ca-certificates xorriso lego 7zip wimtools dosfstools mtools cabextract genisoimage gcab"
+PACKAGES="ca-certificates curl xorriso lego 7zip wimtools dosfstools mtools cabextract genisoimage gcab"
 pct exec "$VMID" -- bash -c "missing=\$(for p in $PACKAGES; do dpkg -s \$p >/dev/null 2>&1 || echo \$p; done); [ -z \"\$missing\" ] || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \$missing >/dev/null; }"
 # ISO storages read-only into the container (newer studios read Windows ISOs' editions).
 # A new mount point takes a container restart to appear.
