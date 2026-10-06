@@ -70,6 +70,21 @@ fn colour(tag: &str) -> &'static str {
     }
 }
 
+/// The datacenter's tag colours (tag-style color-map): tag -> background hex. Tags not in it
+/// get PVE's default colour, which the browser works out the way PVE's own UI does.
+pub async fn colours(pve: &Pve) -> anyhow::Result<std::collections::BTreeMap<String, String>> {
+    let opts: Value = pve.get("/cluster/options").await?;
+    let map = match &opts["tag-style"] {
+        Value::Object(m) => m.get("color-map").and_then(Value::as_str).unwrap_or("").to_owned(),
+        Value::String(s) => s.split(',').find_map(|p| p.strip_prefix("color-map=")).unwrap_or("").to_owned(),
+        _ => String::new(),
+    };
+    Ok(map.split(';').filter_map(|e| {
+        let mut f = e.split(':');
+        Some((f.next()?.to_owned(), f.next()?.to_owned()))
+    }).collect())
+}
+
 static PAINT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Gives the studio's tags their colours in the datacenter's tag-style map, keeping every

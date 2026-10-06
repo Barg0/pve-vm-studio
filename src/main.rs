@@ -4,6 +4,7 @@
 //! It runs in an LXC and talks to the cluster through the PVE API only.
 
 mod api;
+mod apps;
 mod auth;
 mod autoupdate;
 mod catalog;
@@ -32,6 +33,8 @@ mod virtio;
 mod vms;
 mod web;
 mod wim;
+mod winget;
+mod wu;
 mod windows;
 mod winpe;
 mod media;
@@ -184,6 +187,7 @@ async fn main() -> Result<()> {
     tokio::spawn(pve_nodes_loop(state.clone()));
     tokio::spawn(reconcile_after_restart(state.clone()));
     tokio::spawn(warm_caches(state.clone()));
+    tokio::spawn(wu_loop(state.clone()));
     tokio::spawn(clean_work(state.clone()));
     tokio::spawn(autoupdate::scheduler(state.clone()));
     tokio::spawn(notify::watch_loop(state.clone()));
@@ -335,7 +339,7 @@ async fn clean_work(app: AppState) {
     }
 }
 
-async fn dir_size(path: &std::path::Path) -> u64 {
+pub async fn dir_size(path: &std::path::Path) -> u64 {
     let mut total = 0;
     let mut stack = vec![path.to_path_buf()];
     while let Some(p) = stack.pop() {
@@ -525,3 +529,14 @@ async fn retag(app: &AppState, res: &[pve::Resource]) {
     }
 }
 
+/// Microsoft Update's security releases (wu.rs): what an earlier sync left on disk at once,
+/// then asked again every six hours - only updates not seen before are fetched.
+async fn wu_loop(app: AppState) {
+    wu::load(&app.config.data_dir).await;
+    loop {
+        if let Err(e) = wu::refresh(&app.config.data_dir, std::time::Duration::from_secs(6 * 3600)).await {
+            tracing::warn!("Microsoft Update not asked: {e:#}");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+    }
+}

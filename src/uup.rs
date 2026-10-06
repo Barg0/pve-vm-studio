@@ -38,12 +38,28 @@ pub struct File {
     pub size: u64,
 }
 
+/// When the last file list (get.php) was asked for. The catalog lets the other questions
+/// through at any pace, but a file list makes it ask Microsoft, and it answers a second one
+/// within about ten seconds with "too many requests" (measured: 1.2, 3 and 8 s apart are
+/// refused, 12 s apart never). File lists are asked one at a time and that far apart; the
+/// rest go straight, so the editions of a build never wait behind a file list.
+static PACE: tokio::sync::Mutex<Option<std::time::Instant>> = tokio::sync::Mutex::const_new(None);
+const GAP: std::time::Duration = std::time::Duration::from_secs(12);
+
 /// One question to the catalog. It answers quick repeats with HTTP 429 or USER_RATE_LIMITED:
 /// the studio waits (3, 9, 27 s) and asks again before it gives up.
 async fn get(web: &reqwest::Client, path: &str, query: &[(&str, &str)]) -> Result<serde_json::Value> {
+    let mut last = if path == "get.php" { Some(PACE.lock().await) } else { None };
     let mut wait = 3;
     for attempt in 0..4 {
-        let resp = web.get(format!("{API}/{path}")).query(query).send().await.with_context(|| format!("asking the UUP dump catalog ({path})"))?;
+        if let Some(Some(at)) = last.as_deref() {
+            tokio::time::sleep(GAP.saturating_sub(at.elapsed())).await;
+        }
+        let resp = web.get(format!("{API}/{path}")).query(query).send().await;
+        if let Some(l) = last.as_deref_mut() {
+            *l = Some(std::time::Instant::now());
+        }
+        let resp = resp.with_context(|| format!("asking the UUP dump catalog ({path})"))?;
         // Too many questions too fast: it says so as HTTP 429 as well as in its JSON.
         if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < 3 {
             tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
@@ -153,30 +169,60 @@ pub async fn catalog_age() -> Option<u64> {
     CATALOG.lock().await.as_ref().map(|(at, _)| at.elapsed().as_secs())
 }
 
-/// A product's full builds, newest first, one entry per build number.
+/// A product's full builds, highest build first, one entry per build number - its first
+/// appearance in the catalog: the catalog lists an old build again when it fetches it once
+/// more (26200.7985 of March, again on 2026-10-02), and that date is not its release.
 pub async fn product_builds(web: &reqwest::Client, p: &Product, fresh: bool) -> Result<Vec<Build>> {
     let all = catalog(web, fresh).await?;
     let mut out: Vec<Build> = all.iter().filter(|b| b.arch == "amd64" && (p.matches)(&b.title)).cloned().collect();
-    out.sort_by(|a, b| b.created.cmp(&a.created));
+    out.sort_by(|a, b| a.created.cmp(&b.created));
     let mut seen = std::collections::HashSet::new();
     out.retain(|b| seen.insert(b.build.clone()));
+    let num = |b: &Build| b.build.split('.').map(|x| x.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
+    out.sort_by(|a, b| num(b).cmp(&num(a)));
     Ok(out)
 }
 
-/// What kind of release a build is: "2026-09 B" for a Patch Tuesday release (the second
-/// Tuesday, or the days right after it), "2026-09 preview" for the others, "Insider".
-pub fn release_kind(p: &Product, created: i64) -> String {
-    use chrono::{Datelike, TimeZone, Weekday};
+/// The second Tuesday of a date's month (Patch Tuesday) and whether the date is it or the
+/// day after.
+fn on_patch_tuesday(d: chrono::NaiveDate) -> bool {
+    use chrono::{Datelike, Weekday};
+    let first = chrono::NaiveDate::from_ymd_opt(d.year(), d.month(), 1).unwrap();
+    let to_tue = (7 + Weekday::Tue.num_days_from_monday() as i64 - first.weekday().num_days_from_monday() as i64) % 7;
+    let pt = first + chrono::Duration::days(to_tue + 7);
+    d >= pt && d <= pt + chrono::Duration::days(1)
+}
+
+/// What kind of release a build is, as Microsoft Update says (wu.rs): "2026-09 B" - the
+/// month's Patch Tuesday security update; "2026-09 OOB" - a security update out of band;
+/// "2026-09 preview" - not a security release (the D preview, a Release Preview build, a
+/// non-security out-of-band fix); "Insider". Until Microsoft Update has been asked, the
+/// catalog's date gives an estimate that never reads as a release: "2026-09 B?".
+pub fn release_kind(p: &Product, build: &str, created: i64) -> String {
+    use chrono::{Datelike, TimeZone};
     if p.insider {
         return "Insider".into();
     }
     let Some(d) = chrono::Utc.timestamp_opt(created, 0).single() else { return String::new() };
-    let first = chrono::NaiveDate::from_ymd_opt(d.year(), d.month(), 1).unwrap();
-    let to_tue = (7 + Weekday::Tue.num_days_from_monday() as i64 - first.weekday().num_days_from_monday() as i64) % 7;
-    let pt = first + chrono::Duration::days(to_tue + 7);
-    let day = d.date_naive();
-    let tag = format!("{}-{:02}", d.year(), d.month());
-    if day >= pt && day <= pt + chrono::Duration::days(3) { format!("{tag} B") } else { format!("{tag} preview") }
+    let month = format!("{}-{:02}", d.year(), d.month());
+    if let Some(answer) = crate::wu::category(p.id).and_then(|c| crate::wu::lookup(c, build)) {
+        return match answer {
+            Some(u) => {
+                // Its month as Microsoft titles it ("2026-09 Cumulative Update ..."), else its date.
+                let pub_day = chrono::DateTime::parse_from_rfc3339(&u.created).map(|t| t.date_naive()).unwrap_or(d.date_naive());
+                let m = u.title.get(..7).filter(|t| t.as_bytes().get(4) == Some(&b'-') && t.chars().filter(|c| c.is_ascii_digit()).count() == 6).map(str::to_owned).unwrap_or_else(|| format!("{}-{:02}", pub_day.year(), pub_day.month()));
+                format!("{m} {}", if on_patch_tuesday(pub_day) { "B" } else { "OOB" })
+            }
+            None => format!("{month} preview"),
+        };
+    }
+    if on_patch_tuesday(d.date_naive()) { format!("{month} B?") } else { format!("{month} preview") }
+}
+
+/// A release "Keep current" and the Stable filter take: Microsoft's security updates,
+/// Patch Tuesday and out of band.
+pub fn is_release(kind: &str) -> bool {
+    kind.ends_with(" B") || kind.ends_with(" OOB")
 }
 
 /// The editions of a build in a language, with the names Microsoft gives them.
@@ -396,25 +442,44 @@ async fn download_with(web: &reqwest::Client, log: &JobLog, file: &File, dest: &
     Ok(())
 }
 
-type FilesKey = (String, String, String);
-static FILES: tokio::sync::Mutex<Option<std::collections::HashMap<FilesKey, (std::time::Instant, Vec<File>)>>> = tokio::sync::Mutex::const_new(None);
+/// The names and sizes of an edition's files, for the size shown before a build - not for
+/// the build itself (Microsoft's links expire). A build's files never change, so they are
+/// asked for once and kept on disk: one file list costs the catalog's ten-second budget.
+static SIZES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// files(), kept a quarter of an hour - for the size shown before a build, not for the
-/// build itself (Microsoft's links expire).
-pub async fn files_cached(web: &reqwest::Client, uuid: &str, lang: &str, edition: &str) -> Result<Vec<File>> {
-    let key = (uuid.to_owned(), lang.to_owned(), edition.to_owned());
-    if let Some((at, f)) = FILES.lock().await.as_ref().and_then(|m| m.get(&key))
-        && at.elapsed() < std::time::Duration::from_secs(900)
-    {
-        return Ok(f.clone());
+pub async fn files_cached(web: &reqwest::Client, cache: &std::path::Path, uuid: &str, lang: &str, edition: &str) -> Result<Vec<File>> {
+    // One at a time: a second ask for the same list waits and then finds it on disk.
+    let _one = SIZES.lock().await;
+    let key = format!("{uuid}/{lang}/{}", edition.to_lowercase());
+    let mut all: std::collections::BTreeMap<String, Vec<(String, u64)>> =
+        tokio::fs::read(cache).await.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    if let Some(list) = all.get(&key) {
+        return Ok(list.iter().map(|(name, size)| File { name: name.clone(), url: String::new(), sha1: String::new(), size: *size }).collect());
     }
     let f = files(web, uuid, lang, edition).await?;
-    FILES.lock().await.get_or_insert_with(Default::default).insert(key, (std::time::Instant::now(), f.clone()));
+    all.insert(key, f.iter().map(|x| (x.name.clone(), x.size)).collect());
+    if let Ok(b) = serde_json::to_vec(&all) {
+        let tmp = cache.with_extension("tmp");
+        if tokio::fs::write(&tmp, b).await.is_ok() {
+            let _ = tokio::fs::rename(&tmp, cache).await;
+        }
+    }
     Ok(f)
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn release_preview_is_no_patch_tuesday() {
+        let p = super::product("w11-25h2").unwrap();
+        // 26200.9445 (2026-09-08), 26200.9539 Release Preview (2026-09-10), 26200.9550 (2026-09-22).
+        // Before Microsoft Update has answered: an estimate, never a release.
+        assert_eq!(super::release_kind(p, "26200.9445", 1788868800), "2026-09 B?");
+        assert_eq!(super::release_kind(p, "26200.9539", 1789059644), "2026-09 preview");
+        assert_eq!(super::release_kind(p, "26200.9550", 1790096424), "2026-09 preview");
+        assert!(!super::is_release("2026-09 B?") && super::is_release("2026-09 B") && super::is_release("2026-09 OOB"));
+    }
+
     #[test]
     fn tags() {
         assert_eq!(super::lang_tag("en-us"), "en-US");

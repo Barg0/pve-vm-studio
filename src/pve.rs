@@ -247,6 +247,7 @@ impl Pve {
         let attempts = if method == Method::GET { 3 } else { 1 };
         let mut attempt = 0;
         let mut tried = 0;
+        let mut retried_fork = false;
         let mut ep = self.endpoint();
         loop {
             attempt += 1;
@@ -262,7 +263,17 @@ impl Pve {
                 req = req.form(f);
             }
             match req.send().await {
-                Ok(resp) => return decode(resp, &method, path).await,
+                Ok(resp) => match decode(resp, &method, path).await {
+                    // PVE could not fork the task's worker ("got no worker upid - start worker
+                    // failed"): nothing ran, so asking once more is safe - a write too. Seen
+                    // once in ~90 VM starts, right after another task of the same daemon.
+                    Err(e) if !retried_fork && e.to_string().contains("got no worker upid") => {
+                        retried_fork = true;
+                        tracing::warn!("{method} {path}: PVE could not start its task worker - asking again");
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    }
+                    r => return r,
+                },
                 Err(e) if e.is_connect() && tried + 1 < self.endpoints.read().unwrap().len() => {
                     tried += 1;
                     let next = self.failover(&ep);

@@ -28,7 +28,7 @@ use crate::{
     seed::{self, SeedDisk},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VmSpec {
     pub name: String,
     /// The design card this VM was built from - what ties a built VM to its card, not the name.
@@ -128,6 +128,24 @@ pub struct VmSpec {
     /// activated at first boot (SetupComplete). Never stored with the record.
     #[serde(default, skip_serializing)]
     pub product_key: String,
+    /// Windows with Desktop Experience: applications from WinGet, installed at first boot by
+    /// GuestProvision as SYSTEM, machine-wide, always the newest version. A failure is
+    /// reported, never fatal - the VM still comes up.
+    #[serde(default)]
+    pub winget_apps: Vec<WingetApp>,
+    /// Everything WinGet can upgrade on the fresh VM (Edge, the inbox apps, the ones just
+    /// installed), at first boot after the installs. Never fatal either.
+    #[serde(default)]
+    pub winget_upgrade: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WingetApp {
+    /// The WinGet package id (7zip.7zip).
+    pub id: String,
+    /// Installer switches passed with --override, as the app is listed in the design.
+    #[serde(default)]
+    pub over: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,7 +252,33 @@ pub struct VmRow {
 
 pub async fn list(db: &SqlitePool) -> Result<Vec<VmRow>> {
     // Cleared VMs still exist in PVE (and still need their gold) - only the view drops them.
-    Ok(sqlx::query_as("SELECT * FROM vms WHERE status NOT IN ('removed', 'cleared') ORDER BY name").fetch_all(db).await?)
+    // Gone ones were removed in PVE.
+    Ok(sqlx::query_as("SELECT * FROM vms WHERE status NOT IN ('removed', 'cleared', 'gone') ORDER BY name").fetch_all(db).await?)
+}
+
+/// The same VM, not just the same number: a VMID is reused once its VM is gone (a record of a
+/// removed vm-01 must not show the cis-01 that has its id now). The node is left out - a
+/// migrated VM keeps its VMID and name.
+pub fn is_same_vm(r: &crate::pve::Resource, name: &str, vmid: i64) -> bool {
+    r.kind == "qemu" && r.vmid == Some(vmid as u32) && r.name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(name))
+}
+
+/// Built VMs that PVE no longer lists - removed in Proxmox VE - leave the studio's view as
+/// 'gone': their card is free to be built again. `res` must be a full answer of
+/// /cluster/resources (a VM on a node that is down is still listed there, as "unknown").
+/// Returns the ids it marked.
+pub async fn mark_gone(db: &SqlitePool, rows: &[VmRow], res: &[crate::pve::Resource]) -> Result<Vec<String>> {
+    let mut gone = Vec::new();
+    for v in rows.iter().filter(|v| v.status == "ready") {
+        let Some(id) = v.vmid else { continue };
+        if res.iter().any(|r| is_same_vm(r, &v.name, id)) {
+            continue;
+        }
+        sqlx::query("UPDATE vms SET status = 'gone' WHERE id = ? AND status = 'ready'").bind(&v.id).execute(db).await?;
+        tracing::info!("VM {} ({id} on {}) is gone from Proxmox VE - its card can be built again", v.name, v.node);
+        gone.push(v.id.clone());
+    }
+    Ok(gone)
 }
 
 pub async fn get(db: &SqlitePool, id: &str) -> Result<Option<VmRow>> {
@@ -681,7 +725,7 @@ async fn deploy_inner(
         if m.iter().any(|l| l.contains("-FAIL ")) {
             deploy_pass_dism_errors(pve, log, &node, vmid).await;
         }
-        if guest_provision_result(pve, log, &node, vmid).await? {
+        if guest_provision_result(pve, db, log, vm_id, &node, vmid).await? {
             pr.stage(90.0, 93.0, "restarting");
             log.run("Restarting - a role asked for it").await;
             pve.run_task(
@@ -698,7 +742,7 @@ async fn deploy_inner(
         pr.stage(35.0, 90.0, "first boot");
         log.run("First boot: specialize names the VM, OOBE takes the VM's answer file").await;
         windows::follow_first_boot(pve, log, &mut pr, &node, vmid).await?;
-        let restart = guest_provision_result(pve, log, &node, vmid).await?;
+        let restart = guest_provision_result(pve, db, log, vm_id, &node, vmid).await?;
         // [diff] Hyper-V's VMs never had a seed drive: everything went into the VHDX. Here the
         // seed rides in on a SATA disk, which cannot be unplugged from a running VM - so
         // one clean shutdown, the drive goes, and the VM starts again. A role that asked for
@@ -857,7 +901,8 @@ fn guest_manifest(spec: &VmSpec, mac: &str, extra_macs: &[String], join_mode: &s
             serde_json::json!({ "scsiLocation": i + 1, "sizeGB": d.size_gb, "letter": l, "fileSystem": fs, "label": label })
         })
         .collect();
-    let auto = |i: usize| format!("vnic-{:02}", i + 1);
+    // As PVE names the VM's network devices: net0 is the primary, net1 the first extra.
+    let auto = |i: usize| format!("net{i}");
     let mut nics = vec![serde_json::json!({
         "name": if spec.nic_name.trim().is_empty() { auto(0) } else { spec.nic_name.trim().to_owned() },
         "macAddress": mac.replace(':', "-").to_uppercase(),
@@ -879,6 +924,8 @@ fn guest_manifest(spec: &VmSpec, mac: &str, extra_macs: &[String], join_mode: &s
         // "specialize": the answer file joined (the deploy pass wrote it into Panther);
         // "deferred": GuestProvision registers the join task (research §7).
         "domainJoin": spec.domain_join.as_ref().map(|d| serde_json::json!({ "enabled": true, "mode": join_mode, "domain": d.domain, "ouPath": d.ou })),
+        "wingetApps": spec.winget_apps.iter().map(|a| serde_json::json!({ "id": a.id, "override": a.over })).collect::<Vec<_>>(),
+        "wingetUpgrade": spec.winget_upgrade,
         "azureArc": spec.arc.as_ref().map(|a| serde_json::json!({
             "enabled": true, "authMode": a.auth_mode, "subscriptionId": a.subscription_id, "tenantId": a.tenant_id,
             "resourceGroup": a.resource_group, "location": a.location, "servicePrincipalAppId": a.app_id,
@@ -890,7 +937,7 @@ fn guest_manifest(spec: &VmSpec, mac: &str, extra_macs: &[String], join_mode: &s
 /// agent. It never reboots itself - a reboot inside SetupComplete leaves Windows in a bad
 /// state - so when it asks for one, the studio restarts the VM from outside (§6).
 /// Returns whether it asked for a restart; the caller gives it one.
-async fn guest_provision_result(pve: &Pve, log: &JobLog, node: &str, vmid: u32) -> Result<bool> {
+async fn guest_provision_result(pve: &Pve, db: &SqlitePool, log: &JobLog, vm_id: &str, node: &str, vmid: u32) -> Result<bool> {
     let Some((text, _)) = pve.agent_read(node, vmid, r"C:\ProgramData\VmDeployLogs\state.json", 0).await else {
         return Ok(false); // nothing for GuestProvision to do on this VM
     };
@@ -919,6 +966,47 @@ async fn guest_provision_result(pve: &Pve, log: &JobLog, node: &str, vmid: u32) 
     } else {
         log.warn("GuestProvision reported a failure - see C:\\ProgramData\\VmDeployLogs in the VM").await;
     }
+    // Applications from WinGet: each one in the log, a failure as a warning only - and the
+    // results onto the VM's record, where Connect and the mail read them.
+    if let Some(apps) = st["wingetApps"].as_array().filter(|a| !a.is_empty()) {
+        let ok = apps.iter().filter(|a| a["success"].as_bool() == Some(true)).count();
+        log.line(format!("WinGet: {ok} of {} application(s) installed", apps.len())).await;
+        for a in apps {
+            let id = a["id"].as_str().unwrap_or("?");
+            if a["success"].as_bool() == Some(true) {
+                log.ok(format!("{id} {}", a["version"].as_str().unwrap_or(""))).await;
+            } else {
+                log.warn(format!("{id} was not installed: {} - C:\\ProgramData\\VmDeployLogs\\winget in the VM", a["message"].as_str().unwrap_or("failed"))).await;
+            }
+        }
+        if let Ok(Some(row)) = get(db, vm_id).await {
+            let mut spec: serde_json::Value = serde_json::from_str(&row.spec).unwrap_or_default();
+            spec["winget_result"] = serde_json::Value::Array(apps.clone());
+            let _ = sqlx::query("UPDATE vms SET spec = ? WHERE id = ?").bind(spec.to_string()).bind(vm_id).execute(db).await;
+        }
+    }
+    // WinGet's upgrades of everything installed: old -> new per application, a failure as a
+    // warning only - and onto the VM's record as well.
+    if let Some(ups) = st["wingetUpgrades"].as_array() {
+        let skipped = ups.iter().filter(|a| a["skipped"].as_bool() == Some(true)).count();
+        let ok = ups.iter().filter(|a| a["success"].as_bool() == Some(true)).count();
+        log.line(format!("WinGet: {ok} of {} application(s) updated{}", ups.len() - skipped, if skipped > 0 { format!(", {skipped} left to the Microsoft Store (WinGet runtime, MSIX)") } else { String::new() })).await;
+        for a in ups {
+            let (id, from, to) = (a["id"].as_str().unwrap_or("?"), a["from"].as_str().unwrap_or(""), a["to"].as_str().unwrap_or(""));
+            if a["skipped"].as_bool() == Some(true) {
+                log.debug(format!("{id} {from}: {}", a["message"].as_str().unwrap_or("skipped"))).await;
+            } else if a["success"].as_bool() == Some(true) {
+                log.ok(format!("{id} {from} -> {to}")).await;
+            } else {
+                log.warn(format!("{id} {from} was not updated: {} - C:\\ProgramData\\VmDeployLogs\\winget in the VM", a["message"].as_str().unwrap_or("failed"))).await;
+            }
+        }
+        if let Ok(Some(row)) = get(db, vm_id).await {
+            let mut spec: serde_json::Value = serde_json::from_str(&row.spec).unwrap_or_default();
+            spec["winget_upgrades"] = serde_json::Value::Array(ups.clone());
+            let _ = sqlx::query("UPDATE vms SET spec = ? WHERE id = ?").bind(spec.to_string()).bind(vm_id).execute(db).await;
+        }
+    }
     Ok(st["restartNeeded"].as_bool() == Some(true))
 }
 
@@ -943,7 +1031,7 @@ mod tests {
         assert_eq!(m["pendingCapabilities"][0], "ServerCore.AppCompatibility~~~~0.0.1.0");
         assert_eq!(m["networkAdapters"][0]["name"], "LAN");
         assert_eq!(m["networkAdapters"][0]["macAddress"], "BC-24-11-AA-BB-CC");
-        assert_eq!(m["networkAdapters"][1]["name"], "vnic-02");
+        assert_eq!(m["networkAdapters"][1]["name"], "net1");
         // The raw disk stays out; the first data disk is scsi1 = LUN 1, drive D:.
         assert_eq!(m["dataDisks"].as_array().unwrap().len(), 1);
         assert_eq!(m["dataDisks"][0]["scsiLocation"], 1);

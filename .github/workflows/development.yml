@@ -37,3 +37,8 @@ jobs:
           gh release create development dist/* --prerelease --target "$GITHUB_SHA" \
             --title "Development build $GITHUB_SHA" \
             --notes "Development build $GITHUB_SHA - main, untested. $(git log -1 --format=%s)"
+          # gh creates the release as a draft, uploads, then publishes - right after the old
+          # tag was deleted that last step can be lost (2026-10-05: left as a draft, which the
+          # studio's anonymous API call cannot see). Published explicitly, and checked.
+          gh release edit development --draft=false --prerelease
+          test "$(gh release view development --json isDraft --jq .isDraft)" = "false"

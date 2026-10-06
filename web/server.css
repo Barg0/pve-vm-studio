@@ -40,13 +40,8 @@ table.data tr.selected td { background: var(--accent-soft); }
 .name-cell { display: flex; align-items: center; gap: 8px; }
 .name-cell img { width: 18px; height: 18px; flex-shrink: 0; }
 
-.pill.status.ok { color: var(--success-text); background: color-mix(in srgb, var(--success) 14%, transparent); }
-.pill.status.bad { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 14%, transparent); }
 /* Running is orange (the accent) everywhere; --run is that colour. */
 :root { --run: var(--accent); --run-soft: var(--accent-soft); --run-border: var(--accent-border); }
-.pill.status.run { color: var(--run); background: var(--run-soft); }
-.pill.status.idle { color: var(--fg-muted); background: var(--bg-subtle); }
-.pill.status.warn { color: var(--warn); background: var(--warn-soft); }
 
 /* Jobs: a rail of jobs grouped by day, the selected one's log beside it. The page is one
    screen - the rail and the log scroll, the page does not. */
@@ -247,7 +242,6 @@ tr.muted-row td { color: var(--fg-muted); }
 tr.wi-virtual td { color: var(--fg-muted); }
 tr.wi-virtual.selected td { color: var(--fg); }
 .wi-arrow { color: var(--fg-muted); margin-right: 4px; }
-.pill.role.virtual { color: var(--band-ident); border-color: color-mix(in srgb, var(--band-ident) 45%, var(--border)); background: color-mix(in srgb, var(--band-ident) 14%, var(--bg)); }
 
 /* Windows bake: what every Windows gold is baked with, as two compact parts beside the ISO. */
 /* Laid out like a label.field beside it - same label, same 3 px gap, same 32 px row - so
@@ -256,7 +250,7 @@ tr.wi-virtual.selected td { color: var(--fg); }
 .bake-part-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .bake-part-row .bake-part { flex: 1 1 0; }
 .bake-part { font: inherit; display: inline-flex; align-items: center; gap: 8px; height: 32px; box-sizing: border-box; padding: 0 12px 0 10px; cursor: pointer;
-  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-subtle); color: var(--fg); min-width: 0; }
+  border: 1px solid var(--input-border); border-radius: var(--radius); background: var(--bg); color: var(--fg); min-width: 0; }
 .bake-part:hover { border-color: var(--accent-border); background: var(--bg-hover); }
 .bake-part img { width: 16px; height: 16px; flex-shrink: 0; }
 .bake-part .bp-k { font-size: 11px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase; color: var(--fg-muted); }
@@ -298,8 +292,6 @@ button.gold-flag { font-family: inherit; cursor: pointer; background: none; }
 .gold-flag.bad { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .gold-tags { display: flex; flex-wrap: wrap; gap: 4px; }
 .gold-tags:empty { display: none; }
-.gold-tag { font-size: 11px; padding: 1px 7px; border-radius: var(--radius); color: var(--fg-muted); background: var(--bg-elevated); border: 1px solid var(--divider); }
-.gold-tag.off { text-decoration: line-through; opacity: .6; }
 .gold-after { font-size: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 16px; padding: 5px 10px; border-radius: var(--radius); background: var(--accent-soft); }
 .gold-after.failed { background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .gold-detail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -338,19 +330,6 @@ button.gold-flag { font-family: inherit; cursor: pointer; background: none; }
 .dash-split .dot.bad { background: var(--danger); }
 .dash-split .dot.warn { background: var(--warn); }
 .dash-split .dot.design { background: transparent; border: 1.5px dashed var(--fg-muted); width: 9px; height: 9px; box-sizing: border-box; }
-/* A media card's state in its subtitle: a dot, then the words in the dot's colour. */
-.vio-meta { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.vio-meta .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
-.vio-meta .dot.ok { background: var(--success); box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 30%, transparent); }
-.vio-meta .dot.run { background: var(--run); }
-.vio-meta .dot.warn { background: var(--warn); }
-.vio-meta .dot.idle { border: 1px solid var(--fg-muted); width: 5px; height: 5px; }
-.vio-ok { color: var(--success-text); } .vio-run { color: var(--run); } .vio-warn { color: var(--warn); }
-/* A section's way to its blade: an icon button in the heading's own line, no taller than it. */
-.dash-sec h5 { min-height: 26px; }
-/* A section's way to its blade: the studio's square icon button, at the heading's right. */
-.dash-sec-go.btn.icon.sm { margin-left: auto; width: 26px; height: 26px; padding: 0; justify-content: center; }
-.dash-sec-go img { width: 14px; height: 14px; }
 /* Sections inside a card body (Windows: Required/Optional, Golds: Windows/Linux) reach the
    card edges like the System card's. */
 .card.collapsible .card-body:has(> .dash-sec) { padding: 0; }
@@ -362,7 +341,6 @@ button.gold-flag { font-family: inherit; cursor: pointer; background: none; }
 .dash-wrow:first-child { border-top: 0; }
 .dash-wrow-name { flex: 1; font-weight: 600; }
 .dash-wrow-val { color: var(--fg); }
-.dash-wrow-extra .pill { font-size: 10px; padding: 1px 7px; }
 .dash-act-ico { position: relative; width: 20px; height: 20px; }
 .dash-act-ico img { width: 18px; height: 18px; display: block; margin: 1px; }
 .dash-act-ico .dot { position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px; box-shadow: 0 0 0 2px var(--bg-elevated); }
@@ -394,7 +372,7 @@ button.gold-flag { font-family: inherit; cursor: pointer; background: none; }
 .dash-vm-os { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--fg-muted); min-width: 0; white-space: nowrap; overflow: hidden; }
 .dash-vm-os img { width: 15px; height: 15px; flex-shrink: 0; }
 .dash-vm-ip { font-size: 12px; color: var(--fg-muted); text-align: right; font-variant-numeric: tabular-nums; }
-.dash-vm > .pill { width: 100%; box-sizing: border-box; justify-content: center; }
+.dash-vm > .pill { justify-self: start; }
 
 .dash-split .card-body:has(> .dash-sys) { padding: 0; }
 .dash-sec { padding: 10px 16px 12px; border-top: 1px solid var(--divider); display: flex; flex-direction: column; gap: 3px; }
@@ -431,12 +409,12 @@ button.gold-flag { font-family: inherit; cursor: pointer; background: none; }
 /* A built VM's card: the record of what was built, read-only. */
 fieldset.built-lock { border: 0; margin: 0; padding: 0; min-width: 0; }
 fieldset.built-lock:disabled { opacity: .72; }
-.built-banner { display: flex; gap: 10px; align-items: flex-start; margin: 12px 0 4px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5;
+.built-banner { display: flex; gap: 10px; align-items: center; margin: 12px 0 4px; padding: 10px 12px; font-size: 12.5px; line-height: 1.5;
   border: 1px solid color-mix(in srgb, var(--success) 35%, var(--border)); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--success) 8%, transparent); }
 .built-banner.clash { align-items: center; border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .built-banner.clash > div { flex: 1; }
 .built-banner .clash-icon { width: 16px; height: 16px; flex-shrink: 0; color: var(--warn); }
-.built-banner img { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; }
+.built-banner img { width: 16px; height: 16px; flex-shrink: 0; }
 .save-state.err { cursor: pointer; }
 .topbar .save-state { margin-left: 4px; margin-right: 12px; }
 
@@ -482,7 +460,6 @@ fieldset.built-lock:disabled { opacity: .72; }
 /* WinPE from Microsoft: the build is not a choice - the catalog's newest, shown where a field would be. */
 .pe-product { display: flex; align-items: center; gap: 8px; }
 .pe-product select { flex: 1; min-width: 0; }
-.pe-product .pill { height: 32px; display: inline-flex; align-items: center; box-sizing: border-box; }
 .pe-newest { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-lg);
   background: var(--bg-subtle); color: var(--fg); font-size: 13px; white-space: nowrap; overflow: hidden; }
 /* Let's Encrypt: production or staging, a switch the height of the fields beside it. */
@@ -529,16 +506,80 @@ fieldset.built-lock:disabled { opacity: .72; }
 .wm-pre-grid b { display: block; font-family: var(--mono); font-size: 15px; color: var(--fg); font-weight: 600; }
 @media (max-width: 1150px) { .wm-layout { grid-template-columns: 1fr; } .wm-scroll { height: auto; max-height: 60vh; } .wm-filter-row { grid-template-columns: 1fr; } }
 /* The VM card's "New pool..." row under the Pool picker. */
-/* Pool on the Deploy plan: a picker per VM, "New pool..." opening below it in the cell. */
-.dp-pool { min-width: 180px; }
-.dp-pool select { width: 100%; }
-.dp-tags { min-width: 160px; }
-.dp-tags input { width: 100%; }
 .pool-new { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; align-items: center; min-width: 260px; }
 .pool-new input { grid-column: span 2; }
-.dp-bulk { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-.dp-bulk select { width: 260px; }
-.dp-bulk-label { font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
+/* The Deployment plan: two-line cells, a destination per VM (pool + PVE tags) that opens a
+   floating editor, the same three buttons on every row. */
+table.dp-plan td { vertical-align: middle; }
+.dp-cell { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dp-cell > img { width: 16px; height: 16px; flex: none; }
+.dp-two { display: grid; gap: 2px; min-width: 0; }
+.dp-two > :first-child { white-space: nowrap; }
+.dp-two > span:last-child { font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
+.dp-two .muted { color: var(--fg-muted); }
+.dp-dest { font: inherit; color: var(--fg); display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 28px; max-width: 340px;
+  padding: 3px 8px; background: none; border: 1px dashed var(--border-strong); border-radius: var(--radius); cursor: pointer; text-align: left; }
+.dp-dest:hover, .dp-dest[aria-expanded="true"] { border-color: var(--accent-border); background: var(--accent-soft); }
+.dp-dest:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Read-only keeps the same box, border clear - so built and to-build rows line up. */
+.dp-dest.ro { border-color: transparent; cursor: default; }
+/* The box hangs out to the left by its padding and border, so the pool's text starts on the
+   column heading's edge - like every other column's text. */
+.dp-dest { min-width: 120px; margin-left: -9px; }
+.dp-pool-name { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; }
+.dp-pool-name img { width: 14px; height: 14px; }
+.dp-pool-name.none { color: var(--fg-muted); font-weight: 400; }
+table.dp-plan .row-actions .btn:disabled { opacity: .4; }
+
+/* A PVE tag: a badge like the states, tinted in its Proxmox colour (--c), with a small square
+   where a state has its dot - so a tag never reads as a state. */
+.tagc { display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 6px; border-radius: var(--radius-lg);
+  font-size: 11px; font-weight: 600; line-height: 1; white-space: nowrap;
+  color: color-mix(in srgb, var(--c) 62%, var(--fg)); background: color-mix(in srgb, var(--c) 16%, transparent); }
+.tagc::before { content: ""; width: 6px; height: 6px; border-radius: 1px; background: var(--c); flex: none; }
+.tagc button { font: inherit; font-size: 12px; line-height: 1; color: inherit; opacity: .7; background: none; border: 0; padding: 0; margin-left: 1px; cursor: pointer; }
+.tagc button:hover { opacity: 1; }
+
+/* The floating destination editor. */
+.dp-layer { position: fixed; z-index: var(--z-popover, 120); width: 340px; max-width: calc(100vw - 32px); background: var(--bg-elevated);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); display: grid; }
+.dp-layer[hidden] { display: none; }
+.dp-l-h { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--divider); font-size: 12px; color: var(--fg-muted); }
+.dp-l-h img { width: 16px; height: 16px; }
+.dp-l-h b { color: var(--fg); font-size: 13px; }
+.dp-l-sec { padding: 10px 12px; display: grid; gap: 6px; border-bottom: 1px solid var(--divider); }
+.dp-l-k { font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--fg-muted); }
+.dp-plist { display: grid; gap: 1px; max-height: 196px; overflow-y: auto; margin: 0 -4px; }
+.dp-popt { font: inherit; font-size: 13px; color: var(--fg); background: none; border: 0; text-align: left; cursor: pointer;
+  display: grid; grid-template-columns: 16px minmax(0, auto) 1fr auto 14px; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: var(--radius); }
+.dp-popt:hover, .dp-popt:focus-visible { background: var(--bg-hover); outline: none; }
+.dp-popt img { width: 15px; height: 15px; }
+.dp-popt .z { font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dp-popt .cnt { font-size: 11px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.dp-popt .tick { color: var(--accent); visibility: hidden; font-size: 12px; }
+.dp-popt[aria-selected="true"] { background: var(--accent-soft); }
+.dp-popt[aria-selected="true"] .tick { visibility: visible; }
+.dp-popt.none .nm { color: var(--fg-muted); }
+.dp-popt.new { color: var(--accent); font-weight: 600; }
+.dp-newpool { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 4px; }
+.dp-newpool input { min-width: 0; }
+.dp-newpool #dpNewPool { font-family: var(--mono); }
+.dp-newpool #dpNewPoolC { grid-column: 1; }
+.dp-tagfield { position: relative; }
+.dp-tagbox { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 32px; padding: 4px 6px; border: 1px solid var(--input-border); border-radius: var(--radius); background: var(--bg); }
+.dp-tagbox:focus-within { border-color: var(--accent-border); }
+.dp-tagbox input { flex: 1; min-width: 80px; height: 22px; border: 0; padding: 0; background: transparent; color: var(--fg); font: 12px var(--mono); outline: none; }
+.dp-tsugg { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 2; background: var(--bg-elevated); border: 1px solid var(--border-strong);
+  border-radius: var(--radius); box-shadow: var(--shadow-2); padding: 4px; display: grid; gap: 1px; max-height: 168px; overflow-y: auto; }
+.dp-tsugg button { white-space: nowrap; overflow: hidden; font: 12px var(--mono); color: var(--fg); background: none; border: 0; text-align: left; cursor: pointer; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: var(--radius); }
+.dp-tsugg button:hover, .dp-tsugg button.on { background: var(--bg-hover); }
+.dp-tsugg .sq { width: 6px; height: 6px; border-radius: 1px; flex: none; }
+.dp-tsugg .z { margin-left: auto; font: 11px var(--font); color: var(--fg-muted); }
+.dp-tsugg button > :not(.sq):not(.z) { min-width: 0; }
+.dp-tsugg .z { white-space: nowrap; flex: none; }
+.dp-l-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; }
+.dp-all { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); }
+.dp-all input { accent-color: var(--accent); }
 
 /* Let's Encrypt: the certificate's names as chips - the studio's own fixed, the rest removable. */
 .le-names { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -606,8 +647,6 @@ a.btn, a.btn:hover { text-decoration: none; }
 .cis-grub { margin-right: auto; font-size: 12px; color: var(--fg-muted); }
 .cis-pw { user-select: all; color: var(--fg); }
 
-/* A status pill beside a button in a card head (Windows: READY + Media) - one height. */
-.card-head .pill.status { height: 28px; box-sizing: border-box; padding-top: 0; padding-bottom: 0; }
 
 /* A switch alone in a table cell (Clean up's rows): no row frame, no label. */
 .toggle.bare { border: 0; background: none; padding: 0; min-height: 0; width: auto; display: inline-flex; }
@@ -625,7 +664,7 @@ a.btn, a.btn:hover { text-decoration: none; }
 /* One height per row of buttons, everywhere (a general rule): a card head's actions, an
    overlay's or a form's footer - 32 px for every button, icon button and pill; a table row's
    actions - 28 px. Icon buttons are square. */
-.card-head .card-actions > .btn, .card-head .card-actions > .pill.status, .card-head .card-actions > .pill.role,
+.card-head .card-actions > .btn,
 .actions > .btn, .actions > a.btn, .cf-actions > .btn, .gs-actions .btn { height: 32px; min-height: 0; box-sizing: border-box; }
 .card-head .card-actions > .btn.sm, .actions > .btn.sm { padding: 0 12px; font-size: 12.5px; }
 .card-head .card-actions > .btn.icon, .actions > .btn.icon { width: 32px; padding: 0; justify-content: center; }
@@ -734,3 +773,16 @@ a.btn, a.btn:hover { text-decoration: none; }
 .ml-preview .actions { display: flex; gap: 8px; justify-content: flex-end; }
 .section.collapsible > .section-body > :is(.ml-log, p.hint):first-child { margin-top: 12px; }
 .section.collapsible > .section-body > p.hint:only-child { margin-bottom: 0; }
+
+/* The mail's recipients: chips in the box, the input after them. */
+.ml-to { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 32px; padding: 3px 4px 3px 4px; border: 1px solid var(--input-border);
+  border-radius: var(--radius); background: var(--bg); cursor: text; box-sizing: border-box; }
+.ml-to:focus-within { border-color: var(--accent); }
+/* One line of chips is exactly as tall as the fields beside it (32 px); more addresses wrap. */
+.ml-to .chip { margin: 0; height: 24px; padding: 0 3px 0 8px; box-sizing: border-box; }
+.ml-to input { flex: 1; min-width: 160px; border: 0; padding: 0 4px; height: 24px; background: transparent; outline: none; box-shadow: none; }
+.ml-to input.is-invalid { color: var(--danger-text); }
+.ml-to:has(input.is-invalid) { border-color: var(--danger); }
+
+/* A virtual edition says what it is made from too: Core or Desktop, then Virtual. */
+.wi-types { display: inline-flex; gap: 6px; align-items: center; }

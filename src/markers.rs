@@ -74,6 +74,11 @@ const TEXT: &[(&str, &str)] = &[
     ("HEALTH", "Scanning the component store"),
     ("COMMIT", "Saving image"),
     ("WINRE", "Servicing WinRE"),
+    ("EDGE", "Adding Microsoft Edge"),
+    ("APPS", "Provisioning the inbox apps"),
+    ("PROV-OK", "Provisioned"),
+    ("PROV-FAIL", "Provisioning failed"),
+    ("BOOT", "Servicing boot.wim"),
     ("EXPORT", "Exporting the images"),
     ("COPY-OUT", "Copying the result back"),
     ("WORKER-OK", "Worker done"),
@@ -120,12 +125,33 @@ pub fn text(line: &str) -> String {
         let at = match parts[0] {
             "winre" => "WinRE".to_owned(),
             "pe" => "WinPE".to_owned(),
+            b if b.starts_with("boot") => format!("boot.wim {}", &b[4..]),
             n => format!("image {n}"),
         };
         return match key {
             "UPD-OK" => format!("Cleaned up: {at}"),
             "UPD-FAIL" => format!("Cleanup failed: {at}, exit code {}", parts.get(2).unwrap_or(&"?")),
             _ => format!("Cleaning up: {at}"),
+        };
+    }
+    // PVS-HEALTH <index>[-before|-updated|-cleaned]: the scan after each stage.
+    if key == "HEALTH" {
+        let (n, stage) = args.split_once('-').unwrap_or((args, ""));
+        let when = match stage {
+            "before" => " before the updates",
+            "updated" => " after the updates",
+            "cleaned" => " after the cleanup",
+            _ => "",
+        };
+        return format!("Scanning the component store: image {n}{when}");
+    }
+    // PVS-EDGE <index>, PVS-BOOT <index>, PVS-APPS <index> <count>.
+    if matches!(key, "EDGE" | "BOOT" | "APPS") {
+        let head = TEXT.iter().find(|(k, _)| *k == key).map(|(_, t)| *t).unwrap_or_default();
+        return match parts.as_slice() {
+            [n, count] => format!("{head}: image {n}, {count} app(s)"),
+            [n] => format!("{head}: image {n}"),
+            _ => head.to_owned(),
         };
     }
     let head = match TEXT.iter().find(|(k, _)| *k == key) {

@@ -94,9 +94,10 @@ async fn worker_put(axum::extract::Path((run, token, path)): axum::extract::Path
     use tokio::io::AsyncWriteExt;
     // What the worker sends back: the images, its package lists, DISM's log.
     let list = path.strip_prefix("packages-").and_then(|r| r.strip_suffix(".txt")).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
-        || path.strip_prefix("health-").and_then(|r| r.strip_suffix(".txt")).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
+        // health-<index>[-before|-updated|-cleaned].txt: a scan after each stage, the last as it ships.
+        || path.strip_prefix("health-").and_then(|r| r.strip_suffix(".txt")).map(|n| ["-before", "-updated", "-cleaned"].iter().find_map(|s| n.strip_suffix(s)).unwrap_or(n)).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()));
     let step_log = path.strip_prefix("logs/").and_then(|r| r.strip_suffix(".log")).is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || "-_.%".contains(c)) && !n.contains(".."));
-    if !matches!(path.as_str(), "serviced.wim" | "winre-serviced.wim" | "dism.log") && !list && !step_log {
+    if !matches!(path.as_str(), "serviced.wim" | "winre-serviced.wim" | "boot-serviced.wim" | "dism.log") && !list && !step_log {
         return axum::http::StatusCode::FORBIDDEN;
     }
     let Some(file) = worker_file(&run, &token, &path) else { return axum::http::StatusCode::NOT_FOUND };
@@ -372,7 +373,8 @@ pub fn wanted(kind: Kind, f: &uup::File, editions: &[String], lang: &str) -> boo
     }
     // Another edition's metadata ESD (professional_en-us.esd while building Home) is not a package.
     let other_meta = n.ends_with(&format!("_{}.esd", lang.to_lowercase())) && !n.starts_with("microsoft-");
-    (n.ends_with(".esd") && !other_meta) || n.ends_with(".cab")
+    // Edge.wim: Microsoft Edge, which a client's edition ESD no longer carries (/Add-Edge).
+    (n.ends_with(".esd") && !other_meta) || n.ends_with(".cab") || n == "edge.wim"
 }
 
 fn kv(info: &str, key: &str) -> String {
@@ -474,10 +476,32 @@ async fn prune_dism_logs(dir: &Path, keep: usize) {
 
 /// DISM /ScanHealth on the mounted image, its answer sent back as health-<at>.txt for the
 /// studio to read (health_verdict) - the build takes no image Windows itself calls damaged.
+/// Its own log (logs/health-<at>.log) names each corrupt file - what tells Microsoft's
+/// reverse-delta scan error from real damage (reverse_delta_only).
 fn health_check(at: &str) -> String {
     format!(
-        "echo PVS-HEALTH {at} > COM1\r\ndism /English /Image:W:\\mount /Cleanup-Image /ScanHealth /ScratchDir:W:\\scratch > W:\\health-{at}.txt 2>&1\r\n%C% -T W:\\health-{at}.txt %U%/health-{at}.txt > nul 2>&1\r\n"
+        "echo PVS-HEALTH {at} > COM1\r\ndism /English /Image:W:\\mount /Cleanup-Image /ScanHealth /ScratchDir:W:\\scratch /LogPath:W:\\logs\\health-{at}.log > W:\\health-{at}.txt 2>&1\r\n%C% -T W:\\health-{at}.txt %U%/health-{at}.txt > nul 2>&1\r\n%C% -T W:\\logs\\health-{at}.log %U%/logs/health-{at}.log > nul 2>&1\r\n"
     )
+}
+
+/// Since the 2026 cumulative updates of 26100/26200, /ScanHealth calls the store repairable
+/// for reverse-delta payloads (WinSxS\<component>\r\<file>) alone - byte-identical to copies
+/// it does not flag, RestoreHealth cannot clear them, live systems show the same (Microsoft
+/// Tech Community, Sysnative, 2026-09). Some(count) when the scan's log has nothing
+/// else: every corruption a CSI payload, every payload under \r\.
+pub(crate) fn reverse_delta_only(cbs: &str) -> Option<usize> {
+    let count = |key: &str| {
+        cbs.lines().rev().find_map(|l| l.split_once(key).map(|(_, v)| v.trim().parse::<usize>().unwrap_or(usize::MAX)))
+    };
+    let total = count("Total Detected Corruption:")?;
+    let payload = count("CSI Payload Corruption:")?;
+    let corrupt: Vec<&str> = cbs.lines().filter(|l| l.contains("CSI Payload Corrupt\t") || l.contains("CSI Payload Corrupt ")).collect();
+    (total > 0 && total == payload && corrupt.len() == total && corrupt.iter().all(|l| l.contains("\\r\\"))).then_some(total)
+}
+
+/// " - only reverse-delta files (n)" for a scan's log that reverse_delta_only accepts.
+fn reverse_note(cbs: &str) -> String {
+    reverse_delta_only(cbs).map(|n| format!(" - only {n} reverse-delta file(s), the known scan error")).unwrap_or_default()
 }
 
 /// What /ScanHealth said: Ok with its sentence, or Err with why the image is not healthy.
@@ -576,16 +600,41 @@ pub(crate) async fn extract_ssu(log: &JobLog, msu: &Path, dest: &Path) -> Result
 /// A step's log file name: the update's file name without its extension, per image.
 fn log_name(at: &str, file: &str) -> String {
     let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
-    format!("{}-{stem}", if at == "winre" { at.to_owned() } else { format!("image{at}") })
+    format!("{}-{stem}", if at == "winre" || at.starts_with("boot") { at.to_owned() } else { format!("image{at}") })
 }
 
 /// The worker's script: the install image's updates one at a time (each with its verdict),
 /// the package list of every image for the studio to check, the Safe OS update into WinRE,
 /// and DISM's own log back to the studio whatever happened.
-fn worker_cmd(url: &str, pin: &str, indexes: usize, chain: &[String], image: &[String], winre: &[String], ssu: Option<&str>) -> String {
+fn worker_cmd(url: &str, pin: &str, indexes: usize, chain: &[String], image: &[String], winre: &[String], ssu: Option<&str>, extra: &Extras) -> String {
     let mut s = worker_head("media worker: install.wim + updates -> serviced install.wim", url, pin);
-    s += &worker_cmd_body(indexes, chain, image, winre, ssu);
+    s += &worker_cmd_body(indexes, chain, image, winre, ssu, extra);
     s
+}
+
+/// What the worker does beyond the updates: Microsoft Edge and the inbox apps into each
+/// install image (a Windows 11 set carries both outside its edition ESD), and boot.wim
+/// brought to the cumulative update.
+#[derive(Default)]
+pub(crate) struct Extras {
+    /// Edge.wim, sent to the worker: /Add-Edge into each image.
+    pub edge: bool,
+    /// The frameworks (relative to apps\), provisioned first.
+    pub frameworks: Vec<String>,
+    /// Per image: its apps. Empty: no apps.wim.
+    pub apps: Vec<Vec<crate::apps::App>>,
+    /// The cumulative update chain for boot.wim (as `image` names them), empty: boot.wim
+    /// is not serviced.
+    pub boot: Vec<String>,
+}
+
+/// A provisioning step (Edge, a framework, an app): its own markers - one line per app is
+/// detail, summed up per image by the build - and its own DISM log.
+fn prov_step(s: &mut String, at: &str, name: &str, log: &str, dism: &str) {
+    s.push_str(&format!("{dism} /LogPath:W:\\logs\\{log}.log /LogLevel:2 > nul 2>&1\r\nset RC=!errorlevel!\r\nif \"!RC!\"==\"3010\" set RC=0\r\n"));
+    s.push_str(&format!(
+        "if \"!RC!\"==\"0\" (echo PVS-PROV-OK {at} {name} > COM1) else (echo PVS-PROV-FAIL {at} {name} !RC! > COM1)\r\n%C% -T W:\\logs\\{log}.log %U%/logs/{log}.log > nul 2>&1\r\n"
+    ));
 }
 
 /// Every worker script starts alike: COM1, the network, curl off the seed, the studio
@@ -621,22 +670,44 @@ fn worker_tail() -> String {
     s
 }
 
-fn worker_cmd_body(indexes: usize, chain: &[String], image: &[String], winre: &[String], ssu: Option<&str>) -> String {
+fn worker_cmd_body(indexes: usize, chain: &[String], image: &[String], winre: &[String], ssu: Option<&str>, extra: &Extras) -> String {
     let mut s = String::new();
     s += "echo PVS-COPY-IN > COM1\r\n%C% -o W:\\install.wim %U%/install.wim > COM1 2>&1 || goto :fail\r\n";
     if !winre.is_empty() {
         s += "%C% -o W:\\winre.wim %U%/winre.wim > COM1 2>&1 || goto :fail\r\n";
     }
-    if !chain.is_empty() {
-        s += "mkdir W:\\upd\\lcu\r\n";
+    if !extra.boot.is_empty() {
+        s += "%C% -o W:\\boot.wim %U%/boot.wim > COM1 2>&1 || goto :fail\r\n";
     }
-    for u in chain.iter().map(|c| format!("lcu/{c}")).chain(image.iter().filter(|u| !u.starts_with("lcu/")).cloned()).chain(winre.iter().cloned()).chain(ssu.filter(|_| !winre.is_empty()).map(str::to_owned)) {
+    if extra.edge {
+        s += "mkdir W:\\edge\r\n%C% -o W:\\edge\\Edge.wim %U%/Edge.wim > COM1 2>&1 || goto :fail\r\n";
+    }
+    // The apps as one WIM (a bundle's packages, stubs and licence laid out as DISM wants
+    // them - 2,800 files would be 2,800 requests), applied to W:\apps.
+    if extra.apps.iter().any(|a| !a.is_empty()) {
+        s += "%C% -o W:\\apps.wim %U%/apps.wim > COM1 2>&1 || goto :fail\r\nmkdir W:\\apps\r\n";
+        s += "dism /English /Apply-Image /ImageFile:W:\\apps.wim /Index:1 /ApplyDir:W:\\apps /ScratchDir:W:\\scratch > COM1 2>&1 || goto :fail\r\ndel W:\\apps.wim\r\n";
+    }
+    let files: Vec<String> = chain.iter().map(|c| format!("lcu/{c}")).chain(image.iter().filter(|u| !u.starts_with("lcu/")).cloned()).chain(winre.iter().cloned()).chain(ssu.filter(|_| !winre.is_empty()).map(str::to_owned)).collect();
+    // Every folder an update sits in (lcu/ for the one-call chain, lcu1/, lcu2/ ... for a chain
+    // applied one update at a time) exists before curl writes into it.
+    let mut dirs: Vec<&str> = files.iter().filter_map(|u| u.rsplit_once('/').map(|(d, _)| d)).collect();
+    dirs.dedup();
+    for d in dirs {
+        s += &format!("mkdir W:\\upd\\{}\r\n", d.replace('/', "\\"));
+    }
+    for u in &files {
         let local = u.replace('/', "\\");
         s += &format!("%C% -o W:\\upd\\{local} %U%/upd/{u} > COM1 2>&1 || goto :fail\r\n");
     }
     s += &format!("for /l %%i in (1,1,{indexes}) do call :service %%i || goto :fail\r\n");
     if !winre.is_empty() {
         s += "call :winre || goto :fail\r\n";
+    }
+    // boot.wim is not worth the install images: a failure there leaves the studio's own
+    // boot.wim (from the serviced WinRE) in place, the rest goes on.
+    if !extra.boot.is_empty() {
+        s += "call :boot\r\n";
     }
     s += "echo PVS-EXPORT > COM1\r\n";
     s += &format!(
@@ -648,7 +719,14 @@ fn worker_cmd_body(indexes: usize, chain: &[String], image: &[String], winre: &[
     // One image: its updates in order, the component store cleaned, its package list.
     s += ":service\r\necho PVS-INDEX %1 > COM1\r\n";
     s += "dism /English /Mount-Image /ImageFile:W:\\install.wim /Index:%1 /MountDir:W:\\mount /ScratchDir:W:\\scratch > COM1 2>&1 || exit /b 1\r\n";
-    for u in image {
+    // The image as it came, before any update: a store damaged here was put together wrong;
+    // one that is only damaged after was damaged by an update. Reported, never fatal.
+    s += &health_check("%1-before");
+    // .NET after the cleanup (Microsoft's media steps: a .NET update leaves operations
+    // pending that the cleanup would fail on); the rest - the enablement package first, then
+    // the cumulative chain, as the build ordered them - before it.
+    let is_net = |u: &&String| u.to_lowercase().contains("-ndp");
+    for u in image.iter().filter(|u| !is_net(u)) {
         // lcu/<target>: the cumulative update chain sits in its own folder, the target named
         // alone - DISM takes the checkpoints in that folder first (Microsoft's checkpoint
         // procedure; naming the checkpoint itself fails with 0x80070228).
@@ -657,9 +735,29 @@ fn worker_cmd_body(indexes: usize, chain: &[String], image: &[String], winre: &[
     }
     // Microsoft's procedure cleans the install image without /ResetBase (the updates stay
     // removable), and only a pending operation (0x800F0806) is a warning, not a failure.
+    // Scanned after each stage (a minute or two each), so a damaged store names the stage
+    // that damaged it: the updates, the cleanup, or .NET.
+    s += &health_check("%1-updated");
     dism_step(&mut s, "%1 cleanup", "image%1-cleanup", "dism /English /Image:W:\\mount /Cleanup-Image /StartComponentCleanup /ScratchDir:W:\\scratch");
-    // Windows' own verdict on the image: the component store scanned for corruption (about
-    // a minute an image). Not WinRE: DISM refuses /ScanHealth on a Windows PE image (error 50).
+    let net: Vec<&String> = image.iter().filter(is_net).collect();
+    if !net.is_empty() {
+        s += &health_check("%1-cleaned");
+    }
+    for u in net {
+        let (file, local) = (u.rsplit('/').next().unwrap_or(u), u.replace('/', "\\"));
+        dism_step(&mut s, &format!("%1 {file}"), &log_name("%1", file), &format!("dism /English /Image:W:\\mount /Add-Package /PackagePath:W:\\upd\\{local} /ScratchDir:W:\\scratch"));
+    }
+    // Edge and the inbox apps after the updates (Microsoft's OEM order: "add major updates
+    // before apps... if you add an update later, you'll need to re-add the apps").
+    if extra.edge {
+        s += "echo PVS-EDGE %1 > COM1\r\n";
+        prov_step(&mut s, "%1", "edge", "image%1-edge", "dism /English /Image:W:\\mount /Add-Edge /SupportPath:W:\\edge /ScratchDir:W:\\scratch");
+    }
+    if extra.apps.iter().any(|a| !a.is_empty()) {
+        s += "call :apps%1\r\n";
+    }
+    // Windows' own verdict on the image as it ships. Not WinRE: DISM refuses /ScanHealth on
+    // a Windows PE image (error 50).
     s += &health_check("%1");
     s += "dism /English /Image:W:\\mount /Get-Packages /Format:Table > W:\\packages-%1.txt 2>&1\r\n%C% -T W:\\packages-%1.txt %U%/packages-%1.txt > nul 2>&1\r\n";
     s += "echo PVS-COMMIT %1 > COM1\r\ndism /English /Unmount-Image /MountDir:W:\\mount /Commit /ScratchDir:W:\\scratch > COM1 2>&1 || exit /b 1\r\nexit /b 0\r\n";
@@ -682,6 +780,49 @@ fn worker_cmd_body(indexes: usize, chain: &[String], image: &[String], winre: &[
         s += "dism /English /Unmount-Image /MountDir:W:\\mount /Commit /ScratchDir:W:\\scratch > COM1 2>&1 || exit /b 1\r\n";
         s += "dism /English /Export-Image /SourceImageFile:W:\\winre.wim /SourceIndex:1 /DestinationImageFile:W:\\winre-serviced.wim /Compress:max /Bootable /ScratchDir:W:\\scratch > COM1 2>&1 || exit /b 1\r\n";
         s += "%C% -T W:\\winre-serviced.wim %U%/winre-serviced.wim > COM1 2>&1 || exit /b 1\r\nexit /b 0\r\n";
+    }
+
+    // Each image's apps (an N edition ships fewer): the frameworks without a licence, then
+    // every app with its own, for every region, a stubbed app in full (as uup-converter).
+    for (i, apps) in extra.apps.iter().enumerate() {
+        let n = i + 1;
+        s += &format!(":apps{n}\r\necho PVS-APPS {n} {} > COM1\r\n", apps.len());
+        if !apps.is_empty() {
+            for f in &extra.frameworks {
+                let name = f.rsplit('\\').next().unwrap_or(f);
+                prov_step(&mut s, &n.to_string(), &format!("fw:{name}"), &format!("image{n}-fw-{name}"), &format!("dism /English /Image:W:\\mount /Add-ProvisionedAppxPackage /PackagePath:\"W:\\apps\\{f}\" /SkipLicense /ScratchDir:W:\\scratch"));
+            }
+        }
+        for a in apps {
+            let stub = if a.stub { " /StubPackageOption:InstallFull" } else { "" };
+            prov_step(
+                &mut s,
+                &n.to_string(),
+                &a.id,
+                &format!("image{n}-app-{}", a.id),
+                &format!("dism /English /Image:W:\\mount /Add-ProvisionedAppxPackage /PackagePath:\"W:\\apps\\{}\\{}\" /LicensePath:\"W:\\apps\\{}\\License.xml\" /Region:all{stub} /ScratchDir:W:\\scratch", a.id, a.main, a.id),
+            );
+        }
+        s += "exit /b 0\r\n";
+    }
+
+    // boot.wim (WinPE and the Setup environment) to the cumulative update, as Microsoft's
+    // media steps 17-25: the update chain into each index, then the cleanup with /ResetBase.
+    // On 26052 and newer WinPE-Rejuv-Package goes first (uup-converter: the update does not
+    // take it), then back as boot-serviced.wim.
+    if !extra.boot.is_empty() {
+        s += ":boot\r\nfor %%b in (1 2) do call :bootidx %%b || exit /b 1\r\n";
+        s += "for %%b in (1 2) do dism /English /Export-Image /SourceImageFile:W:\\boot.wim /SourceIndex:%%b /DestinationImageFile:W:\\boot-serviced.wim /Compress:max /ScratchDir:W:\\scratch > COM1 2>&1 || exit /b 1\r\n";
+        s += "%C% -T W:\\boot-serviced.wim %U%/boot-serviced.wim > COM1 2>&1 || exit /b 1\r\nexit /b 0\r\n";
+        s += ":bootidx\r\necho PVS-BOOT %1 > COM1\r\n";
+        s += "dism /English /Mount-Image /ImageFile:W:\\boot.wim /Index:%1 /MountDir:W:\\mount /ScratchDir:W:\\scratch > COM1 2>&1 || (echo PVS-UPD-FAIL boot%1 mount 1 > COM1 & dism /English /Unmount-Image /MountDir:W:\\mount /Discard > nul 2>&1 & exit /b 1)\r\n";
+        s += "for /f \"tokens=4\" %%p in ('dism /English /Image:W:\\mount /Get-Packages ^| findstr /i \"WinPE-Rejuv-Package\"') do dism /English /Image:W:\\mount /Remove-Package /PackageName:%%p /ScratchDir:W:\\scratch > COM1 2>&1\r\n";
+        for u in &extra.boot {
+            let (file, local) = (u.rsplit('/').next().unwrap_or(u), u.replace('/', "\\"));
+            dism_step(&mut s, &format!("boot%1 {file}"), &log_name("boot%1", file), &format!("dism /English /Image:W:\\mount /Add-Package /PackagePath:W:\\upd\\{local} /ScratchDir:W:\\scratch"));
+        }
+        dism_step(&mut s, "boot%1 cleanup", "boot%1-cleanup", "dism /English /Image:W:\\mount /Cleanup-Image /StartComponentCleanup /ResetBase /ScratchDir:W:\\scratch");
+        s += "dism /English /Unmount-Image /MountDir:W:\\mount /Commit /ScratchDir:W:\\scratch > COM1 2>&1 || exit /b 1\r\nexit /b 0\r\n";
     }
     s += &worker_tail();
     s
@@ -969,10 +1110,49 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         // Downloaded ESDs are no longer needed once the images are out of them - unless the
         // downloads are kept for the next build.
         let keep: bool = settings::load::<WorkerSettings>(db, "worker").await.unwrap_or_default().keep_downloads;
-        for f in files.iter().filter(|f| !is_update(&f.name) && !keep) {
+        for f in files.iter().filter(|f| !is_update(&f.name) && !f.name.eq_ignore_ascii_case("edge.wim") && !keep) {
             let _ = tokio::fs::remove_file(dl.join(&f.name)).await;
             let _ = tokio::fs::remove_file(dl.join(&f.name).with_extension("esd")).await;
         }
+
+        // ---- Windows 11: Edge and the inbox apps, which its edition ESD no longer carries ----
+        let mut extra = Extras::default();
+        let edge_file = files.iter().find(|f| f.name.eq_ignore_ascii_case("edge.wim")).map(|f| dl.join(&f.name)).filter(|p| p.exists());
+        let mut apps_root: Option<(PathBuf, Vec<uup::File>)> = None;
+        if prod.kind == Kind::Client {
+            extra.edge = edge_file.is_some();
+            if let Some(agg) = files.iter().find(|f| is_aggregated(&f.name)).map(|f| dl.join(&f.name)) {
+                let tmp = dir.join("compdb");
+                if let Some(app_xml) = crate::apps::compdb(log, &agg, &tmp, "DesktopTargetCompDB_App_Neutral").await? {
+                    let mut eds = Vec::new();
+                    for ed in &base {
+                        eds.push(crate::apps::compdb(log, &agg, &tmp, &format!("DesktopTargetCompDB_{}_{}", ed.to_lowercase(), req.lang.to_lowercase())).await?);
+                    }
+                    log.get("Asking the UUP dump catalog for the inbox apps").await;
+                    let catalog = uup::files(web, &req.uuid, "neutral", "app").await.context("asking the catalog for the inbox apps")?;
+                    let plan = crate::apps::plan(&app_xml, &eds, &catalog)?;
+                    for (i, apps) in plan.per_image.iter().enumerate() {
+                        log.ok(format!("{}: {} inbox app(s) from its CompDB", editions_out.get(i).cloned().unwrap_or_default(), apps.len())).await;
+                    }
+                    if !plan.missing.is_empty() {
+                        log.debug(format!("Listed, but not in this set: {}", plan.missing.join(", "))).await;
+                    }
+                    let mut want = plan.files.clone();
+                    let uuid = req.uuid.clone();
+                    uup::download_all(web, log, &mut pr, &mut want, &dl, || {
+                        let uuid = uuid.clone();
+                        async move { uup::files(web, &uuid, "neutral", "app").await }
+                    })
+                    .await?;
+                    let root = dir.join("apps");
+                    crate::apps::lay_out(&plan, &dl, &root).await?;
+                    extra.frameworks = plan.frameworks.clone();
+                    extra.apps = plan.per_image.clone();
+                    apps_root = Some((root, want));
+                }
+            }
+        }
+        let has_apps = extra.apps.iter().any(|a| !a.is_empty());
 
         // ---- the worker: the cumulative update, which only DISM can apply ----
         let behind = base_rev.parse::<u64>().unwrap_or(0) < target_rev.parse::<u64>().unwrap_or(0);
@@ -980,7 +1160,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             bail!("the images are at revision {base_rev}, the build is {} - and the catalog lists no update to get there", req.build);
         }
         let mut applied = Vec::new();
-        if behind {
+        if behind || extra.edge || has_apps {
             pr.stage(42.0, 90.0, "the worker applies the updates");
             applied = updates.iter().chain(&winre_updates).map(|u| u.name.clone()).collect();
             let pe: winpe::WinPe = settings::load(db, "winpe").await?;
@@ -1002,7 +1182,34 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             let target = chain.iter().max_by_key(|u| kb_of(&u.name).and_then(|k| k[2..].parse::<u64>().ok()).unwrap_or(0)).map(|u| u.name.clone());
             let mut chain_names = Vec::new();
             let mut image_names = Vec::new();
-            if chain.len() > 1 {
+            // The rest first, the enablement package among them (uup-converter's order: it goes
+            // in before the cumulative update); .NET the worker holds back until after the
+            // cleanup.
+            let single = if chain.len() <= 1 { chain.clone() } else { Vec::new() };
+            for (i, u) in updates.iter().filter(|u| !in_chain(u)).chain(single).enumerate() {
+                let n = format!("{:02}-{}", i + 1, u.name);
+                take_file(&dl.join(&u.name), &share.join("upd").join(&n), keep).await?;
+                image_names.push(n);
+            }
+            if chain.len() > 1 && prod.kind == Kind::Client {
+                // Windows 11: each update of the chain on its own, the checkpoint first
+                // (Microsoft's second checkpoint procedure). Given the target alone, DISM left
+                // the checkpoint Staged and the target's forward deltas found no base for the
+                // client's own components - 72 corrupt files in 25H2 26200.9539 (2026-10-06),
+                // the image healthy right before. Each .msu sits alone in its own folder.
+                let mut ordered = chain.clone();
+                ordered.sort_by_key(|u| kb_of(&u.name).and_then(|k| k[2..].parse::<u64>().ok()).unwrap_or(0));
+                for (i, u) in ordered.iter().enumerate() {
+                    let dir = format!("lcu{}", i + 1);
+                    tokio::fs::create_dir_all(share.join("upd").join(&dir)).await?;
+                    take_file(&dl.join(&u.name), &share.join("upd").join(&dir).join(&u.name), keep).await?;
+                    // Plain image updates for the worker: fetched as named and applied one by one
+                    // (chain_names is the one-call chain's upd/lcu folder).
+                    image_names.push(format!("{dir}/{}", u.name));
+                }
+                log.line(format!("Cumulative chain {} - one DISM call each, the checkpoint first",
+                    ordered.iter().filter_map(|u| kb_of(&u.name)).collect::<Vec<_>>().join(" -> "))).await;
+            } else if chain.len() > 1 {
                 tokio::fs::create_dir_all(share.join("upd/lcu")).await?;
                 for u in &chain {
                     take_file(&dl.join(&u.name), &share.join("upd/lcu").join(&u.name), keep).await?;
@@ -1015,11 +1222,6 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                     chain.iter().filter_map(|u| kb_of(&u.name)).collect::<Vec<_>>().join(" -> "),
                     target.as_deref().and_then(kb_of).unwrap_or_default())).await;
             }
-            for (i, u) in updates.iter().filter(|u| chain.len() <= 1 || !in_chain(u)).enumerate() {
-                let n = format!("{:02}-{}", i + 1, u.name);
-                take_file(&dl.join(&u.name), &share.join("upd").join(&n), keep).await?;
-                image_names.push(n);
-            }
             let mut winre_names = Vec::new();
             for (i, u) in winre_updates.iter().enumerate() {
                 let n = format!("re{:02}-{}", i + 1, u.name);
@@ -1029,9 +1231,31 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             if !winre_names.is_empty() {
                 tokio::fs::copy(&winre, share.join("winre.wim")).await?;
             }
+            if let Some(edge) = &edge_file {
+                take_file(edge, &share.join("Edge.wim"), keep).await?;
+            }
+            let mut apps_gb = 0.0;
+            if let Some((root, want)) = &apps_root {
+                run(log, "wimlib-imagex", &["capture", &root.display().to_string(), &share.join("apps.wim").display().to_string(), "Apps", "--compress=none", "--no-acls"]).await
+                    .context("packing the inbox apps for the worker")?;
+                let _ = tokio::fs::remove_dir_all(root).await;
+                apps_gb = want.iter().map(|f| f.size).sum::<u64>() as f64 / 1e9;
+                if !keep {
+                    for f in want {
+                        let _ = tokio::fs::remove_file(dl.join(&f.name)).await;
+                    }
+                }
+            }
+            // boot.wim to the cumulative update: the chain's .msu files, as the image gets them.
+            if behind {
+                extra.boot = image_names.iter().filter(|n| n.to_lowercase().ends_with(".msu")).cloned().collect();
+                if !extra.boot.is_empty() {
+                    tokio::fs::copy(tree.join("sources/boot.wim"), share.join("boot.wim")).await?;
+                }
+            }
             let wim_gb = tokio::fs::metadata(share.join("install.wim")).await?.len() as f64 / 1e9;
             let upd_gb = updates.iter().chain(&winre_updates).map(|u| u.size).sum::<u64>() as f64 / 1e9;
-            let scratch_gb = ((wim_gb * 4.0 + upd_gb * 2.0 + 20.0).ceil() as u64).max(60);
+            let scratch_gb = ((wim_gb * 4.0 + upd_gb * 2.0 + apps_gb * 3.0 + 20.0).ceil() as u64).max(60);
 
             // WinRE's servicing stack: SSU-*.cab out of the cumulative update's .msu - since 24H2
             // a WIM (MSWIM header), which wimlib opens and WinPE's expand.exe cannot.
@@ -1051,9 +1275,17 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                     log.line("No servicing stack inside the cumulative update - WinRE gets the Safe OS update alone").await;
                 }
             }
-            log.run(format!("Worker: {} update(s) into {} image(s) - a WinPE VM applies them with DISM", applied.len(), base.len())).await;
-            log.line("DISM: about 15-30 min per image, health scan included").await;
-            let minutes = 60 + 60 * base.len() as u64 + if winre_names.is_empty() { 0 } else { 20 };
+            let mut what = vec![format!("{} update(s)", applied.len())];
+            if extra.edge {
+                what.push("Microsoft Edge".into());
+            }
+            if has_apps {
+                what.push(format!("{} inbox app(s)", extra.apps.iter().map(Vec::len).max().unwrap_or(0)));
+            }
+            log.run(format!("Worker: {} into {} image(s){} - a WinPE VM applies them with DISM", what.join(", "), base.len(), if extra.boot.is_empty() { "" } else { " and boot.wim" })).await;
+            log.line("DISM: about 15-30 min per image, health scan included; about 20 more for the apps, 20 for boot.wim").await;
+            let app_minutes: u64 = extra.apps.iter().map(|a| a.len() as u64).sum::<u64>() / 2 + if extra.edge { 5 * base.len() as u64 } else { 0 };
+            let minutes = 60 + 60 * base.len() as u64 + if winre_names.is_empty() { 0 } else { 20 } + app_minutes + if extra.boot.is_empty() { 0 } else { 40 };
             let spec = WorkerSpec {
                 run_id: &run_id,
                 share: &share,
@@ -1065,7 +1297,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             };
             let (n_base, chain_n, image_n, winre_n, ssu_n) = (base.len(), chain_names.clone(), image_names.clone(), winre_names.clone(), ssu_name.clone());
             let m = run_worker(pve, db, log, &mut pr, work, p, &link, spec, |url, pin| {
-                worker_cmd(url, pin, n_base, &chain_n, &image_n, &winre_n, ssu_n.as_deref())
+                worker_cmd(url, pin, n_base, &chain_n, &image_n, &winre_n, ssu_n.as_deref(), &extra)
             })
             .await?;
             report_dism_logs(log, work, &share, "media", &run_id).await?;
@@ -1075,9 +1307,31 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             // Every update's verdict, as the worker reported it.
             let mut failed = Vec::new();
             let mut winre_ok = !winre_names.is_empty();
+            let mut boot_ok = !extra.boot.is_empty();
+            // Per image: (apps provisioned, apps failed), Edge in or not.
+            let mut prov: HashMap<String, (usize, Vec<String>)> = HashMap::new();
+            let mut edge_in: HashMap<String, bool> = HashMap::new();
             for l in &m {
                 let parts: Vec<&str> = l.split_whitespace().collect();
                 match parts.as_slice() {
+                    ["PVS-PROV-OK", at, "edge"] => {
+                        edge_in.insert(at.to_string(), true);
+                    }
+                    ["PVS-PROV-FAIL", at, "edge", code] => {
+                        edge_in.insert(at.to_string(), false);
+                        log.warn(format!("Microsoft Edge into {}: DISM failed with {}", where_label(at), dism_code(code))).await;
+                    }
+                    ["PVS-PROV-OK", at, name] if !name.starts_with("fw:") => prov.entry(at.to_string()).or_default().0 += 1,
+                    ["PVS-PROV-OK", ..] => {}
+                    ["PVS-PROV-FAIL", at, name, code] => {
+                        let code = dism_code(code);
+                        log.warn(format!("{} into {}: DISM failed with {code}", name.trim_start_matches("fw:"), where_label(at))).await;
+                        prov.entry(at.to_string()).or_default().1.push(name.trim_start_matches("fw:").to_owned());
+                    }
+                    ["PVS-UPD-FAIL", at, name, code] if at.starts_with("boot") => {
+                        log.warn(format!("{} into {}: DISM failed with {}", update_label(name), where_label(at), dism_code(code))).await;
+                        boot_ok = false;
+                    }
                     ["PVS-UPD-OK", at, "cleanup"] => log.ok(format!("Component store of {} cleaned up", where_label(at))).await,
                     ["PVS-UPD-FAIL", at, "cleanup", code] => {
                         let code = dism_code(code);
@@ -1106,6 +1360,32 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                     _ => {}
                 }
             }
+            // Edge and the apps per image: what went in, what did not (a warning - the image
+            // still installs; the job names each one).
+            for i in 1..=editions_out.len() {
+                let at = i.to_string();
+                let want = extra.apps.get(i - 1).map(Vec::len).unwrap_or(0);
+                let (ok, bad) = prov.get(&at).cloned().unwrap_or_default();
+                let mut parts = Vec::new();
+                match edge_in.get(&at) {
+                    Some(true) => parts.push("Microsoft Edge added".to_owned()),
+                    Some(false) => parts.push("Microsoft Edge NOT added".to_owned()),
+                    None if extra.edge => parts.push("Microsoft Edge not reported".to_owned()),
+                    None => {}
+                }
+                if want > 0 {
+                    parts.push(format!("{ok} of {want} inbox app(s) provisioned"));
+                }
+                if parts.is_empty() {
+                    continue;
+                }
+                let line = format!("Image {i}: {}", parts.join(", "));
+                if bad.is_empty() && ok == want && edge_in.get(&at).copied().unwrap_or(!extra.edge) {
+                    log.ok(line).await;
+                } else {
+                    log.warn(format!("{line}{}", if bad.is_empty() { String::new() } else { format!(" - not: {}", bad.join(", ")) })).await;
+                }
+            }
             // The package lists: nothing half-installed in any image.
             for i in 1..=editions_out.len() {
                 let Ok(raw) = tokio::fs::read(share.join(format!("packages-{i}.txt"))).await else {
@@ -1123,10 +1403,45 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             // Health: Windows' own scan of every image's component store (not WinRE's - DISM
             // refuses it on a Windows PE image, error 50).
             for i in 1..=editions_out.len() {
-                let raw = tokio::fs::read(share.join(format!("health-{i}.txt"))).await.map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
-                match health_verdict(&raw) {
+                let read = |n: String| async move { tokio::fs::read(n).await.map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default() };
+                // Before the updates: Some(verdict), or None when no answer came back - unknown,
+                // never counted as damaged.
+                let raw = read(share.join(format!("health-{i}-before.txt")).display().to_string()).await;
+                let before = (!raw.trim().is_empty()).then(|| health_verdict(&raw));
+                match &before {
+                    Some(Ok(_)) => log.ok(format!("Image {i} before the updates: healthy (DISM /ScanHealth)")).await,
+                    Some(Err(why)) => log.warn(format!("Image {i} before the updates: {why} - it was put together damaged (DISM /ScanHealth)")).await,
+                    None => log.warn(format!("Image {i} before the updates: no scan result came back")).await,
+                }
+                // After each stage: which one damaged the store, if one did.
+                for (stage, what) in [("updated", "after the updates"), ("cleaned", "after the cleanup")] {
+                    let raw = read(share.join(format!("health-{i}-{stage}.txt")).display().to_string()).await;
+                    if raw.trim().is_empty() {
+                        continue;
+                    }
+                    match health_verdict(&raw) {
+                        Ok(_) => log.ok(format!("Image {i} {what}: healthy (DISM /ScanHealth)")).await,
+                        Err(why) => log.warn(format!("Image {i} {what}: {why}{}", reverse_note(&read(share.join(format!("logs/health-{i}-{stage}.log")).display().to_string()).await))).await,
+                    }
+                }
+                match health_verdict(&read(share.join(format!("health-{i}.txt")).display().to_string()).await) {
                     Ok(v) => log.ok(format!("Image {i} is healthy: {v} (DISM /ScanHealth)")).await,
-                    Err(why) => bail!("image {i} is not healthy: {why} - DISM /ScanHealth"),
+                    Err(why) => {
+                        let cbs = read(share.join(format!("logs/health-{i}.log")).display().to_string()).await;
+                        if let Some(n) = reverse_delta_only(&cbs) {
+                            // Microsoft's scan error, not damage: the image ships, the job says so.
+                            log.warn(format!("Image {i}: /ScanHealth flags {n} reverse-delta file(s) (WinSxS \\r\\) and nothing else - the known scan error of the 2026 cumulative updates, not damage")).await;
+                        } else {
+                            bail!(
+                                "image {i} is not healthy: {why} - DISM /ScanHealth; {}",
+                                match &before {
+                                    Some(Ok(_)) => "it was healthy before the updates, so an update damaged it",
+                                    Some(Err(_)) => "it was already damaged before the updates",
+                                    None => "whether it was damaged before the updates is not known",
+                                }
+                            );
+                        }
+                    }
                 }
             }
             move_file(&share.join("serviced.wim"), &install).await.context("reading the serviced image the worker sent back")?;
@@ -1146,23 +1461,61 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                     winpe_update_index(&install, i, &format!("add '{re_s}' /Windows/System32/Recovery/winre.wim\n")).await?;
                 }
                 log.ok("WinRE in every image carries the Safe OS update").await;
-                // boot.wim is WinRE too (WinPE and the Setup environment): built again from the
-                // serviced one, so Setup boots the patched build - and the boot manager from it
-                // onto the media, as Microsoft's step 28.
-                build_boot_wim(log, &tree, &serviced_re).await?;
-                let b = winpe::image_build(log, &tree.join("sources/boot.wim"), "2").await?;
-                let copied = boot_files_from(log, &dir, &tree).await?;
-                log.ok(format!("boot.wim built again from the serviced WinRE: {b}; boot manager onto the media: {}", if copied.is_empty() { "nothing".into() } else { copied.join(", ") })).await;
             } else if !winre_names.is_empty() {
                 log.warn("WinRE keeps its base build - the Safe OS update did not go in").await;
             }
+            // boot.wim: the worker's, with the cumulative update in WinPE and Setup (Microsoft's
+            // steps 17-25). Without it, built again from the serviced WinRE as before - Setup
+            // still boots a patched build. Either way the boot manager comes from it onto the
+            // media, as Microsoft's step 28.
+            let serviced_boot = share.join("boot-serviced.wim");
+            let boot_from = if boot_ok && serviced_boot.exists() {
+                let boot = tree.join("sources/boot.wim");
+                move_file(&serviced_boot, &boot).await?;
+                let boot_s = boot.display().to_string();
+                run(log, "wimlib-imagex", &["info", &boot_s, "1", "--image-property", "FLAGS=9"]).await?;
+                run(log, "wimlib-imagex", &["info", &boot_s, "2", "--image-property", "FLAGS=2"]).await?;
+                run(log, "wimlib-imagex", &["info", &boot_s, "2", "--boot"]).await?;
+                Some("the cumulative update in WinPE and Setup")
+            } else if winre_ok && serviced_re.exists() {
+                if !extra.boot.is_empty() {
+                    log.warn("boot.wim did not take the cumulative update - built from the serviced WinRE instead").await;
+                }
+                build_boot_wim(log, &tree, &serviced_re).await?;
+                Some("built again from the serviced WinRE")
+            } else {
+                None
+            };
+            if let Some(how) = boot_from {
+                let boot = tree.join("sources/boot.wim");
+                // What the Setup environment really carries: the WIM's own build field is only
+                // as new as whoever wrote it, the cumulative update's package is the fact.
+                let rollup = rollup_in(log, &boot, "2").await.unwrap_or_else(|| "none found".into());
+                let copied = boot_files_from(log, &dir, &tree).await?;
+                log.ok(format!("boot.wim, {how}: cumulative update {rollup} in the Setup environment; boot manager onto the media: {}", if copied.is_empty() { "nothing".into() } else { copied.join(", ") })).await;
+            }
+            if let Some(edge) = &edge_file
+                && !keep
+            {
+                let _ = tokio::fs::remove_file(edge).await;
+            }
             log.ok(format!("Every image is at {} now", req.build)).await;
+            // The worker's share (a copy of every update while downloads are kept, apps.wim,
+            // boot.wim, Edge.wim, WinRE) is done with: its room goes to the ISO.
+            let _ = tokio::fs::remove_dir_all(&share).await;
         } else {
             log.ok(format!("The images are at {} already - no worker needed", req.build)).await;
         }
 
         // ---- the ISO ----
         pr.stage(90.0, 93.0, "building the ISO");
+        // The tree and the ISO beside it: about twice the tree's size, checked before
+        // genisoimage writes half an ISO into a full disk.
+        let tree_bytes = dir_size(&tree).await;
+        let free = statvfs_free(work)?;
+        if free < tree_bytes + tree_bytes / 10 + 1_000_000_000 {
+            bail!("the studio has {:.1} GB free in {}; the ISO needs about {:.1} GB - clear the kept downloads (Studio settings → Debug tools)", free as f64 / 1e9, work.display(), tree_bytes as f64 * 1.1 / 1e9);
+        }
         move_file(&install, &tree.join("sources/install.wim")).await?;
         let name = iso_name(prod, &req.build, &req.editions, &req.lang);
         let iso = dir.join(&name);
@@ -1253,6 +1606,7 @@ fn update_label(name: &str) -> String {
 fn where_label(at: &str) -> String {
     match at {
         "winre" => "WinRE".into(),
+        b if b.starts_with("boot") => format!("boot.wim image {}", &b[4..]),
         _ => format!("image {at}"),
     }
 }
@@ -1337,6 +1691,37 @@ pub(crate) async fn take_file(from: &Path, to: &Path, keep: bool) -> Result<()> 
 
 /// A rename when both sides share a file system (the studio's data and the share do), a
 /// copy otherwise.
+/// The cumulative update an image carries: its Package_for_RollupFix version (26100.9550.1.28).
+async fn rollup_in(log: &JobLog, wim: &Path, index: &str) -> Option<String> {
+    let out = run(log, "wimlib-imagex", &["dir", &wim.display().to_string(), index, "--path=/Windows/servicing/Packages"]).await.ok()?;
+    let mut v: Vec<String> = out
+        .lines()
+        .filter_map(|l| l.rsplit('/').next())
+        .filter(|n| n.starts_with("Package_for_RollupFix") && n.ends_with(".mum"))
+        .filter_map(|n| n.trim_end_matches(".mum").rsplit('~').next().map(str::to_owned))
+        .collect();
+    let num = |s: &String| s.split('.').map(|x| x.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
+    v.sort_by_key(num);
+    v.pop()
+}
+
+/// A folder's size, every file below it.
+async fn dir_size(dir: &Path) -> u64 {
+    let mut total = 0;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        let Ok(mut rd) = tokio::fs::read_dir(&d).await else { continue };
+        while let Ok(Some(e)) = rd.next_entry().await {
+            match e.metadata().await {
+                Ok(m) if m.is_dir() => stack.push(e.path()),
+                Ok(m) => total += m.len(),
+                Err(_) => {}
+            }
+        }
+    }
+    total
+}
+
 async fn move_file(from: &Path, to: &Path) -> Result<()> {
     if tokio::fs::rename(from, to).await.is_err() {
         tokio::fs::copy(from, to).await.with_context(|| format!("copying {} to {}", from.display(), to.display()))?;
@@ -1415,10 +1800,73 @@ mod tests {
     }
 
     #[test]
+    fn chain_one_update_at_a_time() {
+        // Windows 11: no one-call chain; each .msu in its own folder, the checkpoint first.
+        let image = vec!["lcu1/Windows11.0-KB5043080-x64.msu".to_owned(), "lcu2/Windows11.0-KB5124010-x64.msu".to_owned()];
+        let cmd = worker_cmd_body(1, &[], &image, &[], None, &Extras::default());
+        assert!(cmd.contains("mkdir W:\\upd\\lcu1") && cmd.contains("mkdir W:\\upd\\lcu2"));
+        assert!(cmd.contains("-o W:\\upd\\lcu1\\Windows11.0-KB5043080-x64.msu %U%/upd/lcu1/Windows11.0-KB5043080-x64.msu"));
+        assert!(!cmd.contains("%U%/upd/lcu/"));
+        let a = cmd.find("/PackagePath:W:\\upd\\lcu1\\").unwrap();
+        let b = cmd.find("/PackagePath:W:\\upd\\lcu2\\").unwrap();
+        assert!(a < b, "the checkpoint goes in first");
+    }
+
+    #[test]
+    fn net_after_cleanup_scan_each_stage() {
+        let image = vec!["01-Windows11.0-KB5054156-x64.cab".to_owned(), "02-Windows11.0-KB5126052-x64-NDP481.cab".to_owned(), "lcu1/Windows11.0-KB5043080-x64.msu".to_owned(), "lcu2/Windows11.0-KB5124010-x64.msu".to_owned()];
+        let cmd = worker_cmd_body(1, &[], &image, &[], None, &Extras::default());
+        let at = |n: &str| cmd.find(n).unwrap_or_else(|| panic!("{n} missing"));
+        assert!(at("KB5054156-x64.cab /Scratch") < at("PackagePath:W:\\upd\\lcu1\\"), "the enablement package before the cumulative chain");
+        assert!(at("PackagePath:W:\\upd\\lcu2\\") < at("health-%1-updated.txt"));
+        assert!(at("health-%1-updated.txt") < at("/StartComponentCleanup"));
+        assert!(at("/StartComponentCleanup") < at("health-%1-cleaned.txt"));
+        assert!(at("health-%1-cleaned.txt") < at("NDP481.cab /Scratch"), ".NET after the cleanup");
+        assert!(at("NDP481.cab /Scratch") < at("health-%1.txt"));
+        assert!(cmd.contains("%U%/logs/health-%1.log"));
+    }
+
+    #[test]
+    fn reverse_delta_scan_error() {
+        let log = |lines: &str, total: usize, payload: usize| format!(
+            "2026-10-06 14:07:29, Info CBS Total Detected Corruption:\t{total}\n2026-10-06 14:07:29, Info CBS \tCSI Payload Corruption:\t{payload}\n{lines}"
+        );
+        let r = "2026-10-06 14:07:29, Info CBS (p)\tCSI Payload Corrupt\t(n)\t\t\tamd64_microsoft-windows-nfs-admincmdtools_31bf3856ad364e35_10.0.26100.3323_none_507c8beb43054047\\r\\showmount.exe\n";
+        let f = "2026-10-06 14:07:29, Info CBS (p)\tCSI Payload Corrupt\t(n)\t\t\tamd64_microsoft-windows-nfs-admincmdtools_31bf3856ad364e35_10.0.26100.3323_none_507c8beb43054047\\f\\showmount.exe\n";
+        assert_eq!(reverse_delta_only(&log(&r.repeat(2), 2, 2)), Some(2));
+        assert_eq!(reverse_delta_only(&log(&format!("{r}{f}"), 2, 2)), None, "a forward payload is damage");
+        assert_eq!(reverse_delta_only(&log(r, 2, 1)), None, "a manifest or metadata corruption is damage");
+        assert_eq!(reverse_delta_only(&log("", 0, 0)), None);
+        assert_eq!(reverse_delta_only(""), None);
+    }
+
+    #[test]
+    fn edge_apps_and_boot() {
+        let image = vec!["01-Windows11.0-KB5054156-x64.cab".to_owned(), "02-Windows11.0-KB5126052-x64-NDP481.cab".to_owned(), "lcu1/Windows11.0-KB5043080-x64.msu".to_owned(), "lcu2/Windows11.0-KB5124010-x64.msu".to_owned()];
+        let extra = Extras {
+            edge: true,
+            frameworks: vec!["MSIXFramework\\Microsoft.VCLibs.x64.14.00.appx".into()],
+            apps: vec![vec![crate::apps::App { id: "Microsoft.BingNews_8wekyb3d8bbwe".into(), main: "Microsoft.BingNews_8wekyb3d8bbwe.msixbundle".into(), stub: true }]],
+            boot: vec!["lcu1/Windows11.0-KB5043080-x64.msu".into(), "lcu2/Windows11.0-KB5124010-x64.msu".into()],
+        };
+        let cmd = worker_cmd_body(1, &[], &image, &[], None, &extra);
+        let at = |n: &str| cmd.find(n).unwrap_or_else(|| panic!("{n} missing"));
+        assert!(cmd.contains("%U%/Edge.wim") && cmd.contains("%U%/apps.wim") && cmd.contains("%U%/boot.wim"));
+        assert!(at("NDP481.cab /Scratch") < at("/Add-Edge /SupportPath:W:\\edge"), "Edge after the updates");
+        assert!(at("/Add-Edge") < at("call :apps%1"));
+        assert!(at("call :apps%1") < at("health-%1.txt"));
+        assert!(at("VCLibs.x64.14.00.appx\" /SkipLicense") < at("BingNews_8wekyb3d8bbwe.msixbundle\""), "frameworks first");
+        assert!(cmd.contains("/LicensePath:\"W:\\apps\\Microsoft.BingNews_8wekyb3d8bbwe\\License.xml\" /Region:all /StubPackageOption:InstallFull"));
+        assert!(cmd.contains("call :boot\r\n") && !cmd.contains("call :boot ||"), "boot.wim never fails the run");
+        assert!(at("WinPE-Rejuv-Package") < at("/PackagePath:W:\\upd\\lcu1\\Windows11.0-KB5043080-x64.msu /ScratchDir:W:\\scratch /LogPath:W:\\logs\\boot%1"));
+        assert!(cmd.contains("boot-serviced.wim"));
+    }
+
+    #[test]
     fn checkpoint_chain() {
         let chain = vec!["Windows11.0-KB5043080-x64.msu".to_owned(), "Windows11.0-KB5124010-x64.msu".to_owned()];
         let image = vec!["lcu/Windows11.0-KB5124010-x64.msu".to_owned(), "01-Windows11.0-KB5121794-x64.cab".to_owned()];
-        let cmd = worker_cmd("https://x/worker/r/t", "", 1, &chain, &image, &["re01-Windows11.0-KB5125758-x64.cab".to_owned()], Some("SSU-26100.9539-x64.cab"));
+        let cmd = worker_cmd("https://x/worker/r/t", "", 1, &chain, &image, &["re01-Windows11.0-KB5125758-x64.cab".to_owned()], Some("SSU-26100.9539-x64.cab"), &Extras::default());
         assert!(cmd.contains("/ScanHealth") && !cmd.contains("health-winre"), "every install image scanned, WinRE not");
         assert!(cmd.contains("-o W:\\upd\\SSU-26100.9539-x64.cab %U%/upd/SSU-26100.9539-x64.cab"));
         let ssu_at = cmd.find("/PackagePath:W:\\upd\\SSU-26100.9539-x64.cab").unwrap();

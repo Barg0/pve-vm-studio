@@ -46,7 +46,7 @@ function took(a, b) {
   const s = Math.max(0, Math.round(((b ? new Date(b) : new Date()) - new Date(a)) / 1000));
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m`;
 }
-function pillOn(text, on) { return `<span class="pill status ${on ? "on" : "off"}">${esc(text)}</span>`; }
+function pillOn(text, on) { return `<span class="pill status ${on ? "on" : "off"}">${esc(cap(text))}</span>`; }
 function stoggle(id, label, checked, sub) { return toggle(`id="${id}"`, esc(label), checked, false, sub ? esc(sub) : ""); }
 function opts(list, selected, auto) {
   return (auto ? `<option value="">${esc(auto)}</option>` : "") +
@@ -62,7 +62,7 @@ function bladeHead(id, actions = "") {
   return `<div class="blade-toolbar">${bladeTitle(id)}<div class="row">${actions}</div></div>`;
 }
 const JOB_TONE = { running: "run", queued: "idle", succeeded: "ok", failed: "bad", interrupted: "warn" };
-function jobPill(status) { return `<span class="pill status ${JOB_TONE[status] || "idle"}">${esc(status)}</span>`; }
+function jobPill(status) { return `<span class="pill status ${JOB_TONE[status] || "idle"}">${esc(cap(status))}</span>`; }
 
 /* ---------- sign-in ---------- */
 
@@ -117,6 +117,7 @@ async function signedIn(s) {
   await openLab(null, true);
   render();
   startNavPoll();
+  bellLoad();
 }
 
 /* The nav's badges (golds baking, jobs running) follow the server, not the last blade
@@ -143,6 +144,8 @@ function startNavPoll() {
       const jobs = await api("GET", "/jobs");
       cluster.jobs = jobs;
       const run = jobs.filter(j => j.status === "running" || j.status === "queued").map(j => j.id).sort().join(",");
+      // A job that ended may have left a notification; the bell also looks every 15 s.
+      if (run !== lastRun || tick % 3 === 0) bellLoad();
       if (run !== lastRun || cluster.golds.some(g => g.status === "baking")) {
         lastRun = run;
         cluster.golds = await api("GET", "/golds");
@@ -239,7 +242,67 @@ $id("saveState").addEventListener("click", async () => {
   lab.conflict = false; lab.saved = "";
   await openLab(lab.id, true); render();
 });
-$id("deployBtn").addEventListener("click", () => { state.blade = "deploy"; render(); });
+/* The bell: what happened lately - every event the studio can mail about, mail or not.
+   Unread is per browser: the newest id seen when the panel was last opened. */
+const bell = { items: [], open: false, seen: (() => { try { return Number(localStorage.getItem("pvs.bellSeen")) || 0; } catch { return 0; } })() };
+const BELL_TONE = { success: "ok", danger: "bad", warn: "warn", accent: "run", neutral: "idle" };
+function ago(iso) {
+  const s = Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000));
+  return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : s < 7 * 86400 ? `${Math.floor(s / 86400)} d ago`
+    : new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+async function bellLoad() {
+  try { bell.items = await api("GET", "/notifications?limit=25"); } catch { return; }
+  const unread = bell.items.filter(n => n.id > bell.seen).length;
+  const c = $id("bellCount");
+  c.hidden = !unread; c.textContent = unread > 9 ? "9+" : String(unread);
+  $id("bellBtn").title = unread ? `${unread} new notification${unread === 1 ? "" : "s"}` : "Notifications";
+  if (bell.open) bellPaint();
+}
+/* A glyph's band, as its template names it - the tile under it takes that hue. */
+function bellIcon(icon) { return icon === "mark-accent" ? "mark" : icon; }
+function bellBand(icon) {
+  const def = ICON_TEMPLATES[bellIcon(icon) + ".svg"];
+  return (def && ["host", "work", "ident", "deploy", "linux", "studio"].includes(def[0])) ? def[0] : "ident";
+}
+function bellPaint() {
+  const pop = $id("bellPop");
+  const seenBefore = bell.paintedSeen ?? bell.seen;
+  pop.innerHTML = `<div class="bell-h"><b>Notifications</b><button class="btn sm" type="button" data-goto-studio title="Which events notify - Studio settings"><img src="${iconSrc("certificate.svg")}" alt=""> Notifications</button></div>
+    ${bell.items.length ? `<div class="bell-list">${bell.items.map(n => `<button class="bell-row${n.id > seenBefore ? " new" : ""}" type="button" data-bell-link="${esc(n.link)}" data-bell-job="${esc(n.job || "")}" title="${n.job ? "Open its log" : "Open"}">
+      <span class="bell-ico" style="--tile:var(--band-${bellBand(n.icon)})"><img src="${iconSrc(bellIcon(n.icon) + ".svg")}" alt=""></span>
+      <span class="bell-txt"><span class="bell-t">${esc(n.title)}</span>${n.subtitle ? `<span class="bell-s">${esc(n.subtitle)}</span>` : ""}</span>
+      <span class="bell-r"><span class="pill status ${BELL_TONE[n.tone] || "idle"}">${esc(cap(String(n.status).toLowerCase()))}</span><span class="bell-at" title="${esc(new Date(n.at).toLocaleString())}">${esc(ago(n.at))}</span></span>
+    </button>`).join("")}</div>`
+    : `<div class="bell-empty">Nothing yet. Bakes, builds, updates and alerts show up here.</div>`}`;
+}
+function bellToggle(open) {
+  bell.open = open ?? !bell.open;
+  $id("bellPop").hidden = !bell.open;
+  $id("bellBtn").setAttribute("aria-expanded", String(bell.open));
+  if (!bell.open) { bell.paintedSeen = null; return; }
+  // What was new when the panel opened stays marked while it is open; the count clears.
+  bell.paintedSeen = bell.seen;
+  bellPaint();
+  const top = bell.items.reduce((m, n) => Math.max(m, n.id), bell.seen);
+  bell.seen = top;
+  try { localStorage.setItem("pvs.bellSeen", String(top)); } catch { /* this browser keeps nothing */ }
+  $id("bellCount").hidden = true;
+}
+$id("bellBtn").addEventListener("click", e => { e.stopPropagation(); bellToggle(); });
+$id("bellPop").addEventListener("click", e => {
+  e.stopPropagation();
+  if (e.target.closest("[data-goto-studio]")) { bellToggle(false); state.expanded["gs-notify"] = true; state.blade = "studio"; render(); return; }
+  const row = e.target.closest("[data-bell-link]");
+  if (!row) return;
+  bellToggle(false);
+  // An event of a job opens that job's log; the rest open where they point.
+  if (row.dataset.bellJob) { openJob(row.dataset.bellJob); return; }
+  const id = (row.dataset.bellLink || "").replace(/^#\/?/, "").split("/")[0];
+  if (id) { state.blade = resolveBladeId(id); render(); }
+});
+document.addEventListener("click", e => { if (bell.open && !e.target.closest(".bell-anchor")) bellToggle(false); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && bell.open) { bellToggle(false); $id("bellBtn").focus(); } });
 
 function bladeFromHash() {
   const id = location.hash.replace(/^#\/?/, "").split("/")[0];
@@ -393,7 +456,7 @@ function dashRunning(jobs) {
   return gsCard("dash-running", "first-boot.svg", "Running", active.length ? `${active.length} job${active.length === 1 ? "" : "s"}` : "idle", active.length
     ? `<div class="dash-acts">${active.map(dashJobRow).join("")}</div>`
     : `<p class="dash-idle">Nothing runs right now.${last ? ` The last job ended ${esc(when(last.ended_at || last.created_at))}.` : ""}</p>`,
-    "", true, active.length ? `<span class="pill status run">live</span>` : "");
+    "", true, active.length ? `<span class="pill status run">Live</span>` : "");
 }
 
 /* Activity: what ran, newest first - failures red with the first line of their reason. */
@@ -414,7 +477,6 @@ function dashVms(states) {
   const errors = reviewErrorCount();
   const toBuild = states.filter(x => x.st.key === "design" || x.st.label === "build failed").length;
   const meta = states.length ? [`${states.length} designed`, toBuild ? `${toBuild} to build` : "all built", errors ? `${errors} preflight error${errors === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ") : "nothing designed yet";
-  const badge = states.length && toBuild ? `<button class="btn sm${errors ? "" : " primary"}" type="button" data-goto="deploy">${errors ? "Preflight" : `Deploy ${toBuild}`}</button>` : "";
   return gsCard("dash-vms", "vm.svg", "Designed VMs", meta, states.length
     ? `<div class="dash-vms">${states.map(({ s, st }) => {
         const img = findImage(s.imageId), g = goldFor(s);
@@ -424,11 +486,11 @@ function dashVms(states) {
           <span class="dash-vm-os"><img src="${imageIconSrc(img)}" alt="">${esc(img.label.replace(/^Windows Server /, "WS ").replace(/^Windows /, "W"))}
             ${g ? `<span class="mono muted">${esc(goldBuildLabel(g))}</span>` : `<span class="dash-bad">no gold</span>`}</span>
           <span class="dash-vm-ip mono">${esc(ip)}</span>
-          <span class="pill status ${{ ok: "ok", run: "run", bad: "bad", warn: "warn" }[st.key] || "idle"}">${esc(st.label)}</span></button>`;
+          <span class="pill status ${{ ok: "ok", run: "run", bad: "bad", warn: "warn" }[st.key] || "idle"}">${esc(cap(st.label))}</span></button>`;
       }).join("")}</div>`
     : `<div class="dp-empty"><span class="dp-empty-slot" aria-hidden="true"><img src="${iconSrc("vm.svg")}" alt=""></span>
         <div class="dp-empty-text"><b>Nothing designed yet</b><span>Each VM you design appears here with its gold, its address and its state.</span></div>
-        <button class="btn" type="button" data-goto="servers"><img src="${iconSrc("vm.svg")}" alt=""> Design a VM</button></div>`, "", true, badge);
+        <button class="btn" type="button" data-goto="servers"><img src="${iconSrc("vm.svg")}" alt=""> Design a VM</button></div>`, "", true);
 }
 
 /* The system in one card: short sections, each with the link to its full view. A section
@@ -438,7 +500,7 @@ function dashSystem(inv) {
   const pct = (a, b) => b ? Math.min(100, a / b * 100) : 0;
   const tone = p => p >= 90 ? "danger" : p >= 75 ? "warn" : "";
   const bar = (p, text) => `<span class="meter-track"><span class="meter-fill ${tone(p)}" style="width:${p.toFixed(1)}%"></span></span><span class="meter-text">${text}</span>`;
-  const sec = (title, link, label, body) => `<section class="dash-sec"><h5>${esc(title)}${link ? `<button type="button" class="btn icon sm dash-sec-go" data-goto="${link}" title="Open ${esc(label)}" aria-label="Open ${esc(label)}"><img src="${iconSrc(DASH_GO_ICON[link] || "overview.svg")}" alt=""></button>` : ""}</h5>${body}</section>`;
+  const sec = (title, link, label, body) => `<section class="dash-sec"><h5>${esc(title)}</h5>${body}</section>`;
   const line = (dot, text, right) => `<div class="dash-line"><span class="dot ${dot}"></span><span class="dash-line-text">${text}</span>${right ? `<span class="dash-line-right">${right}</span>` : ""}</div>`;
   const online = inv.nodes.filter(n => n.status === "online");
 
@@ -506,7 +568,7 @@ function peHint(w) {
   const n = w.winpe_newest, st = w.winpe_state;
   const auto = "With Keep WinPE current on (Media → Windows updates), the studio rebuilds it in the next maintenance window.";
   const from = (PE_PRODUCTS.find(p => p[0] === (w.settings || {}).winpe_from) || PE_PRODUCTS[0])[1];
-  if (st === "outdated" && n) return `<span class="pill status warn" title="${esc(from)} ${esc(n.build)} is out - WinPE is distilled from its WinRE. ${esc(auto)}">${esc(n.build)} available</span>`;
+  if (st === "outdated" && n) return `<span class="pill status warn" title="${esc(from)} ${esc(n.build)} is out - WinPE is distilled from its WinRE. ${esc(auto)}">${esc(cap(n.build))} available</span>`;
   if (st === "virtio" && w.virtio_now) return `<span class="pill status warn" title="Its vioscsi driver is from virtio-win ${esc((w.winpe || {}).vioscsi || "none")}, the release in use is ${esc(w.virtio_now)}. ${esc(auto)}">virtio-win ${esc(w.virtio_now)} not in it</span>`;
   return "";
 }
@@ -532,13 +594,13 @@ function dashWindows() {
     return `<div class="dash-wrow"><span class="dot ${tone}"></span><span class="dash-wrow-name">FoD ${esc(label)}</span>
       <span class="dash-wrow-val mono${v ? "" : " muted"}" title="${v ? esc(v) + (m && m.missing ? " - not in PVE any more; VMs take their capabilities from Windows Update until it is built again" : "") : "Capabilities come from Windows Update"}">${!v ? "Windows Update" : m && m.missing ? "missing" : esc(file)}</span></div>`;
   };
-  return gsCard("dash-windows", "os-window.svg", "Windows", ready ? "ready to provision Windows VMs" : "not ready yet",
+  return gsCard("dash-windows", "windows-layers.svg", "Windows", ready ? "ready to provision Windows VMs" : "not ready yet",
     `<section class="dash-sec"><h5>Required</h5><div class="dash-wrows">${row(peOk, "WinPE", !pe.volid ? "missing" : pe.vioscsi ? esc(pe.build) : "no vioscsi - rebuild", peHint(w))}
       ${row(!vio ? false : vioHere ? true : "idle", "virtio-win", vio ? esc(vio) : "unknown",
-        update ? `<span class="pill status warn" title="${set === "stable" || set === "latest" ? "Newer than the release in use" : "The pinned release is older - change it under Media"}">${esc(update)} available</span>`
+        update ? `<span class="pill status warn" title="${set === "stable" || set === "latest" ? "Newer than the release in use" : "The pinned release is older - change it under Media"}">${esc(cap(update))} available</span>`
           : vio && !vioHere ? `<span class="hint" title="Not in PVE now - the first Windows bake downloads it">fetched by the first bake</span>` : "")}</div></section>
     <section class="dash-sec"><h5>Optional</h5><div class="dash-wrows">${FOD_SLOTS.map(fodRow).join("")}</div></section>`,
-    "", true, `<span class="pill status ${ready ? "ok" : "bad"}">${ready ? "ready" : "not ready"}</span>${dashGoBtn("media", "Media")}`);
+    "", true, `<span class="pill status ${ready ? "ok" : "bad"}">${ready ? "Ready" : "Not ready"}</span>${dashGoBtn("media", "Media")}`);
 }
 function dashGolds(golds) {
   const inv = goldInventory(golds), shelf = inv.filter(e => e.kind === "newest").map(e => e.g);
@@ -555,7 +617,7 @@ function dashGolds(golds) {
     : dashLine("", `No gold yet. Linux bakes right away${cluster.winpe ? ", Windows too" : "; Windows needs WinPE first"}.`);
   return gsCard("dash-golds", "gold-image.svg", "Golds", `${shelf.length} ready${baking ? ` · ${baking} baking` : ""}`, rows
     + (spare ? (shelf.length ? '<section class="dash-sec">' : "") + dashLine("warn", `${spare} older gold${spare === 1 ? "" : "s"} can be cleaned up`, `<button class="btn sm" type="button" data-goto="golds">Clean up</button>`) + (shelf.length ? "</section>" : "") : "")
-    , "", true, (baking ? `<span class="pill status run">baking</span>` : "") + dashGoBtn("golds", "Golds"));
+    , "", true, (baking ? `<span class="pill status run">Baking</span>` : "") + dashGoBtn("golds", "Golds"));
 }
 
 /* -- Windows media: install ISOs built from Microsoft's own update files (src/media.rs).
@@ -598,7 +660,7 @@ async function wmLoadBuilds(fresh) {
   }
   const list = wmUi.builds[id] || [];
   // The newest stable (Patch Tuesday) build - what the default filter shows first.
-  if (!list.some(b => b.uuid === wmUi.uuid)) { const first = list.find(b => / B$/.test(b.kind)) || list[0]; wmUi.uuid = first ? first.uuid : ""; wmUi.editions = null; }
+  if (!list.some(b => b.uuid === wmUi.uuid)) { const first = list.find(b => / (B|OOB)$/.test(b.kind)) || list[0]; wmUi.uuid = first ? first.uuid : ""; wmUi.editions = null; }
   paintWinMedia();
   wmLoadEditions();
 }
@@ -667,7 +729,7 @@ function paintWinMedia() {
   const q = wmUi.search.trim().toLowerCase();
   // Stable (Patch Tuesday releases) by default; an Insider product has none, so All.
   const kind = wmUi.kind || (prod.insider ? "all" : "b");
-  const builds = all && all.filter(x => (kind === "all" || (kind === "b" ? / B$/.test(x.kind) : !/ B$/.test(x.kind)))
+  const builds = all && all.filter(x => (kind === "all" || (kind === "b" ? / (B|OOB)$/.test(x.kind) : !/ (B|OOB)$/.test(x.kind)))
     && (!q || x.build.includes(q) || x.kind.toLowerCase().includes(q) || wmDate(x.created).toLowerCase().includes(q)));
   const b = (all || []).find(x => x.uuid === wmUi.uuid);
   const groups = [...new Set(prods.map(p => p.group))];
@@ -688,10 +750,10 @@ function paintWinMedia() {
   const rows = !all ? `<tr><td colspan="5" class="muted">Asking the catalog…</td></tr>`
     : !builds.length ? `<tr><td colspan="5" class="muted">No build matches - clear the search or pick All.</td></tr>`
     : builds.map(x => `<tr class="${x.uuid === wmUi.uuid ? "sel" : ""}" data-wm-build="${esc(x.uuid)}">
-      <td>${wmBuild(x.build)}${x.uuid === all[0].uuid ? ' <span class="pill status ok wm-newest">newest</span>' : ""}</td>
-      <td><span class="wm-kind ${/ B$/.test(x.kind) ? "b" : x.kind === "Insider" ? "ins" : ""}">${esc(x.kind)}</span></td>
+      <td>${wmBuild(x.build)}${x.uuid === all[0].uuid ? ' <span class="pill status ok wm-newest">Newest</span>' : ""}</td>
+      <td><span class="wm-kind ${/ (B|OOB)$/.test(x.kind) ? "b" : x.kind === "Insider" ? "ins" : ""}">${esc(x.kind)}</span></td>
       <td class="muted">${esc(wmDate(x.created))}</td>
-      <td>${(x.isos || []).length ? `<span class="pill status ok">built</span>` : ""}</td>
+      <td>${(x.isos || []).length ? `<span class="pill status ok">Built</span>` : ""}</td>
       <td class="row-actions"><button class="btn sm${x.uuid === wmUi.uuid ? " primary" : ""}" type="button" data-wm-build="${esc(x.uuid)}">${x.uuid === wmUi.uuid ? "Selected" : "Select"}</button></td></tr>`).join("");
 
   const ed = b && wmUi.eds[b.uuid + "|" + wmUi.lang];
@@ -779,7 +841,7 @@ document.addEventListener("input", e => {
 /* -- Golds: the library, and the bake panel above it -- */
 
 const bakeForm = { image: "", mirror: null, node: "", bridge: "", vlan: null, addresses: "", gateway: "", dns: "", disk: null, storage: "", updates: true, features: ["aliases", "prompt", "fastfetch", "quietmotd"], region: true, language: "", format: "", keyboard: "", timezone: "", cis: 0 };
-const winForm = { iso: "", index: null, edition: "", disk: 64, storage: "", locale: "", keyboard: "", timezone: "", features: ["rdp", "ping", "svrmgr"] };
+const winForm = { iso: "", index: null, edition: "", disk: 64, storage: "", locale: "", keyboard: "", timezone: "", features: ["rdp", "ping", "svrmgr", "noencrypt", "power"] };
 const goldsUi = { bake: false, os: "linux", cleanup: false, cleanupPick: null, labelEdit: null, au: null, placeOpen: false };
 let catalogCache = null;
 
@@ -823,7 +885,8 @@ function goldBuildHtml(g, build) {
 }
 const ACTIVATION = { "kms-client": "KMS client key (GVLK)", retail: "Retail key", mak: "MAK", none: "None" };
 const BAKE_OPTION = { rdp: "Remote Desktop", ping: "Answers ping", suppressServerManagerAtLogon: "No Server Manager at sign-in",
-  blockSignInInputMethods: "STIG sign-in keyboard", suppressWelcomeExperience: "No welcome experience", suppressFirstSignInAnimation: "No first sign-in animation" };
+  blockSignInInputMethods: "STIG sign-in keyboard", suppressWelcomeExperience: "No welcome experience", suppressFirstSignInAnimation: "No first sign-in animation",
+  edgeBaseline: "Edge baseline", preferIPv4: "Prefer IPv4", preventDeviceEncryption: "No auto device encryption", vmPowerPlan: "VM power plan" };
 const shortHash = h => h ? `${h.slice(0, 8)}…${h.slice(-4)}` : "";
 function goldKv(rows) {
   return `<dl class="gold-kv">${rows.filter(r => r && r[1] !== undefined && r[1] !== "").map(([k, v, raw]) =>
@@ -840,7 +903,7 @@ function goldDetailHtml(g) {
     ["Edition", m.editionId], ["Experience", m.installationType === "Server Core" ? "Server Core" : m.installationType === "Server" ? "Desktop Experience" : m.installationType],
     ["Build", m.build], ["Language", m.language || m.imageLanguage], ["Activation", ACTIVATION[m.activation] || m.activation || (m.key === "gvlk" ? ACTIVATION["kms-client"] : "")],
     ["Evaluation", m.evaluation === undefined ? "" : m.evaluation ? "Yes - 180 days" : "No"], ["Generalized", m.generalized === undefined ? "" : m.generalized ? "Yes" : "No - VMs share its SID"],
-    ["Firmware", m.generation ? `UEFI, generation ${m.generation}` : "UEFI"], ["Secure Boot", m.secureBootTemplate === "MicrosoftWindows" ? "Microsoft Windows template" : m.secureBootTemplate || (m.secureBoot ? "On" : "")],
+    ["Firmware", "OVMF (UEFI) · q35"], ["Secure Boot", "On · Microsoft keys enrolled"],
     ["vTPM", m.requiresTpm === undefined ? "" : m.requiresTpm ? "Required" : "Not required"], ["System disk", m.diskSizeGB ? `${m.diskSizeGB} GB` : ""], ["virtio-win", m.virtio],
   ] : [
     ["Distribution", m.name], ["Version", m.distroVersion], ["Kernel", m.kernel], ["Updates", (m.updatesApplied ?? m.updates) ? "Applied at bake" : "Not applied"],
@@ -849,8 +912,8 @@ function goldDetailHtml(g) {
   ];
   const rg = m.region || {};
   const region = win
-    ? [["Format", m.locale], ["Keyboard", m.keyboardLayout ? m.keyboardLayout + (m.inputLocale ? ` (${m.inputLocale})` : "") : ""], ["Time zone", m.timeZone], ["Applied", m.localeMode === "offline" ? "Offline, before first boot" : m.localeMode]]
-    : [["Language", rg.language], ["Format", rg.format], ["Keyboard", rg.keyboard], ["Time zone", rg.timezone], ["Applied", m.localeMode === "cloud-init" ? "By cloud-init" : m.localeMode],
+    ? [["Format", m.locale], ["Keyboard", m.keyboardLayout ? m.keyboardLayout + (m.inputLocale ? ` (${m.inputLocale})` : "") : ""], ["Time zone", m.timeZone]]
+    : [["Language", rg.language], ["Format", rg.format], ["Keyboard", rg.keyboard], ["Time zone", rg.timezone],
       ["Package mirror", m.aptMirror ? m.aptMirror.split("/")[2] : ""]];
   const options = win
     ? (m.bakeOptions ? Object.entries(m.bakeOptions).map(([k, v]) => [BAKE_OPTION[k] || k, v]) : (m.policies || []).map(p => [p, true]))
@@ -861,12 +924,11 @@ function goldDetailHtml(g) {
     ["Source SHA-256", goldHash(m.sourceMediaSha256 || m.sourceChecksum), true], ["Bake script", goldHash(m.scriptSha256), true],
     ["Baked on", [m.bakeHost || g.node, utc(m.createdUtc || g.created_at)].filter(Boolean).join(", ")],
     ["Bake took", baked != null ? fmtSecs(baked) : ""],
-    ["Template", `${g.name}${g.vmid != null ? " · VMID " + g.vmid : ""} · ${g.storage}`],
   ];
   return `<div class="gold-detail">
     <section class="gold-col"><h4>What's inside</h4>${goldKv(inside)}</section>
     <section class="gold-col"><h4>Region and options</h4>${goldKv(region)}
-      ${options.length ? `<div class="gold-tags">${options.map(([k, v]) => `<span class="gold-tag${v ? "" : " off"}" title="${v ? "On" : "Off"}">${esc(k)}</span>`).join("")}</div>` : ""}</section>
+      ${options.length ? `<div class="gold-tags ov-ticks">${options.map(([k, v]) => `<span class="${v ? "on" : ""}" title="${v ? "Baked in" : "Not baked in"}">${esc(k)}</span>`).join("")}</div>` : ""}</section>
     <section class="gold-col"><h4>Provenance</h4>${goldKv(prov)}</section>
     <details class="gold-raw"><summary>Raw sidecar (JSON)</summary><pre class="gold-sidecar code-block">${highlightJson(JSON.stringify(m, null, 2))}</pre>
       <button class="btn sm" type="button" data-copy="${esc(JSON.stringify(m, null, 2))}"><img src="${iconSrc("code.svg")}" alt=""> Copy JSON</button></details>
@@ -944,7 +1006,7 @@ function goldRowHtml(t) {
   const sub = [m.editionUpgrade ? "virtual edition from " + (m.sourceEdition || "") : exp].filter(Boolean).join(" · ");
   const build = goldBuildLabel(g);
   const facts = win
-    ? [["Language", goldLang(g) || m.imageLanguage], ["Disk", m.diskSizeGB ? m.diskSizeGB + " GB" : ""], ["Activation", m.activation === "kms-client" || m.key === "gvlk" ? "KMS" : m.activation]]
+    ? [["Language", goldLang(g) || m.imageLanguage], ["Disk", m.diskSizeGB ? m.diskSizeGB + " GB" : ""]]
     : [["Language", (m.region || {}).language], ["Kernel", m.kernel ? m.kernel.replace(/-generic$/, "") : ""], ["Updates", (m.updatesApplied ?? m.updates) ? "applied" : ""]];
   const flags = [m.evaluation ? `<span class="gold-flag warn" title="180 days, no KMS activation">evaluation</span>` : "",
     m.generalized === false ? `<span class="gold-flag warn" title="VMs from it share its SID">not generalized</span>` : "",
@@ -960,7 +1022,7 @@ function goldRowHtml(t) {
         <span class="card-chevron">${chevron()}</span>
         <div class="card-icon"><img src="${imageIconSrc(img)}" alt=""></div>
         <div class="gold-id">
-          <div class="card-title">${esc(title)}</div>
+          <div class="card-title">${esc(title)}${titleBadges(`<span class="pill status ${tone}">${esc(cap(g.status))}</span>`)}</div>
           <div class="gold-sub">${esc(sub)}${sub ? '<span class="gold-sep">·</span>' : ""}${goldsUi.labelEdit === g.id
             ? `<input class="gold-label-input" id="goldLabelInput" maxlength="80" value="${esc(m.label || "")}" placeholder="What this gold is for"><button class="btn icon sm" type="button" data-label-save="${esc(g.id)}" title="Save the label" aria-label="Save the label">${checkIcon()}</button>`
             : `<button type="button" class="gold-label ${m.label ? "" : "empty"}" data-label-edit="${esc(g.id)}" title="Set the label">${esc(m.label || "Add a label")}${pencilIcon()}</button>`}</div>
@@ -970,14 +1032,13 @@ function goldRowHtml(t) {
         <div class="gold-when">baked ${esc(goldAge(g.created_at))} · <span class="mono" title="Gold id - template ${esc(g.name)}${g.vmid != null ? " (" + esc(g.vmid) + ")" : ""} on ${esc(g.node)} · ${esc(g.storage)}">${esc(goldShortId(g))}</span></div></div>
       <div class="gold-facts">
         <div>${facts.filter(f => f[1]).map(([k, v]) => `<span>${esc(k)} <b>${esc(v)}</b></span>`).join("")}${flags}${rebake}</div>
-        <div class="gold-usage" title="${picked.length ? esc(picked.join(", ")) : "No designed VM builds from it"}"><b>${g.used_by || 0}</b> built · <b>${picked.length}</b> picked</div>
+        <div class="gold-usage" title="${picked.length ? esc(picked.join(", ")) : "No designed VM builds from it"}"><b>${goldBuilt(g)}</b> built · <b>${picked.length}</b> picked</div>
       </div>
       <div class="card-actions gold-acts">
         ${keepCurrentToggle(g)}
-        <span class="pill status ${tone}">${esc(g.status)}</span>
-        ${g.job_id ? `<button class="btn icon sm" type="button" data-job-open="${esc(g.job_id)}" title="Bake log" aria-label="Bake log"><img src="${iconSrc("log.svg")}" alt=""></button>` : ""}
-        ${goldRemoveBtn(g)}
+        ${g.job_id ? `<button class="btn sm" type="button" data-job-open="${esc(g.job_id)}" title="Bake log"><img src="${iconSrc("log.svg")}" alt=""> Log</button>` : ""}
         ${g.status !== "baking" ? `<button class="btn sm" type="button" data-rebake="${esc(g.id)}"><img src="${iconSrc("update.svg")}" alt=""> Rebake</button>` : ""}
+        ${goldRemoveBtn(g)}
       </div>
     </div>
     <div class="card-body">
@@ -1079,7 +1140,7 @@ function cleanupPanel(golds) {
     <div class="table-wrap"><table class="data"><thead><tr><th></th><th>Gold</th><th>Image</th><th>Language · build · disk · age</th><th>Kind</th><th>Picked by</th><th></th></tr></thead><tbody>
     ${inv.map(e => `<tr class="${e.locked ? "muted-row" : ""}"><td>${toggle(`data-cleanup="${esc(e.g.id)}" aria-label="Remove ${esc(goldShortId(e.g))}"`, "", pick.has(e.g.id) && !e.locked, !!e.locked, "", "bare")}</td>
       <td class="mono">${esc(goldShortId(e.g))}</td><td>${esc(findImage(e.g.image_id).label)}</td><td class="muted">${esc(goldMetaLine(e.g))}</td>
-      <td>${e.kind === "newest" ? '<span class="pill status ok">newest</span>' : e.kind === "older" ? '<span class="pill">older</span>' : `<span class="pill status bad">${esc(e.g.status)}</span>`}</td>
+      <td>${e.kind === "newest" ? '<span class="pill status ok">Newest</span>' : e.kind === "older" ? '<span class="pill">older</span>' : `<span class="pill status bad">${esc(cap(e.g.status))}</span>`}</td>
       <td class="muted">${esc((e.g.picked_by || []).join(", "))}</td><td class="muted">${esc(e.locked)}</td></tr>`).join("")}
     </tbody></table></div>
     ${actions(`<span class="hint gs-actions-note">${picked.length} of ${inv.length} ticked</span>`,
@@ -1087,6 +1148,9 @@ function cleanupPanel(golds) {
   </div>`;
 }
 
+/* VMs the studio built from a gold that are on the cluster now - full copies and linked
+   clones alike (used_by counts linked clones only: those are what lock a gold). */
+function goldBuilt(g) { return ((cluster.vms || []).filter(v => v.gold === g.id && v.status === "ready")).length; }
 async function bladeGolds(main, stale) {
   const [catalog, golds, bake, au] = await Promise.all([catalogCache || api("GET", "/catalog"), api("GET", "/golds"),
     api("GET", "/settings/bake" + (bakeForm.node ? "?node=" + encodeURIComponent(bakeForm.node) : "")), api("GET", "/auto-update").catch(() => null),
@@ -1170,7 +1234,7 @@ async function bladeGolds(main, stale) {
     <div class="chips"><span class="pill">Ready: ${ready.length}</span><span class="pill">Windows: ${ready.filter(g => g.os === "windows").length}</span>
       <span class="pill">Linux: ${ready.filter(g => g.os === "linux").length}</span>
       <span class="pill status ${golds.some(g => g.status === "baking") ? "run" : "idle"}">Baking: ${golds.filter(g => g.status === "baking").length}</span>
-      <span class="pill">VMs built from golds: ${golds.reduce((n, g) => n + (g.used_by || 0), 0)}</span></div>
+      <span class="pill">VMs built from golds: ${golds.reduce((n, g) => n + goldBuilt(g), 0)}</span></div>
     ${goldsUi.cleanup ? cleanupPanel(golds) : ""}
     ${bakePanel}
     ${tiles.length ? section("windows", "Windows") + section("linux", "Linux")
@@ -1228,7 +1292,9 @@ async function bladeGolds(main, stale) {
     if (g.os === "windows") {
       const bo = m.bakeOptions;
       const policies = bo ? [["rdp", "rdp"], ["ping", "ping"], ["blockSignInInputMethods", "signinkeyboard"], ["suppressServerManagerAtLogon", "svrmgr"],
-        ["suppressWelcomeExperience", "welcome"], ["suppressFirstSignInAnimation", "firstlogon"]].filter(([k]) => bo[k]).map(([, f]) => f) : m.policies;
+        ["suppressWelcomeExperience", "welcome"], ["suppressFirstSignInAnimation", "firstlogon"], ["edgeBaseline", "edge"], ["preferIPv4", "preferipv4"],
+        // A gold from before these two were toggles had both, always.
+        ["preventDeviceEncryption", "noencrypt", true], ["vmPowerPlan", "power", true]].filter(([k, , was]) => bo[k] ?? was).map(([, f]) => f) : m.policies;
       const editionKey = { EnterpriseMultiSession: "MultiSession", DatacenterAzureEdition: "AzureEdition", Enterprise: "Enterprise", Education: "Education",
         ProfessionalWorkstation: "ProWorkstation", ProfessionalEducation: "ProEducation", EnterpriseN: "EnterpriseN", EducationN: "EducationN",
         ProfessionalWorkstationN: "ProWorkstationN", ProfessionalEducationN: "ProEducationN" }[m.editionUpgrade] || "";
@@ -1285,11 +1351,11 @@ async function bladeGolds(main, stale) {
 
 /* The policies the selected index can take: Server Manager is a server's, the welcome
    experience and the first sign-in animation a client's. */
-const WIN_POLICY_SCOPE = { svrmgr: "server", welcome: "client", firstlogon: "client" };
+/* The policies that reach the picked image: client or server ones, and Edge not on Server Core. */
 function winPolicies(info) {
   const img = info.images.find(i => i.index === winForm.index) || info.images[0] || {};
   const kind = img.installation_type === "Client" ? "client" : "server";
-  return info.features.filter(f => !WIN_POLICY_SCOPE[f.id] || WIN_POLICY_SCOPE[f.id] === kind);
+  return info.features.filter(f => !f.scope || f.scope === kind || (f.scope === "desktop" && img.installation_type !== "Server Core"));
 }
 
 let winDiskStorage = "", winDiskStorages = [];
@@ -1346,7 +1412,7 @@ async function fillWinBake(catalog, stale) {
         <tr class="clickable wi-virtual ${i.index === winForm.index && winForm.edition === v.key ? "selected" : ""}" data-wi="${i.index}" data-wi-edition="${esc(v.key)}"
           title="Applied from index ${i.index}, changed to the virtual edition after sysprep (DISM /Set-Edition)">
           <td></td><td><span class="wi-arrow">↳</span> ${esc(v.label)}</td>
-          <td><span class="pill role virtual">Virtual</span></td><td class="mono">${esc(String(i.version || i.build).replace(/^10\.0\./, ""))}</td><td class="mono">${esc(i.language)}</td><td class="mono">${i.size_gb} GiB</td>
+          <td><span class="wi-types"><span class="pill role ${i.installation_type === "Server Core" ? "core" : i.installation_type === "Client" ? "client" : "desktop"}">${esc(i.installation_type === "Server Core" ? "Core" : i.installation_type === "Client" ? "Client" : "Desktop")}</span><span class="pill role virtual">Virtual</span></span></td><td class="mono">${esc(String(i.version || i.build).replace(/^10\.0\./, ""))}</td><td class="mono">${esc(i.language)}</td><td class="mono">${i.size_gb} GiB</td>
           <td class="mono">${esc(v.image_id)}</td></tr>`).join("")}`).join("")}</tbody></table></div>
     <div class="field-group">Disk</div>
     <div class="grid-2 disk-row">${diskField("wi", winForm.disk, 32, winDiskStorages, winForm.storage || winDiskStorage)}</div>
@@ -1357,7 +1423,7 @@ async function fillWinBake(catalog, stale) {
       ${field(fieldLabel("language.svg", "Time zone"), `<select id="wiTz">${opts(info.timezones.map(z => [z.id, `${z.id} · ${z.iana}`]), winForm.timezone)}</select>`)}
     </div>
     <div class="field-group">Policies baked in</div>
-    <div class="toggle-grid">${winPolicies(info).map(f => stoggle("wiF_" + f.id, f.label.replace(/ \((client|server)\)$/, ""), winForm.features.includes(f.id))).join("")}</div>
+    <div class="toggle-grid">${winPolicies(info).map(f => toggle(`id="wiF_${esc(f.id)}"`, `${esc(f.label)}${f.tip ? infoTip(f.label, f.tip) : ""}`, winForm.features.includes(f.id))).join("")}</div>
     ${actions(`<span class="hint gs-actions-note">WinPE pass 1 (apply${winForm.edition ? ", check the edition target" : ""}) · audit mode (virtio, agent, sysprep) · WinPE pass 2 (verify${winForm.edition ? ", change the edition" : ""}, region, policies, key)</span>`,
       act("wiStart", "gold-image.svg", "Bake", true))}`;
   const keepWin = () => {
@@ -1377,7 +1443,7 @@ async function fillWinBake(catalog, stale) {
     try {
       const { id } = await api("POST", "/golds/windows", { iso: winForm.iso, index: winForm.index,
         region: { locale: winForm.locale, keyboard: winForm.keyboard, timezone: winForm.timezone },
-        features: winForm.features.filter(f => winPolicies(info).some(p => p.id === f)),
+        features: winForm.features.filter(f => winPolicies(info).some(p => p.id === f)), policies: 1,
         edition_upgrade: winForm.edition || "", disk_gb: winForm.disk, disk_storage: winForm.storage || null });
       goldsUi.bake = false;
       openJob(id);
@@ -1400,10 +1466,45 @@ function wireRowActions(root, rerender) {
 
 /* -- Deploy: the design against what exists -- */
 
+/* A PVE tag's colour, as Proxmox VE's own UI picks it: the datacenter's tag-style colour map
+   when it names the tag, else Proxmox.Utils.stringToRGB (proxmox-widget-toolkit) - the same
+   hash, the same 0.7 blend with white. */
+let tagColours = null;
+function pveTagRgb(t) {
+  const own = tagColours && tagColours[t];
+  if (own && /^[0-9a-f]{6}$/i.test(own)) return "#" + own;
+  let hash = 0;
+  const str = t + "prox";
+  for (let i = 0; i < str.length; i++) { hash = str.charCodeAt(i) + ((hash << 5) - hash); hash = hash & hash; }
+  const ch = v => Math.round(v * 0.7 + 255 * 0.3);
+  return `rgb(${ch(hash & 255)}, ${ch((hash >> 8) & 255)}, ${ch((hash >> 16) & 255)})`;
+}
+/* A tag as PVE writes it: lower case, letters, digits and - _ + . */
+function cleanTag(t) { return String(t || "").trim().toLowerCase().replace(/[^a-z0-9_+.-]/g, "-").replace(/^-+|-+$/g, ""); }
+function tagsOf(s) { return (Array.isArray(s.pveTags) ? s.pveTags : String(s.pveTags || "").split(/[,; ]+/)).map(cleanTag).filter(Boolean); }
+function tagBadge(t, removable) {
+  return `<span class="tagc" style="--c:${pveTagRgb(t)}">${esc(t)}${removable ? `<button type="button" data-tag-x="${esc(t)}" aria-label="Remove tag ${esc(t)}">×</button>` : ""}</span>`;
+}
+/* Saves the design without redrawing the blade - the plan repaints only its own rows. */
+function saveSoon() {
+  if (!lab.id || lab.conflict || encodeState() === lab.saved) return;
+  setSaveState("unsaved", "warn");
+  clearTimeout(lab.timer);
+  lab.timer = setTimeout(saveLab, 1000);
+}
+
+/* -- Deploy: the design against what exists -- */
+
+/* The plan's floating destination editor: pool and tags of one VM still to build (or, ticked,
+   of all of them). A layer on the page - never inside the table's scroll box - placed under
+   its row, or above it when the window has no room below. */
+const dpEd = { id: null, all: false, newPool: false, q: "", hi: 0, tagOpen: false, layer: null, plan: null };
+
 async function bladeDeploy(main, stale) {
-  const [vms, golds] = await Promise.all([api("GET", "/vms"), api("GET", "/golds")]);
+  const [vms, golds, tc] = await Promise.all([api("GET", "/vms"), api("GET", "/golds"), tagColours ? null : api("GET", "/tags").catch(() => null)]);
   if (stale()) return;
   cluster.golds = golds; cluster.vms = vms;
+  if (tc) tagColours = tc.colours || {};
   refreshValidation();
   const errors = reviewErrorCount();
   const byName = new Map(vms.map(v => [v.name, v]));
@@ -1415,58 +1516,184 @@ async function bladeDeploy(main, stale) {
   });
   const toBuild = planned.filter(p => !p.built || p.built.status === "failed");
   const preflight = reviewPreflightCard();
-  main.innerHTML = bladeHead("deploy", `<button class="btn primary" type="button" id="dpGo" ${toBuild.length && !errors ? "" : "disabled"} title="${errors ? "Fix the preflight errors first" : toBuild.length ? "" : state.servers.length ? "Every designed VM exists" : "Design a VM first"}"><img src="${iconSrcOnAccent("deploy.svg")}" alt=""> Deploy ${toBuild.length} VM(s)</button>`) + `
-    <div class="chips"><span class="pill">Designed: ${state.servers.length}</span><span class="pill">Built: ${planned.filter(p => p.built && p.built.status === "ready").length}</span>
-      <span class="pill">To build: ${toBuild.length}</span>${errors ? `<span class="pill status off">${errors} preflight error(s)</span>` : `<span class="pill status on">Preflight OK</span>`}</div>
+  dpEd.plan = { planned, toBuild, errors };
+  const goAll = `<button class="btn" type="button" id="dpGo" ${toBuild.length && !errors ? "" : "disabled"} title="${errors ? "Fix the preflight errors first" : toBuild.length ? `Builds the ${toBuild.length} VM(s) not on the cluster yet` : state.servers.length ? "Every designed VM exists" : "Design a VM first"}"><img src="${iconSrc("deploy.svg")}" alt=""> Deploy all${toBuild.length ? ` · ${toBuild.length}` : ""}</button>`;
+  main.innerHTML = bladeHead("deploy") + `
+    <div class="chips"><span class="pill">Designed <b>${state.servers.length}</b></span><span class="pill">Built <b>${planned.filter(p => p.built && p.built.status === "ready").length}</b></span>
+      <span class="pill">To build <b>${toBuild.length}</b></span>${errors ? `<span class="pill status off">${errors} preflight error(s)</span>` : `<span class="pill status on">Preflight OK</span>`}</div>
     ${preflight}
-    ${gsCard("dp-plan", "vm.svg", "Deployment plan", state.servers.length ? `${state.servers.length} designed · ${toBuild.length} to build` : "nothing designed yet", state.servers.length ? `${toBuild.length > 1 ? `<div class="dp-bulk">
-        <label for="dpPoolAll" class="dp-bulk-label">${fieldLabel("servers.svg", "Pool for every VM to build")}</label>
-        <select id="dpPoolAll"><option value="" selected disabled>Choose…</option><option value="-">None</option>${(cluster.pools || []).map(x => `<option value="${esc(x.id)}">${esc(x.id)}${x.comment ? " - " + esc(x.comment) : ""}</option>`).join("")}</select></div>` : ""}<div class="table-wrap"><table class="data">
-      <thead><tr><th>VM</th><th>Image</th><th>Gold</th><th>Pool</th><th>Tags</th><th>Built</th><th>Power</th><th>Address</th><th>Node / VMID</th><th></th></tr></thead>
-      <tbody>${planned.map(p => `<tr>
-        <td><b>${esc(p.name || "(no name)")}</b></td>
-        <td>${esc(findImage(p.s.imageId).label)}</td>
-        <td>${p.gold ? `<span class="mono">${esc(p.gold.name)}</span><div class="hint">${esc(goldMetaLine(p.gold))}</div>` : `<button class="btn sm danger-text" type="button" data-goto="servers">no gold - pick one</button>`}</td>
-        <td class="dp-pool">${p.built && p.built.status !== "failed" ? `<span class="${p.s.pvePool ? "mono" : "muted"}">${esc(p.s.pvePool || "none")}</span>` : poolPicker(p.s)}</td>
-        <td class="dp-tags">${(() => {
-          // Tags with the pool: where a VM lands and how PVE files it, decided at deploy.
-          const tags = Array.isArray(p.s.pveTags) ? p.s.pveTags.join(", ") : (p.s.pveTags || "");
-          return p.built && p.built.status !== "failed" ? `<span class="${tags ? "mono" : "muted"}">${esc(tags || "none")}</span>`
-            : `<input data-s="${esc(p.s._id)}" data-k="pveTags" value="${esc(tags)}" placeholder="prod, sql" spellcheck="false" autocomplete="off" aria-label="Tags, comma-separated">`;
-        })()}</td>
-        <td>${p.built ? `<span class="pill status ${{ ready: "ok", building: "run", failed: "bad" }[p.built.status] || "idle"}">${esc(p.built.status)}</span>` : '<span class="pill">not built</span>'}</td>
-        <td>${p.built ? pillOn(p.built.power, p.built.power === "running") : ""}</td>
-        <td class="mono">${esc((p.built && p.built.ip) || p.s.ipAddress || "")}</td>
-        <td class="mono">${p.built ? esc(p.built.node + " / " + (p.built.vmid ?? "")) : ""}</td>
-        <td class="row-actions">${p.built && p.built.job_id ? `<button class="btn sm" type="button" data-job-open="${esc(p.built.job_id)}"><img src="${iconSrc("log.svg")}" alt=""> Log</button>` : ""}
-          ${p.built && p.built.status !== "building" ? `<button class="btn icon sm danger-text" type="button" data-clear-vm="${esc(p.s._id)}" title="Clear from view - takes it out of the studio's view; the VM in Proxmox VE is not touched" aria-label="Clear from view">${trashIcon()}</button>` : ""}</td>
-      </tr>`).join("")}</tbody></table></div>` : `<div class="dp-empty">
+    ${gsCard("dp-plan", "vm.svg", "Deployment plan", state.servers.length ? `${state.servers.length} designed · ${toBuild.length} to build` : "nothing designed yet", state.servers.length ? `<div class="table-wrap"><table class="data dp-plan">
+      <thead><tr><th>VM</th><th>Gold</th><th>Pool · Tags</th><th>State</th><th>Address</th><th></th></tr></thead>
+      <tbody id="dpRows">${dpRows()}</tbody></table></div>` : `<div class="dp-empty">
         <span class="dp-empty-slot" aria-hidden="true"><img src="${iconSrc("vm.svg")}" alt=""></span>
         <div class="dp-empty-text"><b>Nothing to deploy yet</b><span>Each VM you design under Virtual machines appears here with its gold, its address and where it lands - then Deploy builds it.</span></div>
-        <button class="btn" type="button" data-goto="servers"><img src="${iconSrc("vm.svg")}" alt=""> Design a VM</button></div>`, "", true)}
+        <button class="btn" type="button" data-goto="servers"><img src="${iconSrc("vm.svg")}" alt=""> Design a VM</button></div>`, "", true, state.servers.length ? goAll : "")}
     ${vms.filter(v => !state.servers.some(s => (s.name || "").toLowerCase() === v.name)).length ? gsCard("dp-other", "servers.svg", "Built by the studio, not in the design",
       "VMs the studio built whose card is gone - clearing them only takes them out of this list", `<div class="table-wrap"><table class="data"><tbody>${vms.filter(v => !state.servers.some(s => (s.name || "").toLowerCase() === v.name)).map(v => `<tr>
-        <td><b>${esc(v.name)}</b></td><td>${pillOn(v.power, v.power === "running")}</td><td class="mono">${esc(v.ip || "")}</td><td class="mono">${esc(v.node + " / " + (v.vmid ?? ""))}</td>
-        <td class="row-actions">${v.job_id ? `<button class="btn sm" type="button" data-job-open="${esc(v.job_id)}"><img src="${iconSrc("log.svg")}" alt=""> Log</button>` : ""}<button class="btn icon sm danger-text" type="button" data-clear-record="${esc(v.id)}" title="Clear from view - takes it out of the studio's view; the VM in Proxmox VE is not touched" aria-label="Clear from view">${trashIcon()}</button></td></tr>`).join("")}</tbody></table></div>`, "", false) : ""}
+        <td><b>${esc(v.name)}</b></td><td>${pillOn(cap(v.power), v.power === "running")}</td><td class="mono">${esc(v.ip || "")}</td><td class="mono">${esc(v.node + " · " + (v.vmid ?? "—"))}</td>
+        <td class="row-actions"><button class="btn sm" type="button"${v.job_id ? ` data-job-open="${esc(v.job_id)}"` : ' disabled title="No build log"'}><img src="${iconSrc("log.svg")}" alt=""> Log</button><button class="btn icon sm danger-text" type="button" data-clear-record="${esc(v.id)}" title="Clear from view - takes it out of the studio's view; the VM in Proxmox VE is not touched" aria-label="Clear from view">${trashIcon()}</button></td></tr>`).join("")}</tbody></table></div>`, "", false) : ""}
     <div class="field-group">The design at a glance</div>
     ${reviewSummaryCards()}`;
   wireRowActions(main, () => renderServerBlade("deploy", main));
-  const all = $id("dpPoolAll");
-  if (all) all.addEventListener("change", () => {
-    const pool = all.value === "-" ? "" : all.value;
-    toBuild.forEach(p => { p.s.pvePool = pool; p.s._poolNew = false; });
-    toast(pool ? `Every VM to build goes into ${pool}` : "No pool for the VMs to build"); render();
-  });
-  const go = $id("dpGo");
-  if (go) go.addEventListener("click", async () => {
+  dpWireRows();
+  const deploy = async names => {
+    dpClose();
     await flushSave();
     if (reviewErrorCount()) { toast("Review and validate reports errors - fix them first", true); return; }
     try {
-      const r = await api("POST", `/labs/${encodeURIComponent(lab.id)}/deploy`, { names: toBuild.map(p => p.name) });
+      const r = await api("POST", `/labs/${encodeURIComponent(lab.id)}/deploy`, { names });
       toast(`${r.jobs.length} build job(s) started`);
       state.blade = "jobs"; render();
     } catch (e) { toast(e.message, true); }
-  });
+  };
+  dpEd.deploy = deploy;
+  const go = $id("dpGo");
+  if (go) go.addEventListener("click", () => deploy(toBuild.map(p => p.name)));
+}
+
+/* One row per designed VM, every row the same columns and the same three buttons; a button
+   that does not apply is there, greyed out, and says why. */
+function dpRows() {
+  const { planned, toBuild, errors } = dpEd.plan;
+  return planned.map(p => {
+    const open = toBuild.includes(p);
+    const b = p.built;
+    const job = b && b.job_id && (cluster.jobs || []).find(j => j.id === b.job_id);
+    const pct = job && job.progress && typeof job.progress.pct === "number" ? ` · ${Math.round(job.progress.pct)} %` : "";
+    const st = !b ? `<span class="pill status none idle">Not built</span>`
+      : b.status === "building" ? `<span class="pill status run">Building${pct}</span>`
+      : b.status === "failed" ? `<span class="pill status bad">Failed</span>`
+      : `<span class="pill status ${b.power === "running" ? "ok" : "idle"}">${esc(cap(b.power || "unknown"))}</span>`;
+    const pool = p.s.pvePool;
+    const tags = tagsOf(p.s);
+    const dest = `${pool ? `<span class="dp-pool-name"><img src="${iconSrcBand("pool.svg", "ident")}" alt="">${esc(pool)}</span>` : `<span class="dp-pool-name none" title="No pool">—</span>`}${tags.map(t => tagBadge(t)).join("")}`;
+    const node = b && b.status !== "failed" ? b.node : (p.s.pveNode || state.defaults.pveNode || "auto");
+    const why = errors ? "Fix the preflight errors first" : !p.gold ? "No gold to build it from" : !p.name ? "The VM has no name" : "";
+    return `<tr>
+      <td><div class="dp-cell"><img src="${iconSrcBand("vm.svg", serverGlyphBand(p.s))}" alt=""><div class="dp-two"><b>${esc(p.name || "(no name)")}</b><span>${esc(findImage(p.s.imageId).label)}</span></div></div></td>
+      <td>${p.gold ? `<div class="dp-cell"><img src="${iconSrcBand("gold-image.svg", serverGlyphBand(p.gold.image_id ? { imageId: p.gold.image_id } : p.s))}" alt=""><div class="dp-two"><span class="mono">${esc(p.gold.name)}</span><span>${esc(goldMetaLine(p.gold))}</span></div></div>`
+        : `<button class="btn sm danger-text" type="button" data-goto="servers">no gold - pick one</button>`}</td>
+      <td>${open ? `<button class="dp-dest" type="button" data-dest="${esc(p.s._id)}" aria-haspopup="dialog" aria-expanded="${dpEd.id === p.s._id}" title="Pool and tags">${dest}</button>`
+        : `<div class="dp-dest ro">${dest}</div>`}</td>
+      <td>${st}</td>
+      <td><div class="dp-two"><span class="mono${b && b.status !== "failed" ? "" : " muted"}">${esc((b && b.ip) || p.s.ipAddress || "DHCP")}</span><span class="mono">${esc(node)} · ${b && b.status !== "failed" && b.vmid != null ? esc(b.vmid) : "—"}</span></div></td>
+      <td class="row-actions">
+        <button class="btn sm" type="button"${b && b.job_id ? ` data-job-open="${esc(b.job_id)}"` : ' disabled title="Not built yet - no log"'}><img src="${iconSrc("log.svg")}" alt=""> Log</button>
+        <button class="btn sm" type="button"${open && !why ? ` data-deploy-one="${esc(p.name)}"` : ` disabled title="${esc(open ? why : "Already on the cluster")}"`}><img src="${iconSrc("deploy.svg")}" alt=""> Deploy</button>
+        <button class="btn icon sm danger-text" type="button"${b && b.status !== "building" ? ` data-clear-vm="${esc(p.s._id)}" title="Clear from view - takes it out of the studio's view; the VM in Proxmox VE is not touched"` : ` disabled title="${b ? "Building - wait for it to finish" : "Not built - nothing to clear"}"`} aria-label="Clear from view">${trashIcon()}</button></td>
+    </tr>`;
+  }).join("");
+}
+function dpWireRows(repaint) {
+  const body = $id("dpRows"); if (!body) return;
+  body.querySelectorAll("[data-dest]").forEach(b => b.addEventListener("click", e => { e.stopPropagation(); dpEd.id === b.dataset.dest ? dpClose() : dpOpen(b.dataset.dest); }));
+  body.querySelectorAll("[data-deploy-one]").forEach(b => b.addEventListener("click", () => dpEd.deploy && dpEd.deploy([b.dataset.deployOne])));
+  // The blade's wireRowActions covers the first paint; a repaint brings new buttons.
+  if (repaint) body.querySelectorAll("[data-job-open]").forEach(b => b.addEventListener("click", () => openJob(b.dataset.jobOpen)));
+}
+function dpRepaint() { const body = $id("dpRows"); if (body && dpEd.plan) { body.innerHTML = dpRows(); dpWireRows(true); } }
+
+/* The VMs a change applies to: the one being edited, or every VM still to build. */
+function dpTargets(s) { return dpEd.all ? dpEd.plan.toBuild.map(p => p.s) : [s]; }
+/* Tags on the cluster's guests and in the design, with how many carry each - the suggestions. */
+function dpKnownTags() {
+  const n = new Map();
+  // Templates (the golds) carry the studio's own tags - not ones a VM would want.
+  for (const g of ((cluster.inventory && cluster.inventory.guests) || []).filter(g => !g.template)) for (const t of String(g.tags || "").split(/[;, ]+/).map(cleanTag).filter(Boolean)) n.set(t, (n.get(t) || 0) + 1);
+  for (const s of state.servers) for (const t of tagsOf(s)) if (!n.has(t)) n.set(t, 0);
+  return n;
+}
+function dpOpen(id) {
+  Object.assign(dpEd, { id, newPool: false, q: "", hi: 0, tagOpen: false });
+  if (!dpEd.layer) {
+    dpEd.layer = document.createElement("div");
+    dpEd.layer.className = "dp-layer"; dpEd.layer.setAttribute("role", "dialog");
+    document.body.appendChild(dpEd.layer);
+    document.addEventListener("mousedown", e => { if (dpEd.id && !dpEd.layer.contains(e.target) && !e.target.closest("[data-dest]")) dpClose(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && dpEd.id) dpClose(); });
+    window.addEventListener("scroll", dpPlace, true); window.addEventListener("resize", dpPlace);
+  }
+  dpEd.layer.hidden = false;
+  dpRepaint(); dpPaint(); dpPlace();
+  const cur = dpEd.layer.querySelector('[aria-selected="true"]'); if (cur) cur.focus();
+}
+function dpClose() {
+  if (!dpEd.id) return;
+  const was = dpEd.id; dpEd.id = null;
+  if (dpEd.layer) dpEd.layer.hidden = true;
+  dpRepaint();
+  const b = document.querySelector(`[data-dest="${CSS.escape(was)}"]`); if (b) b.focus();
+}
+function dpPlace() {
+  if (!dpEd.id || !dpEd.layer || dpEd.layer.hidden) return;
+  const b = document.querySelector(`[data-dest="${CSS.escape(dpEd.id)}"]`);
+  if (!b) { dpClose(); return; }
+  const r = b.getBoundingClientRect(), h = dpEd.layer.offsetHeight, w = dpEd.layer.offsetWidth;
+  const below = window.innerHeight - r.bottom - 8 >= h || r.top < h + 8;
+  dpEd.layer.style.top = `${below ? r.bottom + 6 : r.top - h - 6}px`;
+  dpEd.layer.style.left = `${Math.max(16, Math.min(r.left, window.innerWidth - w - 16))}px`;
+}
+function dpChanged(focusSel) { saveSoon(); dpRepaint(); dpPaint(focusSel); dpPlace(); }
+function dpPaint(focusSel) {
+  const s = state.servers.find(x => x._id === dpEd.id); if (!s) { dpClose(); return; }
+  const L = dpEd.layer;
+  const tags = tagsOf(s), known = dpKnownTags();
+  const q = cleanTag(dpEd.q);
+  const sugg = [...known.keys()].filter(t => !tags.includes(t) && (!q || t.includes(q))).sort((a, b) => known.get(b) - known.get(a) || a.localeCompare(b)).slice(0, 6);
+  const list = (q && !known.has(q) && !tags.includes(q) ? [q] : []).concat(sugg);
+  const inPool = id => state.servers.filter(x => x.pvePool === id).length;
+  const others = dpEd.plan.toBuild.length;
+  L.setAttribute("aria-label", `Pool and tags of ${s.name || "the VM"}`);
+  L.innerHTML = `
+    <div class="dp-l-h"><img src="${iconSrcBand("vm.svg", serverGlyphBand(s))}" alt=""><b>${esc(s.name || "(no name)")}</b><span>pool and tags</span></div>
+    <div class="dp-l-sec"><div class="dp-l-k">Pool</div>
+      <div class="dp-plist" role="listbox" aria-label="Pool">${[{ id: "", comment: "" }, ...(cluster.pools || [])].map(p => `
+        <button class="dp-popt${p.id ? "" : " none"}" type="button" role="option" aria-selected="${(s.pvePool || "") === p.id}" data-pool="${esc(p.id)}">
+          ${p.id ? `<img src="${iconSrcBand("pool.svg", "ident")}" alt="">` : "<span></span>"}<span class="nm">${esc(p.id || "None")}</span><span class="z">${esc(p.comment || "")}</span><span class="cnt">${p.id && inPool(p.id) ? inPool(p.id) : ""}</span><span class="tick">✓</span></button>`).join("")}
+        ${dpEd.newPool ? `<div class="dp-newpool"><input id="dpNewPool" placeholder="pool-name" aria-label="New pool name" spellcheck="false" autocomplete="off"><input id="dpNewPoolC" placeholder="Comment (optional)" aria-label="Comment" autocomplete="off"><button class="btn sm primary" type="button" data-mkpool>Create</button></div>`
+          : `<button class="dp-popt new" type="button" data-newpool><span>+</span><span class="nm">New pool</span><span></span><span></span><span></span></button>`}
+      </div></div>
+    <div class="dp-l-sec"><div class="dp-l-k">Tags</div>
+      <div class="dp-tagfield"><div class="dp-tagbox">${tags.map(t => tagBadge(t, true)).join("")}<input id="dpTag" value="${esc(dpEd.q)}" placeholder="${tags.length ? "" : "Add a tag"}" aria-label="Add a tag" autocomplete="off" spellcheck="false"></div>
+        ${dpEd.tagOpen && list.length ? `<div class="dp-tsugg" role="listbox">${list.map((t, i) => `<button type="button" role="option" class="${i === dpEd.hi ? "on" : ""}" data-add="${esc(t)}"><span class="sq" style="background:${pveTagRgb(t)}"></span>${esc(t)}<span class="z">${!known.has(t) ? "new tag" : known.get(t) ? `${known.get(t)} on the cluster` : "in the design"}</span></button>`).join("")}</div>` : ""}
+      </div></div>
+    <div class="dp-l-foot"><label class="dp-all"><input type="checkbox" id="dpAll"${dpEd.all ? " checked" : ""}${others > 1 ? "" : " disabled"}> Same for all ${others} to build</label><button class="btn sm primary" type="button" data-done>Done</button></div>`;
+  L.querySelectorAll("[data-pool]").forEach(b => b.onclick = () => { dpTargets(s).forEach(x => { x.pvePool = b.dataset.pool; x._poolNew = false; }); dpChanged(); });
+  const np = L.querySelector("[data-newpool]"); if (np) np.onclick = () => { dpEd.newPool = true; dpPaint("#dpNewPool"); dpPlace(); };
+  const mk = async () => {
+    const name = L.querySelector("#dpNewPool").value.trim(), comment = L.querySelector("#dpNewPoolC").value.trim();
+    if (!name) return;
+    try {
+      const r = await api("POST", "/pools", { name, comment });
+      cluster.pools = (cluster.pools || []).filter(p => p.id !== r.id).concat({ id: r.id, comment }).sort((a, b) => a.id.localeCompare(b.id));
+      dpTargets(s).forEach(x => { x.pvePool = r.id; });
+      dpEd.newPool = false; toast(`Pool ${r.id} created`); dpChanged();
+    } catch (e) { toast(e.message, true); }
+  };
+  const mkb = L.querySelector("[data-mkpool]"); if (mkb) mkb.onclick = mk;
+  L.querySelectorAll("#dpNewPool, #dpNewPoolC").forEach(i => i.onkeydown = e => { if (e.key === "Enter") mk(); if (e.key === "Escape") { e.stopPropagation(); dpEd.newPool = false; dpPaint(); } });
+  const setTags = (fn) => dpTargets(s).forEach(x => { x.pveTags = fn(tagsOf(x)); });
+  const add = t => { t = cleanTag(t); if (t) setTags(cur => cur.includes(t) ? cur : cur.concat(t)); dpEd.q = ""; dpEd.hi = 0; dpChanged("#dpTag"); };
+  L.querySelectorAll("[data-tag-x]").forEach(b => b.onclick = () => { setTags(cur => cur.filter(t => t !== b.dataset.tagX)); dpChanged(); });
+  L.querySelectorAll("[data-add]").forEach(b => b.onmousedown = e => { e.preventDefault(); add(b.dataset.add); });
+  const ti = L.querySelector("#dpTag");
+  ti.oninput = () => { dpEd.q = ti.value; dpEd.hi = 0; dpEd.tagOpen = true; dpPaint("#dpTag"); };
+  ti.onfocus = () => { if (!dpEd.tagOpen) { dpEd.tagOpen = true; dpPaint("#dpTag"); } };
+  ti.onblur = () => setTimeout(() => { if (dpEd.id && dpEd.tagOpen && document.activeElement?.id !== "dpTag") { dpEd.tagOpen = false; L.querySelector(".dp-tsugg")?.remove(); } }, 0);
+  ti.onkeydown = e => {
+    const items = [...L.querySelectorAll(".dp-tsugg [data-add]")];
+    if (e.key === "ArrowDown" && items.length) { e.preventDefault(); dpEd.hi = (dpEd.hi + 1) % items.length; dpPaint("#dpTag"); }
+    else if (e.key === "ArrowUp" && items.length) { e.preventDefault(); dpEd.hi = (dpEd.hi - 1 + items.length) % items.length; dpPaint("#dpTag"); }
+    else if ((e.key === "Enter" || e.key === ",") && (items[dpEd.hi] || ti.value.trim())) { e.preventDefault(); add(items[dpEd.hi] ? items[dpEd.hi].dataset.add : ti.value); }
+    else if (e.key === "Backspace" && !ti.value && tags.length) { const last = tags[tags.length - 1]; setTags(cur => cur.filter(t => t !== last)); dpChanged("#dpTag"); }
+  };
+  L.querySelector("#dpAll").onchange = e => {
+    dpEd.all = e.target.checked;
+    if (dpEd.all) dpEd.plan.toBuild.forEach(p => { p.s.pvePool = s.pvePool || ""; p.s.pveTags = tagsOf(s); });
+    dpChanged();
+  };
+  L.querySelector("[data-done]").onclick = dpClose;
+  if (focusSel) { const f = L.querySelector(focusSel); if (f) { f.focus(); if (f.setSelectionRange) f.setSelectionRange(f.value.length, f.value.length); } }
 }
 
 /* -- Jobs -- */
@@ -2075,7 +2302,7 @@ function autoUpdateCard(au) {
   const failed = runs.find(r => r.step === "failed");
   const meta = active.length ? `${esc(active[0].product)} ${esc(active[0].to)} - ${AU_STEP[active[0].step]}`
     : !following.length ? "no gold keeps current" : `${following.length} gold${following.length === 1 ? "" : "s"} keep current · ${au.next_window ? "next window " + esc(fmtWhen(au.next_window)) : "no maintenance window"}`;
-  const badge = active.some(r => r.job) ? `<span class="pill status run">running</span>` : failed ? `<span class="pill status warn">failed</span>` : "";
+  const badge = active.some(r => r.job) ? `<span class="pill status run">Running</span>` : failed ? `<span class="pill status warn">Failed</span>` : "";
   const stepText = r => {
     if (r.step === "bake") { const g = r.golds || []; return `baking golds (${g.filter(x => x.to && !x.job).length} of ${g.length})`; }
     if (r.step === "failed") return `failed while ${{ pending: "starting", iso: "building the ISO", bake: "baking", cleanup: "cleaning up" }[r.failed_step] || "running"}`;
@@ -2128,9 +2355,11 @@ function wireAutoUpdate(main) {
 }
 
 async function bladeMedia(main, stale) {
-  const [win, isos, bake, c, fod, region, au] = await Promise.all([api("GET", "/settings/windows"), api("GET", "/windows/isos").catch(e => ({ error: e.message, isos: [] })),
+  const [win, isos, bake, c, fod, region, au, golds] = await Promise.all([api("GET", "/settings/windows"), api("GET", "/windows/isos").catch(e => ({ error: e.message, isos: [] })),
     api("GET", "/settings/bake"), refreshInventory(), api("GET", "/settings/fod").catch(() => null), api("GET", "/settings/region").catch(() => ({})),
-    api("GET", "/auto-update").catch(() => null)]);
+    api("GET", "/auto-update").catch(() => null), api("GET", "/golds").catch(() => null)]);
+  // The ISOs' Golds column needs them - Media can be the first blade opened.
+  if (golds) cluster.golds = golds;
   // FoD satellites in the studio's preselected language (Studio settings), en-US without one.
   const fodLang = region.language || "en-US";
   if (stale()) return;
@@ -2143,18 +2372,29 @@ async function bladeMedia(main, stale) {
   const vioBad = r => { const n = parseInt(String(r || "").replace(/^0\.1\./, ""), 10); return (n >= 215 && n <= 262) || n === 285; };
   /* The release in use and where it stands: in PVE, being fetched, an older copy only, or
      fetched by the next bake. */
+  // virtio-win's state for the card head's badge; the meta line keeps the channel and release.
   const vioMeta = () => {
     const set = win.settings.virtio, vio = set === "stable" ? win.stable : set === "latest" ? win.latest : set;
-    const head = esc(set) + (vio && vio !== set ? ` (${esc(vio)})` : "");
+    return esc(set) + (vio && vio !== set ? ` · ${esc(vio)}` : "");
+  };
+  const vioBadge = () => {
+    const set = win.settings.virtio, vio = set === "stable" ? win.stable : set === "latest" ? win.latest : set;
     const job = (cluster.jobs || []).find(j => j.kind === "virtio" && (j.status === "running" || j.status === "queued"));
-    const pct = job && job.progress && typeof job.progress.pct === "number" ? ` ${Math.round(job.progress.pct)}%` : "";
+    const pct = job && job.progress && typeof job.progress.pct === "number" ? ` · ${Math.round(job.progress.pct)} %` : "";
     const here = (win.present || []).slice().sort((a, b) => vioNewer(a, b) ? -1 : 1);
     const where = win.settings.iso_storage || (bake.resolved || {}).iso_storage || "PVE";
-    const st = job ? `<span class="dot run"></span><span class="vio-run">fetching${pct}</span>`
-      : vio && here.includes(vio) ? `<span class="dot ok"></span><span class="vio-ok">in ${esc(where)}</span>`
-      : here.length ? `<span class="dot warn"></span><span class="vio-warn">local copy is ${esc(here[0])}</span>`
-      : `<span class="dot idle"></span>fetched at next bake`;
-    return `<span class="vio-meta">${head} · ${st}</span>`;
+    return job ? `<span class="pill status run">Fetching${pct}</span>`
+      : vio && here.includes(vio) ? `<span class="pill status ok" title="virtio-win ${esc(vio)} is on ${esc(where)}">In ${esc(where)}</span>`
+      : here.length ? `<span class="pill status warn" title="The copy on ${esc(where)} is ${esc(here[0])} - fetched again at the next bake">${esc(vio || set)} available</span>`
+      : `<span class="pill status none idle" title="Fetched into PVE at the next Windows bake">Not fetched</span>`;
+  };
+  // WinPE's: built, building, or behind the newest build / the virtio-win in use.
+  const peBadge = () => {
+    const job = (cluster.jobs || []).find(j => j.kind === "winpe" && (j.status === "running" || j.status === "queued"));
+    const pct = job && job.progress && typeof job.progress.pct === "number" ? ` · ${Math.round(job.progress.pct)} %` : "";
+    if (job) return `<span class="pill status run">Building${pct}</span>`;
+    if (!pe.volid) return `<span class="pill status none idle" title="Windows golds need it">Not built</span>`;
+    return peHint(win) || `<span class="pill status ok">Ready</span>`;
   };
   const vioChoices = [["stable", `stable${win.stable ? " (" + win.stable + ")" : ""}${vioBad(win.stable) ? " · broken per Proxmox" : ""}`],
     ["latest", `latest${win.latest ? " (" + win.latest + ")" : ""}${vioBad(win.latest) ? " · broken per Proxmox" : ""}`]]
@@ -2166,7 +2406,9 @@ async function bladeMedia(main, stale) {
   const bridges = (inv.nodes.find(n => n.node === node)?.bridges || []).map(b => [b.iface, b.iface]).concat(inv.vnets.map(v => [v.vnet, v.vnet + " (SDN)"]));
   const auto = v => v ? `Auto (${v})` : "Auto";
   const readable = isos.isos.filter(i => i.readable);
-  const usedBy = volid => readyGolds().filter(g => goldManifest(g).sourceIso === volid).length;
+  // A Windows gold records its ISO as sourceMedia (sourceIso before that).
+  const usedBy = volid => readyGolds().filter(g => (goldManifest(g).sourceMedia || goldManifest(g).sourceIso) === volid)
+    .map(g => `<span class="pill" title="${esc(goldBuildLabel(g) || g.name)}">${esc(goldShortId(g))}</span>`).join(" ");
   mediaUi.product = win.settings.winpe_from || "ws-insider";
 
   main.innerHTML = bladeHead("media") + `
@@ -2178,9 +2420,9 @@ async function bladeMedia(main, stale) {
     </div>
     ${gsCard("md-isos", "iso-media.svg", "Windows ISOs", isos.error ? "could not be read" : `${isos.isos.length} on ${esc(isos.node || "")}`, isos.error ? warnBanner(esc(isos.error)) : isos.isos.length ? `
       <div class="table-wrap"><table class="data"><thead><tr><th>ISO</th><th>Storage</th><th>Size</th><th>Studio can read it</th><th>Golds</th><th></th></tr></thead><tbody>
-      ${isos.isos.map(i => `<tr><td><div class="name-cell"><img src="${iconSrc("iso-media.svg")}" alt=""><b>${esc(i.file)}</b>${pe.source_iso === i.volid ? ' <span class="pill tag">WinPE source</span>' : ""}${ISO_KIND_TAG[i.kind] ? ` <span class="pill tag">${ISO_KIND_TAG[i.kind]}</span>` : ""}</div></td>
+      ${isos.isos.map(i => `<tr><td><div class="name-cell"><img src="${iconSrc("iso-media.svg")}" alt=""><b>${esc(i.file)}</b>${pe.source_iso === i.volid ? ' <span class="pill">WinPE source</span>' : ""}${ISO_KIND_TAG[i.kind] ? ` <span class="pill">${ISO_KIND_TAG[i.kind]}</span>` : ""}</div></td>
         <td class="mono">${esc(i.storage)}</td><td class="mono">${gib(i.size)} GiB</td><td>${pillOn(i.readable ? "yes" : "no", i.readable)}</td>
-        <td class="muted">${usedBy(i.volid) || ""}</td>
+        <td>${usedBy(i.volid)}</td>
         <td class="row-actions">${i.readable && i.kind === "windows" ? `<button class="btn sm" type="button" data-iso-bake="${esc(i.volid)}"><img src="${iconSrc("gold-image.svg")}" alt=""> Bake a gold</button>` : ""}${pe.volid === i.volid
           ? `<button class="btn icon sm" type="button" disabled title="The WinPE every Windows bake boots - build another WinPE first" aria-label="Delete - the WinPE in use">${trashIcon()}</button>`
           : `<button class="btn icon sm danger-text" type="button" data-iso-delete="${esc(i.volid)}" title="Delete this ISO" aria-label="Delete ${esc(i.file)}">${trashIcon()}</button>`}</td></tr>`).join("")}
@@ -2189,7 +2431,7 @@ async function bladeMedia(main, stale) {
         The studio reads them through a read-only mount to list their editions.</div></div>`
       : `<p class="hint">No Windows ISO on ${esc(isos.node || "the bake node")} yet. Upload one in Proxmox VE (a storage's <b>ISO Images → Upload</b> or <b>Download from URL</b>).</p>`, "", true)}
     ${fod ? fodCard(fod, isos, fodLang) : ""}
-    ${gsCard("gs-winpe", "os-server-desktop.svg", "Windows: WinPE", pe.volid ? `${pe.volid} · build ${pe.build}` : "not built yet - Windows golds need it", `
+    ${gsCard("gs-winpe", "os-server-desktop.svg", "Windows: WinPE", pe.volid ? `${esc(pe.volid)} · build ${esc(pe.build)}` : "Windows golds need it", `
       <p class="hint" style="margin-bottom:10px">The Setup environment (boot.wim <b>index 2</b>, the one that can service an offline image) with our startnet.cmd and the
       no-prompt EFI boot image. Every Windows bake boots it twice - to apply the image, and to customize it after sysprep. Build it from Microsoft's own files, or from a Windows ISO you uploaded.</p>
       ${pe.volid ? `<div class="kv-grid" style="margin-bottom:12px"><div>WinPE</div><div class="kv-val">${esc(pe.volid)}</div><div>Built from</div><div class="kv-val">${esc(peSourceLabel(pe.source_iso))}</div>
@@ -2201,18 +2443,18 @@ async function bladeMedia(main, stale) {
         </div></div>
       ${mediaUi.peFrom === "uup" ? `
       <div class="grid-2">
-        ${field(`<span class="field-label"><img src="${iconSrc("os-server-core.svg")}" alt="">Product${infoTip("Why Windows Server vNext", "Insider builds ship their edition image at the full build, so the WinPE distilled from its WinRE always has the newest DISM - and DISM may be newer than the images it services, never older. Windows Server 2025's edition image is the release build (26100.1) in every set, so its WinPE stays at the September 2024 DISM. WinPE only boots the bakes and the media worker; the images it services are unaffected by the Insider label.")}</span>`, `<div class="pe-product"><select id="peProduct">${opts(PE_PRODUCTS, mediaUi.product)}</select>${mediaUi.product === "ws-insider" ? `<span class="pill status on">recommended</span>` : ""}</div>`)}
+        ${field(`<span class="field-label"><img src="${iconSrc("os-server-core.svg")}" alt="">Product${infoTip("Why Windows Server vNext", "Insider builds ship their edition image at the full build, so the WinPE distilled from its WinRE always has the newest DISM - and DISM may be newer than the images it services, never older. Windows Server 2025's edition image is the release build (26100.1) in every set, so its WinPE stays at the September 2024 DISM. WinPE only boots the bakes and the media worker; the images it services are unaffected by the Insider label.")}</span>`, `<div class="pe-product"><select id="peProduct">${opts(PE_PRODUCTS, mediaUi.product)}</select>${mediaUi.product === "ws-insider" ? `<span class="pill status on">Recommended</span>` : ""}</div>`)}
         ${field(`<span class="field-label"><img src="${iconSrc("update.svg")}" alt="">Build${infoTip("WinPE from Microsoft", "Always en-US and the newest build the UUP dump catalog lists (for Windows Server 2025, the newest Patch Tuesday build) - WinPE only boots the bakes, whatever their language. The studio downloads a Core edition's ESD straight from Microsoft and checks its SHA-1 - no Windows ISO needed.")}</span>`,
           `<div class="pe-newest" id="peBuildSel" aria-live="polite">Asking the catalog…</div>`)}
       </div>
       <p class="hint err" id="peUupHint" hidden></p>
       ${actions(act("peBuildUup", "download.svg", pe.volid ? "Rebuild WinPE" : "Build WinPE", !pe.volid))}`
       : `<div class="grid-2">${field(fieldLabel("iso-media.svg", "Distil from"), `<select id="peIso">${readable.length ? opts(readable.map(i => [i.volid, i.file]), pe.source_iso || readable[0].volid) : '<option value="">No readable Windows ISO in PVE yet</option>'}</select>`)}</div>
-      ${actions(act("peBuild", "os-window.svg", pe.volid ? "Rebuild WinPE" : "Build WinPE", !pe.volid))}`}`, "", !pe.volid)}
+      ${actions(act("peBuild", "os-window.svg", pe.volid ? "Rebuild WinPE" : "Build WinPE", !pe.volid))}`}`, "", !pe.volid, peBadge())}
     ${gsCard("gs-virtio", "integration.svg", "Windows: virtio-win", vioMeta(), `
       <div class="grid-2">${field(fieldLabel("update.svg", "Release baked into Windows golds"), `<select id="vioSel">${opts(vioChoices, win.settings.virtio)}</select>
         <span class="hint">Drivers and QEMU guest agent. "stable" follows the virtio-win project's stable channel; a pinned release stays put.</span>`)}</div>
-      ${actions(act("vioFetch", "download.svg", "Fetch into PVE now"), act("vioSave", "save.svg", "Save", true))}`, "", false)}
+      ${actions(act("vioFetch", "download.svg", "Fetch into PVE now"), act("vioSave", "save.svg", "Save", true))}`, "", false, vioBadge())}
     ${au ? autoUpdateCard(au) : ""}
     ${gsCard("gd-where", "settings.svg", "Where bakes run", `${esc(r.node || "")} · ${esc(r.disk_storage || "")} · ${esc(r.bridge || "")}`, `
       <div class="grid-3">
@@ -2313,7 +2555,7 @@ function versionCard(v) {
   const mb = b => b ? (b / 1e6).toFixed(1) + " MB" : "";
   const kind = { new: "New", fix: "Fixed", chg: "Changed" };
   const notes = r => (r.notes || []).length ? `<ul class="ver-notes">${r.notes.slice(0, 8).map(([k, t]) => `<li>${k ? `<span class="ver-k ${esc(k)}">${kind[k]}</span>` : ""}${esc(t)}</li>`).join("")}</ul>` : "";
-  const state = v.state === "update" ? `<span class="pill status warn">update</span>` : v.state === "current" ? `<span class="pill status ok">up to date</span>` : "";
+  const state = v.state === "update" ? `<span class="pill status warn">Update</span>` : v.state === "current" ? `<span class="pill status ok">Up to date</span>` : "";
   const meta = v.state === "update" ? `${esc(latest.version)} available` : v.state === "current" ? "up to date" : v.state === "none" ? "no release published yet" : "GitHub not reachable";
   const newest = v.state === "update" || v.state === "current";
   const box = (label, ver, sub, on) => `<div class="ver-box${on ? " on" : ""}"><div class="ver-l">${label}</div><div class="ver-v mono">${esc(ver)}</div><div class="hint">${sub}</div></div>`;
@@ -2343,7 +2585,8 @@ function debugCard(worker) {
   const on = [worker.keep_downloads && "downloads kept"].filter(Boolean);
   return gsCard("gs-debug", "search.svg", `Debug tools ${infoTip("Debug tools", "For troubleshooting, shown because config.toml has debug_tools = true. Remove that line and restart the studio: the card goes and every tool switches off.")}`, on.length ? on.join(" · ") : "all off", `
     <div class="toggle-grid" style="grid-template-columns:1fr">${toggle('id="dbgKeep"', `Keep downloads${infoTip("Keep downloads", "Every file a Windows media, WinPE or Features on Demand build downloads stays in the work volume (work/uup-files), and the next build of the same files downloads nothing. Off: a build uses them up and the rest goes after six idle hours.")}`, !!worker.keep_downloads)}</div>
-    ${actions(`<button class="btn" type="button" data-dbg-rebuild="winpe"><img src="${iconSrc("update.svg")}" alt=""> Rebuild last WinPE</button>`,
+    ${actions(`<button class="btn" type="button" id="dbgClear"${worker.downloads_bytes ? "" : " disabled"} title="Deletes work/uup-files now - the next build downloads again"><img src="${iconSrcDanger("trash.svg")}" alt=""> Clear downloads${worker.downloads_bytes ? ` · ${(worker.downloads_bytes / 1e9).toFixed(1)} GB` : ""}</button>`,
+      `<button class="btn" type="button" data-dbg-rebuild="winpe"><img src="${iconSrc("update.svg")}" alt=""> Rebuild last WinPE</button>`,
       `<button class="btn" type="button" data-dbg-rebuild="media"><img src="${iconSrc("update.svg")}" alt=""> Rebuild last Windows media</button>`,
       act("dbgSave", "save.svg", "Save", true))}`, "", false);
 }
@@ -2360,7 +2603,7 @@ function verChannel(v) {
 function versionCardDev(v) {
   const d = v.development || null;
   const when = iso => iso ? new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
-  const state = v.state === "update" ? `<span class="pill status warn">update</span>` : v.state === "current" ? `<span class="pill status ok">up to date</span>` : "";
+  const state = v.state === "update" ? `<span class="pill status warn">Update</span>` : v.state === "current" ? `<span class="pill status ok">Up to date</span>` : "";
   const meta = !d ? "no development build published yet" : v.state === "update" ? `development build ${esc(d.commit)} available` : "up to date with main";
   const box = (label, ver, sub, on) => `<div class="ver-box${on ? " on" : ""}"><div class="ver-l">${label}</div><div class="ver-v mono">${esc(ver)}</div><div class="hint">${sub}</div></div>`;
   const body = `
@@ -2406,7 +2649,7 @@ function maintRowsHtml() {
 
 function maintCard(m) {
   const meta = m.open ? `open now, until ${esc(m.open)}` : m.next ? `next ${esc(fmtWhen(m.next))}` : "none - nothing runs on its own";
-  const badge = m.open ? `<span class="pill status on">open</span>` : "";
+  const badge = m.open ? `<span class="pill status on">Open</span>` : "";
   return gsCard("gs-maint", "clock.svg", `Maintenance windows ${infoTip("Maintenance windows", "When the studio may do work nobody started: its own update (when Install updates automatically is on), then the Windows golds that keep current. Work starts only inside a window; at its end no new step starts, and one already running finishes. An end before the start runs past midnight. Times are the studio's" + (m.zone ? " (" + m.zone + ")" : "") + ".")}`, meta, `
     <div id="mwRows" class="mw-rows">${maintRowsHtml()}</div>
     ${actions(`<button class="btn" type="button" id="mwAdd"><img src="${iconSrc("clock.svg")}" alt=""> Add a window</button>`, act("mwSave", "save.svg", "Save", true))}`, "", false, badge);
@@ -2446,7 +2689,7 @@ function mailCard(m, notif) {
   const failed = s.enabled && st.last_error && (!st.last_ok || st.last_error_at > st.last_ok);
   const on = !!s.enabled;
   const meta = !on ? "off" : s.host ? `${esc(s.host)}:${s.port} · to ${esc(s.to.join(", ") || "nobody")}` : "on, not filled in";
-  const badge = failed ? `<span class="pill status warn" title="${esc(st.last_error)}">send failed</span>` : on && mailReady(s) ? `<span class="pill status on">on</span>` : "";
+  const badge = failed ? `<span class="pill status warn" title="${esc(st.last_error)}">Send failed</span>` : on && mailReady(s) ? `<span class="pill status on">On</span>` : "";
   const dis = on ? "" : " disabled";
   return gsCard("gs-mail", "users.svg", `Mail ${infoTip("Mail", "Notifications go to a smart host - Proxmox Mail Gateway, an Exchange relay, a Postfix - without signing in: the smart host has to accept mail from the studio's address. Switched on, every field is required.")}`, meta, `
     <div class="toggle-grid" style="grid-template-columns:1fr">${toggle('id="mlEnabled"', "Send mail", on)}</div>
@@ -2456,8 +2699,9 @@ function mailCard(m, notif) {
       ${field(fieldLabel("vnet.svg", "Port"), `<input id="mlPort" type="number" min="1" max="65535" value="${s.port || 25}"${dis}>`)}
       ${field(`<span class="field-label"><img src="${iconSrc("security.svg")}" alt="">Security${infoTip("Security", "None: plain SMTP, usual for a relay inside the network (port 25). STARTTLS: upgrades the connection and refuses to send without it (port 25 or 587). TLS: encrypted from the start (port 465).")}</span>`,
         `<select id="mlSec"${dis}>${opts([["none", "None"], ["starttls", "STARTTLS"], ["tls", "TLS"]], s.security || "none")}</select>`)}
+      ${field(fieldLabel("users.svg", "Display name"), `<input id="mlFromName" placeholder="PVE VM Studio" value="${esc(s.from_name ?? "PVE VM Studio")}" maxlength="80"${dis}>`)}
       ${field(fieldLabel("users.svg", "From"), `<input id="mlFrom" placeholder="pve-vm-studio@example.com" value="${esc(s.from)}"${dis}>`)}
-      ${field(fieldLabel("users.svg", "To"), `<input id="mlTo" placeholder="admins@example.com" value="${esc((s.to || []).join(", "))}"${dis}>`)}
+      ${field(fieldLabel("users.svg", "To"), `<div class="ml-to" id="mlToBox">${(mlTo = [...(s.to || [])]).map((t, i) => mlToChip(t, i)).join("")}<input id="mlTo" placeholder="${(s.to || []).length ? "" : "admins@example.com"}" aria-label="Add a recipient" autocomplete="off" spellcheck="false"${dis}></div>`)}
       ${field(fieldLabel("monitor.svg", "Theme"), `<div class="ml-theme"><select id="mlTheme">${opts((m.themes || []).map(t => [t.id, t.name]), s.theme || "proxmox_dark")}</select>
         <button class="btn" type="button" id="mlPreview"><img src="${iconSrc("search.svg")}" alt=""> Preview</button></div>`)}
     </div>
@@ -2527,6 +2771,26 @@ function openMailPreview(themes, current, use) {
   load();
 }
 
+/* The recipients: one chip each; Enter, comma or space adds what is typed, Backspace in an
+   empty box takes the last one back. */
+let mlTo = [];
+function mlToChip(t, i) {
+  return `<span class="chip">${esc(t)}<button class="chip-x" type="button" data-mlto-x="${i}" title="Remove ${esc(t)}" aria-label="Remove ${esc(t)}">${chipRemoveIcon()}</button></span>`;
+}
+function mlToPaint() {
+  const box = $id("mlToBox"); if (!box) return;
+  box.querySelectorAll(".chip").forEach(c => c.remove());
+  $id("mlTo").insertAdjacentHTML("beforebegin", mlTo.map((t, i) => mlToChip(t, i)).join(""));
+  $id("mlTo").placeholder = mlTo.length ? "" : "admins@example.com";
+}
+function mlToTake() {
+  const inp = $id("mlTo"); if (!inp) return;
+  const typed = inp.value.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
+  if (!typed.length) return;
+  typed.forEach(t => { if (!mlTo.includes(t)) mlTo.push(t); });
+  inp.value = ""; mlToPaint();
+}
+
 /* Mail can go out: switched on and every field there. */
 function mailReady(s) { return !!(s && s.enabled && s.host && s.port && s.from && (s.to || []).length); }
 
@@ -2534,8 +2798,8 @@ function mailForm(m) {
   return {
     enabled: $id("mlEnabled").checked,
     host: $id("mlHost").value.trim(), port: parseInt($id("mlPort").value, 10) || 0, security: $id("mlSec").value,
-    verify_cert: $id("mlVerify").checked, from: $id("mlFrom").value.trim(),
-    to: $id("mlTo").value.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean), timeout_sec: (m && m.settings.timeout_sec) || 30,
+    verify_cert: $id("mlVerify").checked, from: $id("mlFrom").value.trim(), from_name: $id("mlFromName").value.trim(),
+    to: [...mlTo, ...$id("mlTo").value.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean)], timeout_sec: (m && m.settings.timeout_sec) || 30,
     theme: $id("mlTheme") ? $id("mlTheme").value : "proxmox_dark",
   };
 }
@@ -2556,10 +2820,23 @@ function mailMarkInvalid(f) {
 
 function wireMail(main, m) {
   const on = (id, fn) => { const el = $id(id); if (el) el.addEventListener("click", fn); };
+  const to = $id("mlTo"), toBox = $id("mlToBox");
+  if (to && toBox) {
+    to.addEventListener("keydown", e => {
+      if ((e.key === "Enter" || e.key === "," || e.key === " ") && to.value.trim()) { e.preventDefault(); mlToTake(); }
+      else if (e.key === "Backspace" && !to.value && mlTo.length) { mlTo.pop(); mlToPaint(); }
+    });
+    to.addEventListener("blur", mlToTake);
+    toBox.addEventListener("click", e => {
+      const x = e.target.closest("[data-mlto-x]");
+      if (x) { if (!to.disabled) { mlTo.splice(Number(x.dataset.mltoX), 1); mlToPaint(); } return; }
+      to.focus();
+    });
+  }
   let tried = false;
   const enable = () => {
     const en = $id("mlEnabled").checked;
-    ["mlHost", "mlPort", "mlSec", "mlFrom", "mlTo", "mlVerify", "mlTest"].forEach(id => {
+    ["mlHost", "mlPort", "mlSec", "mlFromName", "mlFrom", "mlTo", "mlVerify", "mlTest"].forEach(id => {
       const el = $id(id); if (!el) return;
       el.disabled = !en;
       const t = el.closest(".toggle"); if (t) t.classList.toggle("disabled", !en);
@@ -2626,7 +2903,7 @@ async function bladeStudio(main, stale) {
   main.innerHTML = bladeHead("studio") + `
     <div class="chips">
       <span class="pill">DNS name: ${esc(server.settings.fqdn || "not set")}</span>
-      ${c ? `<span class="pill status ${c.days_left < 21 ? "warn" : "on"}">${esc(mode)} · ${c.days_left} days left</span>` : `<span class="pill status off">No certificate</span>`}
+      ${c ? `<span class="pill status ${c.days_left < 21 ? "warn" : "on"}">${esc(cap(mode))} · ${c.days_left} days left</span>` : `<span class="pill status off">No certificate</span>`}
     </div>
     ${gsCard("gs-dns", "dns.svg", "DNS name", server.settings.fqdn || "not set", `
       <div class="grid-2">${field(fieldLabel("dns.svg", "Fully qualified name"), `<input id="stFqdn" placeholder="pve-vm-studio.example.com" value="${esc(server.settings.fqdn)}">
@@ -2723,6 +3000,11 @@ async function bladeStudio(main, stale) {
       await api("PUT", "/settings/worker", { memory_mb: worker.memory_mb, cores: worker.cores, keep_downloads: $id("dbgKeep").checked });
       toast("Saved"); render();
     } catch (e) { toast(e.message, true); }
+  });
+  on("dbgClear", "click", async () => {
+    if (!await confirmDelete("downloads", `Clear ${(worker.downloads_bytes / 1e9).toFixed(1)} GB of downloads?`,
+      "Everything Windows media, WinPE and Features on Demand builds downloaded is deleted from the work volume. The next build downloads its files again.", "Clear downloads")) return;
+    try { const r = await api("DELETE", "/settings/worker/downloads"); toast(`${(r.freed / 1e9).toFixed(1)} GB cleared`); render(); } catch (e) { toast(e.message, true); }
   });
   // The last build of a kind again, with its own parameters - from the kept downloads.
   main.querySelectorAll("[data-dbg-rebuild]").forEach(b => b.addEventListener("click", async () => {

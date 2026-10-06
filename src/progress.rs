@@ -24,6 +24,8 @@ impl Progress {
     pub fn stage(&mut self, from: f64, to: f64, detail: impl Into<String>) {
         self.from = from;
         self.to = to;
+        let detail = detail.into();
+        self.log.mark_step(&detail);
         self.set(from, detail);
     }
 

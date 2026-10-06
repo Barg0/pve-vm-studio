@@ -20,7 +20,7 @@ use crate::{
     golds::GoldRow,
     jobs::JobLog,
     maintenance::MaintenanceSettings,
-    mail::{Report, Tone, fact, mono},
+    mail::{self, Report, Tone, fact, mono},
     media::MediaIso,
     notify, settings, uup,
     windows::WinBakeOptions,
@@ -84,9 +84,9 @@ pub async fn winpe_newest(app: &AppState) -> Option<(String, String, String)> {
     let found = match uup::product_builds(&app.web, p, false).await {
         Ok(list) => list
             .into_iter()
-            .filter(|b| p.insider || uup::release_kind(p, b.created).ends_with(" B"))
+            .filter(|b| p.insider || uup::is_release(&uup::release_kind(p, &b.build, b.created)))
             .max_by_key(|b| version(&b.build))
-            .map(|b| (b.build.clone(), b.uuid.clone(), uup::release_kind(p, b.created))),
+            .map(|b| (b.build.clone(), b.uuid.clone(), uup::release_kind(p, &b.build, b.created))),
         Err(e) => {
             tracing::warn!("WinPE: asking UUP dump for the newest build: {e:#}");
             return None;
@@ -254,7 +254,7 @@ pub fn newest_fit<'a>(p: &uup::Product, builds: &'a [uup::Build], from: &str, pr
     builds
         .iter()
         .filter(|b| version(&b.build) > version(from) && base(&b.build) == base(from))
-        .filter(|b| previews || uup::release_kind(p, b.created).ends_with(" B"))
+        .filter(|b| previews || uup::is_release(&uup::release_kind(p, &b.build, b.created)))
         .max_by_key(|b| version(&b.build))
 }
 
@@ -310,7 +310,7 @@ pub async fn check(app: &AppState) -> Result<usize> {
             from_build: iso.build.clone(),
             to_build: b.build.clone(),
             to_uuid: b.uuid.clone(),
-            release: uup::release_kind(p, b.created),
+            release: uup::release_kind(p, &b.build, b.created),
             step: step.into(),
             new_iso: None,
             golds: serde_json::to_string(&fl)?,
@@ -742,10 +742,16 @@ async fn next_window(app: &AppState) -> String {
     }
 }
 
-async fn gold_line(db: &SqlitePool, id: &str) -> String {
-    match golds::get(db, id).await.ok().flatten() {
-        Some(g) => format!("{} · {}", g.id, g.image_id),
-        None => id.to_owned(),
+/// A gold as one line of a mail's list: its image, its id, its state.
+fn gold_row(g: &GoldRow, state: Option<(Tone, &str)>) -> mail::Row {
+    let m: serde_json::Value = serde_json::from_str(&g.manifest).unwrap_or_default();
+    let name = m["displayName"].as_str().map(str::to_owned).unwrap_or_else(|| g.image_id.clone());
+    mail::Row {
+        icon: "gold-image",
+        name,
+        detail: m["id"].as_str().unwrap_or(&g.name).to_owned(),
+        right: m["build"].as_str().unwrap_or("").trim_start_matches("10.0.").to_owned(),
+        state: state.map(|(t, s)| (t, s.to_owned())),
     }
 }
 
@@ -758,13 +764,18 @@ async fn mail_found(app: &AppState, run: &Run, p: &uup::Product, iso: &MediaIso,
         Tone::Accent,
     );
     r.subtitle = format!("{} · builds in the next maintenance window", run.release);
-    r.pills = vec![("From".into(), run.from_build.clone()), ("To".into(), run.to_build.clone())];
-    r.facts = vec![mono("ISO", iso.volid.clone()), fact("Language", iso.lang.clone()), fact("Editions", iso.editions.join(", ")), fact("Next window", next_window(app).await)];
-    let mut gl = Vec::new();
+    r.compare = Some(mail::Compare { was: run.from_build.clone(), was_sub: "in the golds now".into(), now: run.to_build.clone(), now_sub: run.release.clone() });
+    let mut rows = Vec::new();
     for g in followers {
-        gl.push(fact("Gold", format!("{} · {}", g.id, g.image_id)));
+        rows.push(gold_row(g, None));
     }
-    r.sections.push(notify::section("Golds that follow", "os-window", gl));
+    r.sections.push(mail::Section { title: "Golds that follow".into(), icon: "gold-image", rows, ..Default::default() });
+    r.sections.push(notify::section("Details", "first-boot", vec![
+        mono("ISO", iso.volid.clone()).icon("iso-media"),
+        fact("Editions", iso.editions.join(", ")).icon("first-boot"),
+        fact("Next window", next_window(app).await).icon("clock"),
+    ]));
+    r.buttons = vec![mail::button("Windows updates", "#/media", "update", true)];
     r.link = Some("#/media".into());
     notify::send(app, "update_found", r).await;
 }
@@ -788,12 +799,13 @@ async fn mail_failed(app: &AppState, run: &Run) {
     };
     let mut r = Report::new(format!("{p} update to {} failed", run.to_build), "update", format!("Update to {} failed", run.to_build), "FAILED", Tone::Danger);
     r.subtitle = format!("Stopped while {step}");
-    r.pills = vec![("From".into(), run.from_build.clone()), ("To".into(), run.to_build.clone())];
-    r.facts = vec![mono("Source ISO", run.source_iso.clone())];
+    r.compare = Some(mail::Compare { was: run.from_build.clone(), was_sub: "stays current".into(), now: run.to_build.clone(), now_sub: "not reached".into() });
+    r.facts = vec![mono("Source ISO", run.source_iso.clone()).icon("iso-media")];
     if let Some(n) = &run.new_iso {
-        r.facts.push(mono("New ISO", n.clone()));
+        r.facts.push(mono("New ISO", n.clone()).icon("iso-media"));
     }
-    r.error = run.error.clone();
+    r.error = Some(run.error.clone().unwrap_or_default());
+    r.buttons = vec![mail::button("Windows updates", "#/media", "update", true), mail::button("Jobs", "#/jobs", "log", false)];
     r.notice = Some((Tone::Accent, "The old ISO and golds stay current. Retry the run under Media → Windows updates, or wait for the next build.".into()));
     r.link = Some("#/media".into());
     notify::send(app, "update_failed", r).await;
@@ -803,20 +815,27 @@ async fn mail_done(app: &AppState, run: &Run) {
     let p = uup::product(&run.product).map(|p| p.name).unwrap_or("Windows");
     let mut r = Report::new(format!("{p} golds updated to {}", run.to_build), "update", format!("Updated to {}", run.to_build), "DONE", Tone::Success);
     r.subtitle = format!("{} · {}", p, run.release);
-    r.pills = vec![("From".into(), run.from_build.clone()), ("To".into(), run.to_build.clone())];
-    r.facts = vec![mono("New ISO", run.new_iso.clone().unwrap_or_default()), mono("Old ISO", run.source_iso.clone())];
-    let mut gl = Vec::new();
+    r.compare = Some(mail::Compare { was: run.from_build.clone(), was_sub: String::new(), now: run.to_build.clone(), now_sub: run.release.clone() });
+    let mut rows = Vec::new();
     for f in run.followers() {
-        let to = match &f.to {
-            Some(t) => gold_line(&app.db, t).await,
-            None => "-".into(),
+        let new = match &f.to {
+            Some(t) => golds::get(&app.db, t).await.ok().flatten(),
+            None => None,
         };
-        gl.push(mono("Gold", format!("{} → {to}", f.from)));
+        match new {
+            Some(g) => rows.push(gold_row(&g, Some((Tone::Success, "Ready")))),
+            None => rows.push(mail::Row { icon: "gold-image", name: f.from.clone(), state: Some((Tone::Danger, "Not baked".into())), ..Default::default() }),
+        }
     }
-    r.sections.push(notify::section("Golds", "os-window", gl));
+    r.sections.push(mail::Section { title: "Golds".into(), icon: "gold-image", rows, note: "VMs pick the new golds at their next deploy.".into(), ..Default::default() });
+    r.sections.push(notify::section("Details", "first-boot", vec![
+        mono("New ISO", run.new_iso.clone().unwrap_or_default()).icon("iso-media"),
+        fact("Next window", next_window(app).await).icon("clock"),
+    ]));
     if let Some(e) = &run.error {
         r.notice = Some((Tone::Warn, e.clone()));
     }
+    r.buttons = vec![mail::button("Open Golds", "#/golds", "gold-image", true)];
     r.link = Some("#/golds".into());
     notify::send(app, "update_done", r).await;
 }

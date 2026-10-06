@@ -179,39 +179,6 @@
   }
   /* No static address is not a value, so it does not get the weight of one. */
   .card-actions .card-ip.is-none { font-weight: 400; color: var(--fg-muted); }
-  /* Equal-size header badges: Domain / Arc / Desktop|Core|Client */
-  .card-actions .pill.role,
-  .card-actions .pill.status {
-    box-sizing: border-box;
-    width: 6.25rem;
-    min-width: 6.25rem;
-    height: 1.5rem;
-    justify-content: center;
-    gap: 5px;
-    padding: 0 8px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: .4px;
-    text-transform: uppercase;
-    line-height: 1;
-  }
-  .card-actions .pill.status img {
-    width: 12px; height: 12px; flex-shrink: 0;
-  }
-  /* Domain / Arc badges are always "on" — the green dot belongs to that state only. */
-  .card-actions .pill.status.on::before {
-    background: var(--success);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 35%, transparent);
-  }
-  .card-actions .pill.status.on {
-    color: #fff;
-    background: color-mix(in srgb, var(--success) 28%, transparent);
-    border-color: color-mix(in srgb, var(--success) 50%, var(--border));
-  }
-  .card-actions .pill.role.core,
-  .card-actions .pill.role.desktop,
-  .card-actions .pill.role.client,
-  .card-actions .pill.role.linux { color: #fff; }
   .card-actions .btn.icon.danger-text {
     width: 32px; height: 32px; color: var(--danger);
     border-color: transparent; background: transparent;
@@ -225,7 +192,10 @@
 
   .card.collapsible.collapsed .card-body { display: none; }
   .card.collapsible .card-body { padding: 14px 16px 16px; }
-  .card-stack { display: flex; flex-direction: column; gap: 12px; }
+  /* A stack's cards keep the one card spacing (14 px) - its gap, not their margin as well,
+     which made a list's cards 26 px apart and the card above it 14. */
+  .card-stack { display: flex; flex-direction: column; gap: 14px; margin-bottom: 14px; }
+  .card-stack > .card { margin-bottom: 0; }
 
   /* Consolidated section: a labeled group of fields inside a card. Static by default
      (always visible — primary, frequently-edited fields shouldn't hide behind a click);
@@ -262,7 +232,7 @@
   .section.collapsible > .section-body { padding: 0 12px 14px; border-top: 1px solid var(--divider); }
   /* A body that opens straight onto a control needs the gap its first child would
      otherwise have carried itself. */
-  .section.collapsible > .section-body > :is(.toggle, .grid-1, .grid-2, .grid-3, .kv-grid, .toggle-grid, label.field):first-child { margin-top: 12px; }
+  .section.collapsible > .section-body > :is(.toggle, .grid-1, .grid-2, .grid-3, .kv-grid, .toggle-grid, label.field, .warn-box):first-child { margin-top: 12px; }
 
   .grid-1 { display: grid; grid-template-columns: 1fr; gap: 12px; }
   .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -647,12 +617,16 @@
   .btn:disabled { opacity: .45; cursor: not-allowed; }
   /* Hover must not light a disabled button back up, whatever variant it is. */
   .btn:disabled:hover { background: var(--bg-subtle); box-shadow: none; }
-  .btn.primary:disabled:hover { background: var(--accent); }
+  .btn.primary:disabled:hover { background: color-mix(in srgb, var(--accent) 7%, var(--bg-subtle)); }
+  .btn.danger:disabled:hover { background: color-mix(in srgb, var(--danger) 7%, var(--bg-subtle)); }
   .btn.ghost:disabled:hover, .btn.danger-text:disabled:hover { background: transparent; }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
-  .btn.primary:hover { background: var(--accent-hover); box-shadow: var(--shadow-2); }
-  .btn.danger { border-color: var(--danger); color: var(--danger-fg); background: var(--danger); }
-  .btn.danger:hover { box-shadow: var(--shadow-2); }
+  /* No solid buttons: the main action is the accent as border and text on a faint accent
+     wash - the same box and height as every button beside it, still the one found first.
+     A destructive confirm does the same in the danger red. */
+  .btn.primary { background: color-mix(in srgb, var(--accent) 7%, var(--bg-subtle)); border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); color: var(--accent); font-weight: 600; }
+  .btn.primary:hover { background: color-mix(in srgb, var(--accent) 14%, var(--bg-subtle)); border-color: var(--accent); }
+  .btn.danger { background: color-mix(in srgb, var(--danger) 7%, var(--bg-subtle)); border-color: color-mix(in srgb, var(--danger) 60%, var(--border)); color: var(--danger-text); font-weight: 600; }
+  .btn.danger:hover { background: color-mix(in srgb, var(--danger) 14%, var(--bg-subtle)); border-color: var(--danger); }
   .btn.danger-text { background: transparent; border-color: transparent; color: var(--danger); }
   .btn.danger-text:hover { background: color-mix(in srgb, var(--danger) 14%, transparent); }
   .btn img { width: 14px; height: 14px; display: block; flex-shrink: 0; }
@@ -668,9 +642,9 @@
     padding: 0 12px 0 6px; gap: 8px; margin-right: 8px;
   }
   .topbar #themeBtn:hover { background: var(--bg-hover); border-color: var(--border-strong); }
-  .topbar .btn.primary { height: 32px; font-weight: 700; margin-left: 6px; }
+  .topbar .btn.primary { height: 32px; margin-left: 6px; }
   
-  .btn.icon { width: 28px; height: 28px; min-height: 0; padding: 0; justify-content: center; border-radius: 6px; }
+  .btn.icon { width: 28px; height: 28px; min-height: 0; padding: 0; justify-content: center; border-radius: var(--radius); }
   .btn.sm { height: 28px; padding: 0 10px; font-size: 12px; }
   .btn.icon.sm { width: 28px; height: 28px; padding: 0; }
   .btn.icon.ghost { opacity: .75; }
@@ -698,34 +672,59 @@
   .btn.tab.active { background: var(--bg-hover); color: var(--fg); border-color: var(--border-strong); }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 18px; }
 
-  /* Consolidated pill: stat readouts, role/status badges, and removable chips all share one base. */
+  /* One badge for the whole studio, three kinds, two sizes - and nothing bigger.
+     sm (18 px) everywhere by default; md (22 px) where a badge sits in a head: card and
+     blade heads, the chips row, the overview title. Width is always the text's.
+       .pill         meta  - counts and plain facts: neutral fill, numbers in tabular figures
+       .pill.status  state - lifecycle and power: a dot and the word, tinted in its colour
+       .pill.role    kind  - what a machine is: capitals in a hairline of its band
+       .pill.tag     tag   - a PVE tag or pool, in the mono face */
   .pill {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-size: 12px; padding: 3px 10px; border-radius: var(--radius-lg);
-    border: 1px solid var(--border); background: var(--bg-subtle); color: var(--fg-muted); white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 6px; box-sizing: border-box;
+    height: 18px; padding: 0 6px; border: 0; border-radius: var(--radius-lg);
+    font-size: 11px; font-weight: 600; line-height: 1; white-space: nowrap; vertical-align: middle;
+    font-variant-numeric: tabular-nums; color: var(--fg-muted); background: var(--bg-hover);
   }
+  .pill b { color: var(--fg); font-weight: 700; }
+  :is(.card-head, .card-actions, .gs-head, .blade-toolbar, .chips, .ov-title) .pill:not(.removable) { height: 22px; padding: 0 8px; font-size: 12px; }
+  /* Badges beside a card's title (they shared the head with buttons - splitHeadBadges). */
+  .title-badges { display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; vertical-align: middle; flex-wrap: wrap; }
+  /* In a card title (a flex row with its own 8 px gap) the gap does the spacing: 6 px, as
+     between two badges, and no margin on top of it. */
+  .card-title:has(> .title-badges) { gap: 6px; }
+  .card-title > .title-badges { margin-left: 0; }
   .pill.role {
-    font-size: 10px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
-    padding: 2px 8px; background: var(--bg); border-color: var(--border);
+    --c: var(--fg-muted); color: var(--c); background: transparent;
+    font-size: 10px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent);
   }
-  .pill.role.core { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); background: var(--warn-soft); }
-  .pill.role.desktop { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
-  .pill.role.client { color: var(--role-client); border-color: color-mix(in srgb, var(--role-client) 45%, var(--border)); background: color-mix(in srgb, var(--role-client) 14%, var(--bg)); }
-  .pill.role.linux { color: var(--role-linux); border-color: color-mix(in srgb, var(--role-linux) 45%, var(--border)); background: color-mix(in srgb, var(--role-linux) 14%, var(--bg)); }
+  :is(.card-head, .card-actions, .gs-head, .ov-title) .pill.role { font-size: 10.5px; }
+  .pill.role.core { --c: var(--warn); }
+  .pill.role.desktop { --c: var(--role-server); }
+  .pill.role.client { --c: var(--role-client); }
+  .pill.role.linux { --c: var(--role-linux); }
+  .pill.role.virtual { --c: var(--band-ident, var(--flag-nested)); }
 
   .pill.status {
-    font-weight: 700; letter-spacing: .3px; text-transform: uppercase; line-height: 1.2;
-    padding: 3px 10px 3px 8px; border-color: transparent;
+    --c: var(--fg-muted);
+    color: color-mix(in srgb, var(--c) 82%, var(--fg)); background: color-mix(in srgb, var(--c) 14%, transparent);
   }
-  .pill.status::before {
-    content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0;
-    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 28%, transparent);
-  }
-  .pill.status.on { color: var(--success-text); background: color-mix(in srgb, var(--success) 18%, transparent); border-color: color-mix(in srgb, var(--success) 45%, var(--border)); }
-  .pill.status.off { color: var(--danger-text); background: color-mix(in srgb, var(--danger) 16%, transparent); border-color: color-mix(in srgb, var(--danger) 42%, var(--border)); }
-  .pill.status.warn { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+  .pill.status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c); flex-shrink: 0; }
+  /* A badge with its own glyph (Domain, Arc, HA) needs no dot. */
+  .pill.status:has(> img)::before { display: none; }
+  .pill.status.on, .pill.status.ok { --c: var(--success); }
+  .pill.status.off, .pill.status.bad { --c: var(--danger); }
+  .pill.status.warn { --c: var(--warn); }
+  .pill.status.run, .pill.status.info { --c: var(--run, var(--accent)); }
+  .pill.status.idle { --c: var(--fg-muted); }
+  .pill.status.none::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c); }
+  .pill.status.run::before { animation: pill-pulse 1.6s ease-in-out infinite; }
+  @keyframes pill-pulse { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .pill.status.run::before { animation: none; } }
+  a.pill { text-decoration: none; }
 
   .pill.removable {
+    height: auto; font-size: 12px; font-weight: 400; line-height: 1.2; color: var(--fg-muted); border: 1px solid var(--border);
     padding: 8px 10px; border-radius: var(--radius-lg); background: var(--bg);
     margin: 0 8px 8px 0; gap: 8px;
   }
@@ -734,7 +733,7 @@
     color: var(--accent); font-family: var(--mono);
     background: transparent; border-color: transparent; cursor: default;
   }
-  .pill > img { width: 14px; height: 14px; flex-shrink: 0; }
+  .pill > img { width: 12px; height: 12px; flex-shrink: 0; }
   .pill.removable img { width: 18px; height: 18px; }
   .pill.removable .sam { font-family: var(--mono); color: var(--accent); }
   /* The glyph lives inside the input, not beside it: an icon in the flex row shifts the
@@ -782,10 +781,7 @@
      neutral like every other boxed icon. */
   .chip-add > .btn.icon { width: 32px; height: 32px; flex-shrink: 0; color: var(--secret-glyph); }
 
-  .pill.tag {
-    font-size: 10px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase;
-    background: var(--bg-hover); color: var(--fg-muted); border-radius: var(--radius-lg); padding: 2px 6px; border: none;
-  }
+  .pill.tag { font-family: var(--mono); font-weight: 400; color: var(--fg); background: var(--bg-subtle); box-shadow: inset 0 0 0 1px var(--border-strong); }
 
   .hint { font-size: 11px; color: var(--fg-muted); }
 
@@ -911,26 +907,26 @@
     .ssh-howto > div { display: block; grid-row: auto; }
   }
   .tip-box {
-    display: flex; gap: 10px; align-items: flex-start; font-size: 12px; line-height: 1.6;
+    display: flex; gap: 10px; align-items: center; font-size: 12px; line-height: 1.6;
     background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
     padding: 10px 12px; border-radius: var(--radius-lg); margin-top: 12px;
   }
-  .tip-box img { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; }
+  .tip-box img { width: 16px; height: 16px; flex-shrink: 0; }
 
   /* Mandatory-field callout, e.g. no vSwitch defined yet */
   .req-box {
-    display: flex; gap: 10px; align-items: flex-start; font-size: 12px; line-height: 1.55;
+    display: flex; gap: 10px; align-items: center; font-size: 12px; line-height: 1.55;
     background: color-mix(in srgb, var(--danger) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
     border-left-width: 3px; border-left-color: var(--danger);
     padding: 10px 12px; border-radius: var(--radius-lg); margin-bottom: 12px; color: var(--fg-muted);
   }
-  .req-box svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; color: var(--danger); }
+  .req-box svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--danger); }
   .req-box strong { color: var(--danger-text); font-weight: 600; }
 
   /* "Keep the ISO in media\" recommendation above the FoD toggles */
   .fod-banner {
-    display: flex; gap: 10px; align-items: flex-start; font-size: 12px; line-height: 1.55;
+    display: flex; gap: 10px; align-items: center; font-size: 12px; line-height: 1.55;
     background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
     border-left-width: 3px; border-left-color: var(--accent);
     padding: 10px 12px; border-radius: var(--radius-lg); margin-top: 10px; color: var(--fg-muted);
@@ -1042,17 +1038,6 @@
   .ov-badge img { width: 28px; height: 28px; }
   .ov-id { min-width: 0; }
   .ov-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  /* Role, status and workgroup pills sit in one row, so they share one box: same
-     height, same type, whatever class they come from. */
-  .ov-title .pill {
-    height: 24px; padding: 0 10px; font-size: 11px; font-weight: 700; letter-spacing: .4px;
-    text-transform: uppercase; line-height: 1;
-  }
-  .ov-title .pill img { width: 13px; height: 13px; }
-  /* The plain pill (Workgroup) has no hue of its own; a stronger edge keeps its box as
-     visible as the tinted ones beside it. */
-  .ov-title .pill:not(.role):not(.status) { border-color: var(--border-strong); }
-  .ov-title .pill.status.info { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
   .ov-name { font-size: 20px; font-weight: 600; margin-right: 2px; }
   .ov-os { display: flex; align-items: center; gap: 7px; color: var(--fg-muted); margin-top: 5px; font-size: 12.5px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1146,11 +1131,11 @@
 
   .issue-list { display: flex; flex-direction: column; gap: 8px; }
   .issue {
-    display: flex; gap: 10px; align-items: flex-start; font-size: 12px;
+    display: flex; gap: 10px; align-items: center; font-size: 12px;
     padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius-lg);
     background: var(--bg-subtle);
   }
-  .issue svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 1px; }
+  .issue svg { width: 15px; height: 15px; flex-shrink: 0; }
   .issue.error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
   .issue.error svg { color: var(--danger); }
   .issue.warn { border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
@@ -1162,7 +1147,9 @@
   .warn-box {
     background: color-mix(in srgb, var(--warn) 15%, transparent); border: 1px solid var(--warn);
     padding: 10px 12px; border-radius: var(--radius); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 10px;
   }
+  .warn-box > svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--warn); }
   /* Floats clear of the page scrollbar, with a status stripe on the left: success green,
      or danger red for an error. --tone carries the one colour both the stripe and the
      glyph take. */
@@ -1182,6 +1169,33 @@
   @media (prefers-reduced-motion: reduce) { .toast.show { animation: none; } }
   /* Theme picker (Alacritty schemes — same as Ad Toolkit) */
   .theme-anchor { position: relative; }
+  /* The bell and its panel: the newest events, newest first. */
+  .bell-anchor { position: relative; }
+  /* The topbar's own buttons carry a border like every button; Sign out in the danger red. */
+  .topbar .btn.signout { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: transparent; margin: 0 6px; }
+  .topbar .btn.signout:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+  .btn.bell { position: relative; width: 34px; padding: 0; justify-content: center; }
+  .btn.bell img { width: 18px; height: 18px; }
+  .bell-count { position: absolute; top: 2px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
+    border-radius: var(--radius-lg); background: var(--danger); color: var(--danger-fg); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
+  .bell-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 120; width: 400px; max-width: 94vw;
+    background: var(--bg-elevated); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); }
+  .bell-pop[hidden] { display: none; }
+  .bell-h { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 8px 14px; border-bottom: 1px solid var(--divider); font-size: 13px; }
+  .bell-list { max-height: min(460px, 70vh); overflow-y: auto; padding: 4px; display: grid; gap: 1px; }
+  .bell-row { font: inherit; color: var(--fg); background: none; border: 0; text-align: left; cursor: pointer; width: 100%;
+    display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: var(--radius); }
+  .bell-row:hover, .bell-row:focus-visible { background: var(--bg-hover); outline: none; }
+  .bell-row.new { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  .bell-row.new .bell-t { font-weight: 600; }
+  .bell-ico { width: 32px; height: 32px; border-radius: var(--radius-lg); background: color-mix(in srgb, var(--tile, var(--accent)) 16%, var(--bg-elevated)); display: grid; place-items: center; }
+  .bell-ico img { width: 18px; height: 18px; }
+  .bell-txt { display: grid; gap: 2px; min-width: 0; }
+  .bell-t { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bell-s { font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bell-r { display: grid; gap: 4px; justify-items: end; align-self: start; }
+  .bell-at { font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
+  .bell-empty { padding: 28px 16px; text-align: center; font-size: 12.5px; color: var(--fg-muted); }
   .theme-popover {
     position: absolute; top: calc(100% + 8px); right: 0; z-index: 120; display: none;
   }
@@ -1571,7 +1585,6 @@
     padding: 0 10px; height: 32px; /* the inputs' height - side by side they line up */
   }
   .picker-btn .picker-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .picker-btn .pill { height: 22px; }
   .picker-btn:hover { background: var(--bg-hover); }
   .picker.open .picker-btn {
     border-color: var(--accent);
@@ -1667,3 +1680,22 @@
   .picker-list .opt-meta b.exp.nested { color: var(--flag-nested); }
   .picker-list .opt-meta b.exp.fod { color: var(--success-text); }
   .picker-list .opt-meta b.exp.strip { color: var(--danger-text); }
+
+  /* Applications from WinGet in the VM card. */
+  .wg-table td { vertical-align: middle; }
+  .wg-table input { width: 100%; font-family: var(--mono); font-size: 12px; }
+  .wg-app, .wg-hit { display: flex; align-items: center; gap: 10px; }
+  .wg-ico { width: 26px; height: 26px; border-radius: var(--radius-lg); display: grid; place-items: center; flex: none; background: color-mix(in srgb, var(--band-host, var(--accent)) 14%, var(--bg-elevated)); }
+  .wg-ico img { width: 16px; height: 16px; }
+  .wg-add { margin-top: 10px; }
+  .wg-pick { border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-elevated); max-width: 640px; }
+  .wg-pick > input { margin: 10px; width: calc(100% - 20px); }
+  .wg-res { max-height: 300px; overflow-y: auto; padding: 0 4px 4px; display: grid; gap: 1px; }
+  .wg-hit { font: inherit; color: var(--fg); background: none; border: 0; text-align: left; cursor: pointer; padding: 7px 8px; border-radius: var(--radius); width: 100%; }
+  .wg-hit:hover:not(:disabled), .wg-hit:focus-visible { background: var(--bg-hover); outline: none; }
+  .wg-hit:disabled { cursor: default; opacity: .7; }
+  .wg-n { flex: 1; min-width: 0; font-size: 13px; }
+  .wg-n small { display: block; font-family: var(--mono); font-size: 11.5px; color: var(--fg-muted); }
+  .wg-empty { padding: 14px 10px; font-size: 12.5px; color: var(--fg-muted); }
+  .wg-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--divider); font-size: 11.5px; color: var(--fg-muted); }
+  .ov-ticks span.off { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }

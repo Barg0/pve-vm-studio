@@ -20,6 +20,15 @@ const MAIL_ICONS: &[(&str, Option<&str>)] = &[
     // In the body, beside a title, the mark takes the accent itself.
     ("mark-accent.svg", None),
     ("os-window.svg", None),
+    ("gold-image.svg", None),
+    ("static-ip.svg", None),
+    ("clock.svg", None),
+    ("cpu.svg", None),
+    ("disk.svg", None),
+    ("users.svg", None),
+    ("log.svg", None),
+    ("vnet.svg", None),
+    ("dns.svg", None),
     ("iso-media.svg", None),
     ("update.svg", None),
     ("vm.svg", None),
@@ -97,8 +106,9 @@ fn glyph(js: &str, name: &str) -> Option<(String, String)> {
         let line = js.lines().find(|l| l.trim_start().starts_with(&format!("\"{name}\": [")))?;
         let rest = line.split_once(": [")?.1;
         let band = rest.split('"').nth(1)?.to_owned();
-        // The markup starts at the first single-quoted literal; a note before it is double-quoted.
-        let at = rest.find('\'')?;
+        // The markup starts at the first single-quoted literal that opens a tag; a note before
+        // it is double-quoted and may hold an apostrophe ("A job's log").
+        let at = rest.find("'<")?;
         (band, rest[at..].to_owned())
     };
     let mut out = String::new();
@@ -149,6 +159,11 @@ fn render_icons() {
             std::fs::write(out_dir.join(&file), px.encode_png().unwrap()).unwrap();
             table += &format!("    (\"{}\", \"{key}\", include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{file}\"))),\n", t.id);
         }
+    }
+    table += "];\n/// (icon key, band) - the hue a glyph's tile is tinted with.\npub static ICON_BANDS: &[(&str, &str)] = &[\n";
+    for (name, _) in MAIL_ICONS {
+        let (b, _) = glyph(&js, name).unwrap();
+        table += &format!("    (\"{}\", \"{b}\"),\n", name.trim_end_matches(".svg"));
     }
     table += "];\n";
     std::fs::write(out_dir.join("mail_icons.rs"), table).unwrap();

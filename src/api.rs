@@ -63,6 +63,10 @@ pub fn router() -> Router<AppState> {
         .route("/settings/server", get(get_server).put(put_server))
         .route("/settings/region", get(get_region).put(put_region))
         .route("/pools", get(list_pools).post(create_pool))
+        .route("/tags", get(list_tag_colours))
+        .route("/notifications", get(list_notifications))
+        .route("/winget/search", get(winget_search))
+        .route("/winget/package", get(winget_package))
         .route("/tls", get(get_tls))
         .route("/tls/acme", post(start_acme))
         .route("/tls/providers/{code}", get(provider_help))
@@ -72,6 +76,7 @@ pub fn router() -> Router<AppState> {
         .route("/settings/fod", get(get_fod).put(put_fod))
         .route("/fod/build", post(build_fod))
         .route("/settings/worker", get(get_worker).put(put_worker))
+        .route("/settings/worker/downloads", axum::routing::delete(clear_downloads))
         .route("/virtio/fetch", post(fetch_virtio))
         .route("/windows/isos", get(windows_isos).delete(delete_windows_iso))
         .route("/windows/images", get(windows_images))
@@ -860,24 +865,23 @@ fn vm_card(v: &vms::VmRow) -> String {
 }
 
 async fn list_vms(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
-    let rows = vms::list(&app.db).await?;
-    let res = app.pve.resources().await.unwrap_or_default();
+    let mut rows = vms::list(&app.db).await?;
+    let listed = app.pve.resources().await;
+    // Only an answer from PVE can say a VM is gone; without one every VM just reads "missing".
+    if let Ok(res) = &listed {
+        let gone = vms::mark_gone(&app.db, &rows, res).await?;
+        rows.retain(|v| !gone.contains(&v.id));
+    }
+    let res = listed.unwrap_or_default();
     let out: Vec<serde_json::Value> = rows
         .into_iter()
         .map(|v| {
-            // The same VM, not just the same number: a VMID is reused once its VM is gone (a
-            // record of a removed vm-01 must not show the cis-01 that has its id now).
-            let live = v.vmid.and_then(|id| {
-                res.iter().find(|r| {
-                    r.kind == "qemu"
-                        && r.vmid == Some(id as u32)
-                        && r.name.as_deref().is_some_and(|n| n.eq_ignore_ascii_case(&v.name))
-                        && (v.node.is_empty() || r.node.as_deref() == Some(v.node.as_str()))
-                })
-            });
+            let live = v.vmid.and_then(|id| res.iter().find(|r| vms::is_same_vm(r, &v.name, id)));
             let spec: serde_json::Value = serde_json::from_str(&v.spec).unwrap_or_default();
+            // A VM migrated to another node is still the same VM: PVE says where it runs now.
+            let node = live.and_then(|l| l.node.clone()).unwrap_or_else(|| v.node.clone());
             json!({
-                "id": v.id, "name": v.name, "lab": v.lab_id, "gold": v.gold_id, "node": v.node,
+                "id": v.id, "name": v.name, "lab": v.lab_id, "gold": v.gold_id, "node": node,
                 "vmid": v.vmid, "status": v.status, "ip": v.ip, "job_id": v.job_id,
                 "created_at": v.created_at, "card": vm_card(&v), "spec": spec,
                 "power": live.and_then(|l| l.status.clone()).unwrap_or_else(|| "missing".into()),
@@ -954,7 +958,26 @@ async fn get_worker(State(app): State<AppState>, _user: User) -> ApiResult<impl 
     let s: media::WorkerSettings = settings::load(&app.db, "worker").await?;
     let mut v = serde_json::to_value(&s).unwrap_or_default();
     v["debug_tools"] = json!(app.config.debug_tools);
+    v["downloads_bytes"] = json!(crate::dir_size(&app.config.data_dir.join("work").join("uup-files")).await);
     Ok(Json(v))
+}
+
+/// Empties the download cache (work/uup-files) now, instead of six idle hours later or never
+/// while downloads are kept. Not while any job runs: a build may be reading from it.
+async fn clear_downloads(State(app): State<AppState>, user: User) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    if !app.jobs.idle().await {
+        return Err(ApiError::bad_request("a job is running - it may be using the downloads; clear them once it has finished"));
+    }
+    let dir = app.config.data_dir.join("work").join("uup-files");
+    let freed = crate::dir_size(&dir).await;
+    match tokio::fs::remove_dir_all(&dir).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(ApiError::from(anyhow::anyhow!("clearing {}: {e}", dir.display()))),
+    }
+    tracing::info!("download cache cleared by {}: {:.1} GB", user.session.user, freed as f64 / 1e9);
+    Ok(Json(json!({ "freed": freed })))
 }
 
 /// The media worker VM's memory and cores.
@@ -1380,7 +1403,7 @@ async fn windows_images(State(app): State<AppState>, _user: User, axum::extract:
         "default_timezone": windows::windows_tz_for(
             std::fs::read_to_string("/etc/timezone").unwrap_or_default().trim()
         ),
-        "features": windows::WIN_FEATURES.iter().map(|(id, l)| json!({ "id": id, "label": l })).collect::<Vec<_>>(),
+        "features": windows::WIN_FEATURES.iter().map(|f| json!({ "id": f.id, "label": f.label, "scope": f.scope, "tip": f.tip })).collect::<Vec<_>>(),
     })))
 }
 
@@ -1396,7 +1419,8 @@ async fn start_windows_bake(
 
 /// Starts a Windows bake: the form's, and the auto-update's (`extra` goes into the job's
 /// params). Returns (job, gold).
-pub async fn spawn_windows_bake(app: &AppState, by: &str, opt: windows::WinBakeOptions, extra: serde_json::Value) -> ApiResult<(String, String)> {
+pub async fn spawn_windows_bake(app: &AppState, by: &str, mut opt: windows::WinBakeOptions, extra: serde_json::Value) -> ApiResult<(String, String)> {
+    opt.upgrade();
     let path = iso_path(&app, &opt.iso).ok_or_else(|| ApiError::bad_request("not an ISO volume"))?;
     let images = wim::inspect(&path, &app.config.data_dir.join("wim-cache.json"))
         .await
@@ -1405,7 +1429,7 @@ pub async fn spawn_windows_bake(app: &AppState, by: &str, opt: windows::WinBakeO
         .into_iter()
         .find(|i| i.index == opt.index)
         .ok_or_else(|| ApiError::bad_request(format!("{} has no image {}", opt.iso, opt.index)))?;
-    if let Some(bad) = opt.features.iter().find(|f| !windows::WIN_FEATURES.iter().any(|(id, _)| id == f)) {
+    if let Some(bad) = opt.features.iter().find(|f| !windows::WIN_FEATURES.iter().any(|w| w.id == f.as_str())) {
         return Err(ApiError::bad_request(format!("unknown policy {bad}")));
     }
     let bake: BakeSettings = settings::load(&app.db, "bake").await?;
@@ -1559,7 +1583,7 @@ async fn uup_builds(State(app): State<AppState>, _user: User, axum::extract::Que
         .into_iter()
         .take(12)
         .map(|b| {
-            let release = uup::release_kind(p, b.created);
+            let release = uup::release_kind(p, &b.build, b.created);
             let mut v = serde_json::to_value(&b).unwrap_or_default();
             v["release"] = json!(release);
             v
@@ -1639,6 +1663,41 @@ async fn list_pools(State(app): State<AppState>, _user: User) -> ApiResult<impl 
 }
 
 #[derive(Deserialize)]
+struct WingetQuery {
+    #[serde(default)]
+    q: String,
+    #[serde(default)]
+    id: String,
+}
+
+/// WinGet's catalog for the VM card's Applications picker: packages matching `q`.
+async fn winget_search(State(app): State<AppState>, _user: User, axum::extract::Query(q): axum::extract::Query<WingetQuery>) -> ApiResult<impl IntoResponse> {
+    Ok(Json(crate::winget::search(&app.web, &app.config.data_dir, &q.q).await?))
+}
+
+/// One package's newest manifest: publisher, licence, and whether it installs machine-wide.
+async fn winget_package(State(app): State<AppState>, _user: User, axum::extract::Query(q): axum::extract::Query<WingetQuery>) -> ApiResult<impl IntoResponse> {
+    Ok(Json(crate::winget::package(&app.web, &app.config.data_dir, q.id.trim()).await?))
+}
+
+#[derive(Deserialize)]
+struct NotifyQuery {
+    #[serde(default)]
+    limit: Option<i64>,
+}
+
+/// What happened lately, newest first - the topbar's bell.
+async fn list_notifications(State(app): State<AppState>, _user: User, axum::extract::Query(q): axum::extract::Query<NotifyQuery>) -> ApiResult<impl IntoResponse> {
+    Ok(Json(crate::notify::list(&app, q.limit.unwrap_or(30)).await?))
+}
+
+/// The datacenter's tag colours, for the Deployment plan's tags. Empty when the token may
+/// not read the cluster options - the tags then show PVE's default colours.
+async fn list_tag_colours(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    Ok(Json(json!({ "colours": crate::tags::colours(&app.pve).await.unwrap_or_default() })))
+}
+
+#[derive(Deserialize)]
 struct NewPool {
     name: String,
     #[serde(default)]
@@ -1678,7 +1737,7 @@ async fn media_products(State(app): State<AppState>, _user: User, axum::extract:
     let mut out = Vec::new();
     for p in uup::PRODUCTS {
         let builds = uup::product_builds(&app.web, p, q.fresh).await?;
-        let newest = builds.first().map(|b| json!({ "build": b.build, "created": b.created, "kind": uup::release_kind(p, b.created) }));
+        let newest = builds.first().map(|b| json!({ "build": b.build, "created": b.created, "kind": uup::release_kind(p, &b.build, b.created) }));
         out.push(json!({ "id": p.id, "name": p.name, "group": p.group, "kind": p.kind, "insider": p.insider, "support": p.support, "count": builds.len(), "newest": newest }));
     }
     Ok(Json(json!({ "products": out, "checked": uup::catalog_age().await })))
@@ -1694,7 +1753,7 @@ async fn media_builds(State(app): State<AppState>, _user: User, axum::extract::Q
         .take(60)
         .map(|b| {
             let isos: Vec<&media::MediaIso> = built.iter().filter(|m| m.uuid == b.uuid || (m.product == p.id && m.build == b.build)).collect();
-            json!({ "uuid": b.uuid, "build": b.build, "title": b.title, "created": b.created, "kind": uup::release_kind(p, b.created), "isos": isos })
+            json!({ "uuid": b.uuid, "build": b.build, "title": b.title, "created": b.created, "kind": uup::release_kind(p, &b.build, b.created), "isos": isos })
         })
         .collect();
     Ok(Json(json!({ "product": p.id, "builds": out })))
@@ -1724,7 +1783,7 @@ async fn media_size(State(app): State<AppState>, _user: User, axum::extract::Que
     }
     let mut files: Vec<uup::File> = Vec::new();
     for e in &editions {
-        for f in uup::files_cached(&app.web, &q.id, &q.lang, e).await? {
+        for f in uup::files_cached(&app.web, &app.config.data_dir.join("uup-files-cache.json"), &q.id, &q.lang, e).await? {
             if media::wanted(p.kind, &f, &editions, &q.lang) && !media::deferrable(p.kind, &f.name) && !files.iter().any(|x| x.name == f.name) {
                 files.push(f);
             }
@@ -2056,7 +2115,8 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
         gold: gold_id.to_owned(),
         cores: s["cpuCount"].as_u64().unwrap_or(2).max(1) as u32,
         memory_mb: (s["memoryGB"].as_f64().unwrap_or(4.0) * 1024.0) as u32,
-        disk_gb: s["osDiskGB"].as_u64().or_else(|| s["osDiskGB"].as_str().and_then(|v| v.parse().ok())).map(|v| v as u32),
+        // The system disk is the gold's, at the size it was baked with.
+        disk_gb: None,
         // Linked only when asked for in so many words: a full copy is the default.
         linked: s["useDifferencingDisk"].as_bool().unwrap_or(false) && s["linkedCloneChosen"].as_bool().unwrap_or(false),
         // The card's placement, else General Settings', else the gold's (empty).
@@ -2109,6 +2169,19 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
         domain_join: domain_join_for(s, state),
         arc: arc_for(s, state),
         product_key: license_for(s, state),
+        // Only when the section is switched on; ids as WinGet writes them, nothing else.
+        winget_apps: if s["wingetEnabled"].as_bool() == Some(true) {
+            s["wingetApps"].as_array().into_iter().flatten()
+                .filter_map(|a| {
+                    let id = a["id"].as_str()?.trim();
+                    let ok = !id.is_empty() && id.len() <= 128 && id.chars().all(|c| c.is_ascii_alphanumeric() || "._-+".contains(c));
+                    ok.then(|| crate::vms::WingetApp { id: id.to_owned(), over: a["override"].as_str().unwrap_or("").trim().to_owned() })
+                })
+                .collect()
+        } else {
+            vec![]
+        },
+        winget_upgrade: s["wingetUpgrade"].as_bool() == Some(true),
         nic_name: str_of("nicName"),
         windows_features: s["windowsFeatures"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default(),
         include_management_tools: s["includeManagementTools"].as_bool().unwrap_or(true),
@@ -2158,8 +2231,12 @@ async fn deploy_lab(State(app): State<AppState>, user: User, Path(id): Path<Stri
     let golds = golds::list(&app.db).await?;
     let bake: BakeSettings = settings::load(&app.db, "bake").await?;
     let default_bridge = bake.resolve(&app.pve).await.map(|p| p.bridge).unwrap_or_else(|_| "vmbr0".into());
-    let existing = vms::list(&app.db).await?;
-    let guests = app.pve.resources().await.map_err(ApiError::from)?.into_iter().filter(|r| r.kind == "qemu" || r.kind == "lxc").collect::<Vec<_>>();
+    let res = app.pve.resources().await.map_err(ApiError::from)?;
+    let mut existing = vms::list(&app.db).await?;
+    // A VM removed in Proxmox VE frees its card: it is built again like one never built.
+    let gone = vms::mark_gone(&app.db, &existing, &res).await?;
+    existing.retain(|v| !gone.contains(&v.id));
+    let guests = res.into_iter().filter(|r| r.kind == "qemu" || r.kind == "lxc").collect::<Vec<_>>();
 
     // Everything is checked before anything is built, as Build-Vms' preflight did.
     let mut plan = Vec::new();

@@ -88,6 +88,8 @@ struct Live {
     progress: std::sync::Mutex<Option<Event>>,
     /// Who asked the job to stop; the job ends at its next check (JobLog::check_abort).
     abort: std::sync::Mutex<Option<String>>,
+    /// <id>.steps: when each progress stage began - the mail's step times.
+    steps: PathBuf,
 }
 
 struct LiveInner {
@@ -144,6 +146,15 @@ impl JobLog {
             let _turn = order.lock().await;
             this.tag(tag, text).await;
         });
+    }
+
+    /// A progress stage begins: its name and the time, one line in <id>.steps. Small and
+    /// synchronous - Progress::stage is called from code that does not await.
+    pub fn mark_step(&self, name: &str) {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&self.live.steps) {
+            let _ = writeln!(f, "{}\t{}", chrono::Utc::now().to_rfc3339(), name.replace(['\t', '\n'], " "));
+        }
     }
 
     /// The progress bar: what runs now, how far (0-100) when that is known.
@@ -244,6 +255,7 @@ impl Jobs {
             order: Arc::new(Mutex::new(())),
             progress: std::sync::Mutex::new(None),
             abort: std::sync::Mutex::new(None),
+            steps: self.dir.join(format!("{id}.steps")),
         });
         self.running.write().await.insert(id.clone(), live.clone());
 
@@ -360,7 +372,26 @@ impl Jobs {
     pub async fn delete(&self, id: &str) -> Result<()> {
         sqlx::query("DELETE FROM jobs WHERE id = ? AND status NOT IN ('queued', 'running')").bind(id).execute(&self.db).await?;
         let _ = tokio::fs::remove_file(self.log_path(id)).await;
+        let _ = tokio::fs::remove_file(self.dir.join(format!("{id}.steps"))).await;
         Ok(())
+    }
+
+/// The log's last `n` lines that say something - no debug lines, no closing [ end ] -
+    /// for the mail of a job that failed.
+    pub async fn log_tail(&self, id: &str, n: usize) -> Vec<String> {
+        let text = tokio::fs::read_to_string(self.log_path(id)).await.unwrap_or_default();
+        let lines: Vec<&str> = text.lines().filter(|l| !l.contains("[ debug") && !l.contains("[ end") && !l.trim().is_empty()).collect();
+        // Time of day only - the mail says the date.
+        lines[lines.len().saturating_sub(n)..].iter().map(|l| l.get(11..).unwrap_or(l).to_owned()).collect()
+    }
+
+    /// A job's stages with when each began (<id>.steps), oldest first.
+    pub async fn steps(&self, id: &str) -> Vec<(chrono::DateTime<chrono::FixedOffset>, String)> {
+        let text = tokio::fs::read_to_string(self.dir.join(format!("{id}.steps"))).await.unwrap_or_default();
+        text.lines()
+            .filter_map(|l| l.split_once('\t'))
+            .filter_map(|(at, name)| Some((chrono::DateTime::parse_from_rfc3339(at).ok()?, name.to_owned())))
+            .collect()
     }
 
     fn log_path(&self, id: &str) -> PathBuf {

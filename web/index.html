@@ -33,8 +33,13 @@
       </div>
     </div>
     <span class="user-chip" id="userChip"></span>
-    <button class="btn ghost" type="button" id="logoutBtn">Sign out</button>
-    <button class="btn primary" type="button" id="deployBtn"><img data-icon="deploy.svg" data-icon-on-accent="1" src="" alt=""> Deploy</button>
+    <button class="btn signout" type="button" id="logoutBtn">Sign out</button>
+    <div class="bell-anchor">
+      <button class="btn bell" type="button" id="bellBtn" aria-label="Notifications" aria-haspopup="dialog" aria-expanded="false" title="Notifications">
+        <img data-icon="bell.svg" src="" width="18" height="18" alt=""><span class="bell-count" id="bellCount" hidden></span>
+      </button>
+      <div class="bell-pop" id="bellPop" role="dialog" aria-label="Notifications" hidden></div>
+    </div>
   </div>
 </header>
 

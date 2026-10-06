@@ -308,9 +308,13 @@ pub struct WinBakeOptions {
     pub iso: String,
     pub index: u32,
     pub region: WinRegion,
-    /// rdp | ping | svrmgr
+    /// WIN_FEATURES ids.
     #[serde(default)]
     pub features: Vec<String>,
+    /// 0: from before device encryption and the power plan were toggles - a client gold had
+    /// both, always. 1: `features` says it all.
+    #[serde(default)]
+    pub policies: u32,
     /// "" for the edition on the ISO, else a VIRTUAL_EDITIONS key.
     #[serde(default)]
     pub edition_upgrade: String,
@@ -328,21 +332,78 @@ pub struct WinBakeOptions {
 }
 
 impl WinBakeOptions {
+    /// Options of a gold baked before the client policies were toggles keep what it had.
+    pub fn upgrade(&mut self) {
+        if self.policies == 0 {
+            for f in ["noencrypt", "power"] {
+                if !self.features.iter().any(|x| x == f) {
+                    self.features.push(f.to_owned());
+                }
+            }
+            self.policies = 1;
+        }
+    }
+
     pub fn disk_gb(&self) -> u32 {
         self.disk_gb.unwrap_or(64).clamp(32, 2048)
     }
 }
 
-/// The opt-in policies of New-Vhdx's offline customization (doc §4). Client golds also
-/// always get: no device encryption, high performance power, the OOBE bypass.
-pub static WIN_FEATURES: &[(&str, &str)] = &[
-    ("rdp", "Remote Desktop on (with NLA), firewall open"),
-    ("ping", "Answer ping (ICMPv4/v6 echo)"),
-    ("svrmgr", "Server Manager does not open at logon (server)"),
-    ("signinkeyboard", "Sign-in screen keeps the system keyboard (STIG)"),
-    ("welcome", "No Windows welcome experience (client)"),
-    ("firstlogon", "No first sign-in animation (client)"),
+/// One of New-Vhdx's offline policies (doc §4): its id, the toggle's label, where it applies
+/// ("" every image, "client", "server", "desktop" = every image but Server Core) and the tip.
+pub struct WinFeature {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub scope: &'static str,
+    pub tip: &'static str,
+}
+
+/// New-Vhdx's -EnableRdp ... -SetVmPowerPlan, same defaults in the form.
+pub static WIN_FEATURES: &[WinFeature] = &[
+    WinFeature { id: "rdp", label: "Remote Desktop", scope: "",
+        tip: "Remote Desktop on, with Network Level Authentication, and the firewall open for it on TCP and UDP 3389." },
+    WinFeature { id: "ping", label: "Answer ping", scope: "",
+        tip: "Inbound ICMPv4 and ICMPv6 echo requests allowed in the firewall." },
+    WinFeature { id: "svrmgr", label: "No Server Manager at logon", scope: "server",
+        tip: "Machine policy DoNotOpenAtLogon: Server Manager no longer opens by itself when an administrator signs in." },
+    WinFeature { id: "preferipv4", label: "Prefer IPv4", scope: "",
+        tip: "DisabledComponents 0x20 (Tcpip6 parameters): Windows prefers IPv4 over IPv6 - ::ffff:0:0/96 ranks above ::/0 in its prefix policies - and IPv6 stays on. Microsoft's recommendation instead of turning IPv6 off. Check on a VM with: netsh interface ipv6 show prefixpolicies." },
+    WinFeature { id: "signinkeyboard", label: "Sign-in keyboard (STIG)", scope: "",
+        tip: "BlockUserInputMethodsForSignIn (STIG WN12-CC-000048): the sign-in screen keeps the baked keyboard - per-user input methods do not appear there." },
+    WinFeature { id: "edge", label: "Edge baseline", scope: "desktop",
+        tip: "Microsoft Edge machine policy: Google as the default and only search engine, no first-run experience, no mini menu, a cleared new tab page, required diagnostic data only. A domain GPO overrides it later." },
+    WinFeature { id: "noencrypt", label: "No auto device encryption", scope: "client",
+        tip: "PreventDeviceEncryption: Windows does not turn BitLocker on by itself after OOBE - a VM with Secure Boot and a vTPM qualifies for it. BitLocker is meant to be armed by policy after deployment." },
+    WinFeature { id: "power", label: "VM power plan", scope: "client",
+        tip: "High performance, display off and sleep set to never, hibernation off - as machine policy, so a domain GPO overrides it later." },
+    WinFeature { id: "welcome", label: "No welcome experience", scope: "client",
+        tip: "Policy DisableWindowsSpotlightWindowsWelcomeExperience: no Getting Started / Welcome screen at logon." },
+    WinFeature { id: "firstlogon", label: "No first sign-in animation", scope: "client",
+        tip: "EnableFirstLogonAnimation 0: the first logon lands straight on the desktop, without \"Hi\" and \"We're getting things ready\"." },
 ];
+
+/// A reg.exe /d value, quoted for a cmd.exe line: inner quotes as \" for reg.exe, and every
+/// cmd metacharacter that the \" pairs leave outside cmd's own quoting escaped with ^.
+fn cmd_reg_data(v: &str) -> String {
+    let mut out = String::from("\"");
+    let mut quoted = true;
+    for c in v.chars() {
+        match c {
+            '"' => {
+                out.push_str("\\\"");
+                quoted = !quoted;
+            }
+            '%' => out.push_str("%%"),
+            '&' | '|' | '<' | '>' | '^' if !quoted => {
+                out.push('^');
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
 
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
@@ -548,7 +609,7 @@ echo PVS-FIRSTBOOT-OK %PVS_NAME% >> %LOG%
 
 /// The offline policies of New-Vhdx's Set-OfflineImageCustomization (doc §4), as reg.exe
 /// writes against the loaded hives KSYS (SYSTEM) and KSOFT (SOFTWARE).
-fn pass2_policies(features: &[String], client: bool) -> String {
+fn pass2_policies(features: &[String], client: bool, core: bool) -> String {
     let fw = r"HKLM\KSYS\ControlSet001\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules";
     let mut p = String::new();
     let has = |f: &str| features.iter().any(|x| x == f);
@@ -576,15 +637,55 @@ echo PVS-POLICY ping > COM1
     if has("signinkeyboard") {
         p += "reg add \"HKLM\\KSOFT\\Policies\\Microsoft\\Control Panel\\International\" /v BlockUserInputMethodsForSignIn /t REG_DWORD /d 1 /f > COM1 2>&1\necho PVS-POLICY signinkeyboard > COM1\n";
     }
+    // Prefer IPv4 over IPv6 (Microsoft: "Configure IPv6 in Windows", DisabledComponents
+    // bit 0x20) - the prefix policy table, not IPv6 itself. Read at boot, so the first boot
+    // of every VM already has it.
+    if has("preferipv4") {
+        p += "reg add \"HKLM\\KSYS\\ControlSet001\\Services\\Tcpip6\\Parameters\" /v DisabledComponents /t REG_DWORD /d 32 /f > COM1 2>&1\necho PVS-POLICY preferipv4 > COM1\n";
+    }
+    // New-Vhdx's Set-OfflineEdgePolicy. Server Core has no Edge to manage.
+    if has("edge") && !core {
+        let search = "https://www.google.com/search?q={searchTerms}";
+        let suggest = "https://www.google.com/complete/search?output=chrome&q={searchTerms}";
+        let engines = format!(r#"[{{"suggest_url": "{suggest}", "image_search_url": "", "name": "Google", "keyword": "google", "is_default": true, "search_url": "{search}"}}]"#);
+        for (name, value, kind) in [
+            ("ManagedSearchEngines", engines.as_str(), "REG_SZ"),
+            ("DefaultSearchProviderEnabled", "1", "REG_DWORD"),
+            ("DefaultSearchProviderName", "Google", "REG_SZ"),
+            ("DefaultSearchProviderSearchURL", search, "REG_SZ"),
+            ("DefaultSearchProviderSuggestURL", suggest, "REG_SZ"),
+            ("QuickSearchShowMiniMenu", "0", "REG_DWORD"),
+            ("HideFirstRunExperience", "1", "REG_DWORD"),
+            ("NewTabPageSearchBox", "redirect", "REG_SZ"),
+            ("NewTabPageContentEnabled", "0", "REG_DWORD"),
+            ("NewTabPageAllowedBackgroundTypes", "3", "REG_DWORD"),
+            ("NewTabPageHideDefaultTopSites", "1", "REG_DWORD"),
+            ("DiagnosticData", "1", "REG_DWORD"),
+        ] {
+            p += &format!("reg add \"HKLM\\KSOFT\\Policies\\Microsoft\\Edge\" /v {name} /t {kind} /d {} /f > COM1 2>&1\n", cmd_reg_data(value));
+        }
+        p += "echo PVS-POLICY edge > COM1\n";
+    }
     if client {
         // 24H2 auto-encrypts with Secure Boot + TPM, and swtpm + OVMF qualifies.
-        p += "reg add \"HKLM\\KSYS\\ControlSet001\\Control\\BitLocker\" /v PreventDeviceEncryption /t REG_DWORD /d 1 /f > COM1 2>&1\necho PVS-POLICY no-device-encryption > COM1\n";
-        // High performance through policy - writing the scheme tree itself is denied.
-        p += r#"reg add "HKLM\KSOFT\Policies\Microsoft\Power\PowerSettings" /v ActivePowerScheme /t REG_SZ /d 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c /f > COM1 2>&1
-reg add "HKLM\KSYS\ControlSet001\Control\Power" /v HibernateEnabled /t REG_DWORD /d 0 /f > COM1 2>&1
+        if has("noencrypt") {
+            p += "reg add \"HKLM\\KSYS\\ControlSet001\\Control\\BitLocker\" /v PreventDeviceEncryption /t REG_DWORD /d 1 /f > COM1 2>&1\necho PVS-POLICY no-device-encryption > COM1\n";
+        }
+        // High performance through policy - writing the scheme tree itself is denied. Display
+        // off and sleep never (0), AC and DC: a VM has no battery, Windows keeps the column.
+        if has("power") {
+            let pol = r"HKLM\KSOFT\Policies\Microsoft\Power\PowerSettings";
+            p += &format!("reg add \"{pol}\" /v ActivePowerScheme /t REG_SZ /d 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c /f > COM1 2>&1\n");
+            for guid in ["3c0bc021-c8a8-4e07-a973-6b14cbcb2b7e", "29f6c1db-86da-48c5-9fdb-f2b67b1f44da"] {
+                for v in ["ACSettingIndex", "DCSettingIndex"] {
+                    p += &format!("reg add \"{pol}\\{guid}\" /v {v} /t REG_DWORD /d 0 /f > COM1 2>&1\n");
+                }
+            }
+            p += r#"reg add "HKLM\KSYS\ControlSet001\Control\Power" /v HibernateEnabled /t REG_DWORD /d 0 /f > COM1 2>&1
 reg add "HKLM\KSYS\ControlSet001\Control\Power" /v HibernateEnabledDefault /t REG_DWORD /d 0 /f > COM1 2>&1
 echo PVS-POLICY power > COM1
 "#;
+        }
         // The client OOBE bypass is the same for every client VM, so it lives in the gold.
         for (k, v) in [("HideOnlineAccountScreens", 1), ("DisablePrivacyExperience", 1), ("DisableVoice", 1), ("PrivacyConsentStatus", 1), ("Protectyourpc", 3), ("HideEULAPage", 1)] {
             p += &format!("reg add \"HKLM\\KSOFT\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v {k} /t REG_DWORD /d {v} /f > COM1 2>&1\n");
@@ -607,7 +708,7 @@ pub fn pe2_cmd(img: &WimImage, region: &WinRegion, features: &[String], edition_
     let locale = &region.locale;
     let input = input_locale(if region.keyboard.is_empty() { locale } else { &region.keyboard });
     let tz = &region.timezone;
-    let policies = pass2_policies(features, client);
+    let policies = pass2_policies(features, client, img.installation_type == "Server Core");
     // New-Vhdx's Convert-ToVirtualEdition: after generalize, before the customization - a
     // base edition generalizes cleanly and takes the change afterwards; the staged work
     // completes in specialize on the VM's first boot. Read back with /Get-CurrentEdition,
@@ -1026,7 +1127,7 @@ pub(crate) async fn run_pass(
                         // One line per feature, capability or app is detail: the caller sums
                         // them up per Server Manager feature. So is a worker's verdict per
                         // update, which the media build words itself.
-                        if ["PVS-FEATURE-", "PVS-CAP-", "PVS-APP-", "PVS-UPD-OK", "PVS-UPD-FAIL"].iter().any(|p| part.starts_with(p)) {
+                        if ["PVS-FEATURE-", "PVS-CAP-", "PVS-APP-", "PVS-PROV-", "PVS-UPD-OK", "PVS-UPD-FAIL"].iter().any(|p| part.starts_with(p)) {
                             log.debug(crate::markers::text(part)).await;
                         } else {
                             log.line(crate::markers::text(part)).await;
@@ -1261,8 +1362,10 @@ pub async fn bake(
         Ok((vmid, gold_name, edition_target)) => {
             // New-Vhdx's New-WindowsGoldManifest, then the keys every gold shares.
             let has = |f: &str| opt.features.iter().any(|x| x == f);
-            let mut bake_options = json!({ "rdp": has("rdp"), "ping": has("ping"), "blockSignInInputMethods": has("signinkeyboard") });
+            let mut bake_options = json!({ "rdp": has("rdp"), "ping": has("ping"), "blockSignInInputMethods": has("signinkeyboard"), "preferIPv4": has("preferipv4"), "edgeBaseline": has("edge") && img.installation_type != "Server Core" });
             if client {
+                bake_options["preventDeviceEncryption"] = json!(has("noencrypt"));
+                bake_options["vmPowerPlan"] = json!(has("power"));
                 bake_options["suppressWelcomeExperience"] = json!(has("welcome"));
                 bake_options["suppressFirstSignInAnimation"] = json!(has("firstlogon"));
             } else {
@@ -1650,6 +1753,34 @@ pub fn check_name(name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edge_search_engines_survive_cmd() {
+        // The & of the suggest URL sits between two \" pairs - outside cmd's quoting.
+        let d = cmd_reg_data(r#"[{"u": "a?x=1&q=2", "n": "G"}]"#);
+        assert_eq!(d, r#""[{\"u\": \"a?x=1^&q=2\", \"n\": \"G\"}]""#);
+        assert_eq!(cmd_reg_data("a?x=1&q=2"), r#""a?x=1&q=2""#);
+        let core = pass2_policies(&["edge".into()], false, true);
+        assert!(!core.contains("Edge"));
+        let client = pass2_policies(&["edge".into()], true, false);
+        assert!(client.contains("ManagedSearchEngines") && !client.contains("PreventDeviceEncryption"));
+    }
+
+    #[test]
+    fn prefer_ipv4_is_bit_0x20() {
+        let p = pass2_policies(&["preferipv4".into()], false, true);
+        assert!(p.contains(r#"Tcpip6\Parameters" /v DisabledComponents /t REG_DWORD /d 32 "#));
+    }
+
+    #[test]
+    fn old_options_keep_the_client_policies() {
+        let mut o: WinBakeOptions = serde_json::from_str(r#"{"iso":"x","index":1,"region":{"locale":"en-US","keyboard":"","timezone":"UTC"},"features":["rdp"]}"#).unwrap();
+        o.upgrade();
+        assert_eq!(o.features, ["rdp", "noencrypt", "power"]);
+        let mut n: WinBakeOptions = serde_json::from_str(r#"{"iso":"x","index":1,"region":{"locale":"en-US","keyboard":"","timezone":"UTC"},"features":[],"policies":1}"#).unwrap();
+        n.upgrade();
+        assert!(n.features.is_empty());
+    }
 
     fn img(edition_id: &str, installation_type: &str, build: &str) -> WimImage {
         WimImage {

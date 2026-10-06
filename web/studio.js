@@ -91,6 +91,8 @@ const FRESH = {
   "gateway.svg": ["host", "Default gateway — one route out", '<g fill="@H"><rect x="1.2" y="6.2" width="4" height="5.6" rx="1.2"/><rect x="12.8" y="6.2" width="4" height="5.6" rx="1.2"/><path d="M6 8.2h3.6V6.4l2.8 2.6-2.8 2.6V9.8H6z"/></g>'],
   "static-ip.svg": ["host", "A fixed address on a subnet", '<g fill="@H"><path d="M9 1.6a5.2 5.2 0 0 1 5.2 5.2c0 3.6-5.2 9.6-5.2 9.6S3.8 10.4 3.8 6.8A5.2 5.2 0 0 1 9 1.6z"/></g>' + S + '<circle cx="9" cy="6.8" r="1.9"/></g>'],
   "iso-media.svg": ["host", "The Windows ISO, not a vendor logo", '<g fill="@H"><circle cx="9" cy="9" r="6.4"/></g>' + S + '<circle cx="9" cy="9" r="2"/><path d="M1.4 4.6V1.6h3M16.6 13.4v3h-3"/></g>'],
+  "bell.svg": ["accent", "Notifications - a bell, in the theme's accent", '<g fill="@H"><path d="M9 1.8a1 1 0 0 1 1 1v.6a5 5 0 0 1 4 4.9v3.3l1.4 2a.6.6 0 0 1-.5 1H3.1a.6.6 0 0 1-.5-1l1.4-2V8.3a5 5 0 0 1 4-4.9v-.6a1 1 0 0 1 1-1z"/></g>' + S + '<path d="M7.2 15.6a1.9 1.9 0 0 0 3.6 0"/></g>'],
+  "pool.svg": ["ident", "A PVE resource pool - a tag, as PVE's own resource tree draws pools (fa-tags)", '<g fill="@H"><path d="M2 3.4V8l6.6 6.6a1.2 1.2 0 0 0 1.7 0l4-4a1.2 1.2 0 0 0 0-1.7L7.7 2.3H3.1A1.1 1.1 0 0 0 2 3.4z"/></g>' + S + '<circle cx="5.2" cy="5.4" r="1.1"/><path d="M10.3 2.3l5.6 5.6a1.2 1.2 0 0 1 0 1.7l-4.6 4.6"/></g>'],
   "gold-image.svg": ["host", "A generalized gold VHDX", '<g fill="@H"><path d="M3 5c0-1.5 2.7-2.7 6-2.7s6 1.2 6 2.7v8c0 1.5-2.7 2.7-6 2.7S3 14.5 3 13z"/></g>' + S + '<path d="M3.3 5c0 1.4 2.6 2.5 5.7 2.5S14.7 6.4 14.7 5"/><path d="M9 9.6l1.9 1.9L9 13.4l-1.9-1.9z"/></g>'],
   "differencing.svg": ["host", "A child disk on its parent", '<g fill="@H"><path d="M1.6 4.4c0-1.3 2.2-2.3 4.9-2.3s4.9 1 4.9 2.3v4c0 1.3-2.2 2.3-4.9 2.3S1.6 9.7 1.6 8.4z"/><path d="M7.6 11.2c0-1.2 2-2.1 4.4-2.1s4.4.9 4.4 2.1v3.6c0 1.2-2 2.1-4.4 2.1s-4.4-.9-4.4-2.1z"/></g>' + S + '<path d="M1.9 4.4c0 1.2 2.1 2.1 4.6 2.1M7.9 11.2c0 1.1 1.9 1.9 4.1 1.9s4.1-.8 4.1-1.9"/></g>'],
   "checkpoint.svg": ["host", "Checkpoints on or off", '<g fill="@H"><rect x="3" y="1.6" width="1.9" height="14.8" rx=".9"/><path d="M5.6 2.6h9.6l-2.2 3.4 2.2 3.4H5.6z"/></g>' + S + '<path d="M8.6 4.4h3.4"/></g>'],
@@ -159,8 +161,7 @@ const ICON_TEMPLATES = (() => {
    a host-blue server rack and only Export - the actual hand-off - keeps Deploy orange. */
 ICON_TEMPLATES["search.svg"].band = "studio";
 /* SSH: a bare terminal, full-bleed, nothing but the prompt - no title bar, so it is not
-   PowerShell's window at a glance. Big seams, because it mostly lives on an accent
-   button, knocked out (see tintIconKnockout). */
+   PowerShell's window at a glance. Big seams, so the prompt reads at 14 px. */
 ICON_TEMPLATES["ssh.svg"] = { band: "host", markup:
   '<g fill="@H"><rect x="1.6" y="2.2" width="14.8" height="13.6" rx="2"/></g>' +
   S.replace('stroke-width="1.2"', 'stroke-width="1.7"') + '<path d="M5 6.4l2.8 2.6L5 11.6M9.6 12.2h3.6"/></g>' };
@@ -183,6 +184,15 @@ ICON_TEMPLATES["rdp.svg"] = { band: "host", markup:
 const OS_RACK =
   '<g fill="@H"><rect x="1.6" y="2.6" width="14.8" height="5.6" rx="1.4"/><rect x="1.6" y="9.8" width="14.8" height="5.6" rx="1.4"/></g>' +
   S + '<path d="M4.2 5.4h4.4M4.2 12.6h4.4"/><path d="M13.4 5.4h.01M13.4 12.6h.01"/></g>';
+/* Windows as a whole (the dashboard's Windows card): three layers - boot environment,
+   drivers, features - stacked into one image, in the theme's accent. Deliberately no window
+   panes: nothing that reads as Microsoft's logo. */
+ICON_TEMPLATES["windows-layers.svg"] = { band: "accent", markup:
+  '<g fill="@H"><path d="M9 1.6l7.4 3.6L9 8.8 1.6 5.2z"/><path d="M1.6 8.6l2.2-1.1L9 10l5.2-2.5 2.2 1.1L9 12.2z"/><path d="M1.6 12l2.2-1.1L9 13.4l5.2-2.5 2.2 1.1L9 15.6z"/></g>' };
+/* An application from WinGet: three app tiles fanned out - a list, installed in order.
+   WinGet's catalog carries no icons, so every app shows this one. */
+ICON_TEMPLATES["app-stack.svg"] = { band: "host", markup:
+  '<g fill="@H"><rect x="6" y="1.4" width="10.4" height="10.4" rx="2.4" opacity=".55"/><rect x="3.8" y="3.6" width="10.4" height="10.4" rx="2.4" opacity=".8"/><rect x="1.6" y="5.8" width="10.4" height="10.4" rx="2.4"/></g>' };
 ICON_TEMPLATES["azure-local.svg"] = { band: "ident", markup: OS_RACK };
 ICON_TEMPLATES["os-server-panes.svg"] = { band: "work", markup: OS_RACK };
 /* VM overview takes the same rack - the blade is every machine at a glance - on the host
@@ -267,32 +277,6 @@ function tintIcon(name, theme) {
   return (_iconCache[key] = "data:image/svg+xml," + encodeURIComponent(svg));
 }
 
-/* For a glyph sitting ON the accent (e.g. the primary button): flatten it to the
-   accent's foreground so it reads as a single-colour mark. */
-function tintIconOnAccent(name, theme) {
-  const def = ICON_TEMPLATES[name] || ICON_TEMPLATES["vm.svg"];
-  const key = theme.id + "|onaccent|" + name;
-  if (_iconCache[key]) return _iconCache[key];
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">' +
-    def.markup.split("@H").join(theme.accentFg).split("@S").join(theme.accentFg)
-      .replace(/@B:[a-zA-Z]+/g, theme.accentFg) + "</svg>";
-  return (_iconCache[key] = "data:image/svg+xml," + encodeURIComponent(svg));
-}
-
-/* On an accent button, but with the seams cut back out in the accent itself. The plain
-   on-accent tint paints seams the same colour as the silhouette, which is right for a
-   solid mark like export and turns a glyph whose meaning IS its seams - a prompt, a
-   screen - into a blank tile. */
-function tintIconKnockout(name, theme) {
-  const def = ICON_TEMPLATES[name] || ICON_TEMPLATES["vm.svg"];
-  const key = theme.id + "|knockout|" + name;
-  if (_iconCache[key]) return _iconCache[key];
-  const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">' +
-    def.markup.split("@H").join(theme.accentFg).split("@S").join(theme.accent)
-      .replace(/@B:[a-zA-Z]+/g, theme.accentFg) + "</svg>";
-  return (_iconCache[key] = "data:image/svg+xml," + encodeURIComponent(svg));
-}
-
 /* For a destructive control: the glyph carries the theme's danger hue instead of its
    band, seams still pulled toward the background so it reads as one mark at 16px. */
 function tintIconDanger(name, theme) {
@@ -329,11 +313,13 @@ function iconCacheSize() { return Object.keys(_iconCache).length; }
 function iconSrc(name) {
   return tintIcon(name, currentTheme());
 }
+/* The main buttons are no longer solid: their glyphs are the normal coloured ones. Kept as
+   names so the call sites read as "the glyph of a main button". */
 function iconSrcOnAccent(name) {
-  return tintIconOnAccent(name, currentTheme());
+  return iconSrc(name);
 }
 function iconSrcKnockout(name) {
-  return tintIconKnockout(name, currentTheme());
+  return iconSrc(name);
 }
 function iconSrcDanger(name) {
   return tintIconDanger(name, currentTheme());
@@ -2283,7 +2269,7 @@ const AUTO_START_ACTIONS = [
 function nestedVirtRequired(s) {
   return !!(s && findImage(s.imageId).requiresNestedVirt);
 }
-const NESTED_VIRT_INFO = "Exposes the host's hardware virtualization extensions to this guest (Set-VMProcessor -ExposeVirtualizationExtensions), so the guest can run Hyper-V and start VMs of its own. MAC address spoofing is switched on with it, otherwise the nested VMs' traffic never leaves the guest. In exchange the VM gives up dynamic memory, live migration and checkpoints.";
+const NESTED_VIRT_INFO = "Sets the VM's CPU type to host, so the guest sees the node's hardware virtualization extensions (Intel VT-x / AMD-V) and can run Hyper-V and start VMs of its own. The node's KVM module needs nesting on - the default on current Proxmox VE. With CPU type host the VM only live-migrates to nodes with the same CPU.";
 const NESTED_VIRT_WARN = "Only for a guest that runs Hyper-V itself, or Azure Local.";
 
 const AZURE_REGIONS = [
@@ -2675,10 +2661,11 @@ function reconcileServersWithNetworks() {
    Index 0 is the adapter New-VM already created (switchName / ipAddress / gateway / DNS on the
    server itself); s.nics holds every adapter added on top of it. Names are what the guest sees:
    GuestProvision renames the guest's connections to these at first boot, matching adapters by
-   MAC, so Get-NetAdapter shows "vnic-02" instead of Windows' own "Ethernet 2". Addressing is
+   MAC, so Get-NetAdapter shows "net1" instead of Windows' own "Ethernet 2" - the same name as
+   the VM's network device in PVE (net0, net1, ...). Addressing is
    keyed by the same MAC in the unattend, so renaming an adapter never moves an IP. */
 function nicAutoName(index) {
-  return "vnic-" + String(index + 1).padStart(2, "0");
+  return "net" + index;
 }
 /* This string becomes the guest's connection name, so keep it to what an adapter name may
    safely carry — letters, digits, space, hyphen, underscore, dot. Case is left alone. */
@@ -2698,7 +2685,7 @@ function effectiveNicName(s, index) {
 function createServerNic(s) {
   return {
     _id: uid("nic"),
-    // Blank means "follow my position", so removing vnic-02 renumbers vnic-03 down instead of
+    // Blank means "follow my position", so removing net1 renumbers net2 down instead of
     // leaving a hole. A name somebody typed is kept verbatim and never renumbers.
     name: "",
     switchName: (state.defaults.availableSwitches || [])[0] || "",
@@ -2735,7 +2722,7 @@ function validateNicIpAddress(s, nic) {
   if (problem) return { invalid: true, message: problem };
   return { invalid: false, message: "" };
 }
-/* Card header line: "2 adapters · vnic-02 vStorage" and so on. */
+/* Card header line: "2 adapters · net1 vStorage" and so on. */
 function serverNicSummary(s) {
   const extra = (s && s.nics) || [];
   if (!extra.length) return "";
@@ -3268,7 +3255,7 @@ function applyVmTemplate(server, templateId) {
   // Hardware a template asks for is only ever added, never cleared: a template that says
   // nothing about adapters or data disks leaves whatever the VM already has, the same way it
   // leaves addressing and credentials alone. Extra adapters are created blank so they follow
-  // the VM's own switch and numbering (vnic-02, vnic-03, ...) rather than pinning a switch
+  // the VM's own switch and numbering (net1, net2, ...) rather than pinning a switch
   // name a template could not know.
   if (t.extraNics != null) {
     server.nics = [];
@@ -3723,6 +3710,11 @@ function applyTheme(themeId) {
      and the log's own third warm colour (New-Vhdx's `yellow`), darkened on light themes. */
   set("--band-host", bands.host);
   set("--band-ident", bands.ident);
+  // Every band as a variable too: a tile tinted in its glyph's band (the bell) follows the theme.
+  set("--band-work", bands.work);
+  set("--band-deploy", bands.deploy);
+  set("--band-linux", bands.linux);
+  set("--band-studio", bands.studio);
   set("--log-yellow", dark ? "#e6de78" : "#7d6f0a");
   /* Secrets are reached from Deploy and the blade's own icon already sits on that band;
      the reveal control takes the same hue rather than a colour invented for it. */
@@ -3761,9 +3753,7 @@ function applyThemedChrome(theme) {
   const favicon = document.getElementById("favicon");
   if (favicon) favicon.href = tintIcon("mark.svg", theme);
   document.querySelectorAll("[data-icon]").forEach(el => {
-    el.src = el.hasAttribute("data-icon-on-accent")
-      ? tintIconOnAccent(el.getAttribute("data-icon"), theme)
-      : tintIcon(el.getAttribute("data-icon"), theme);
+    el.src = tintIcon(el.getAttribute("data-icon"), theme);
   });
 }
 
@@ -3783,7 +3773,7 @@ function renderThemeList() {
   document.getElementById("themeList").innerHTML = ordered.map(f => {
     const t = THEMES[f.id + "_" + themeModeTab];
     const selected = t.id === state.themeId;
-    const badge = f.id === THEME_DEFAULT ? '<span class="pill tag">Default</span>' : "";
+    const badge = f.id === THEME_DEFAULT ? '<span class="pill">Default</span>' : "";
     return `<button type="button" class="btn row ${selected ? "selected" : ""}" data-theme-id="${esc(t.id)}">
       <span class="radio"></span>
       ${themeSwatchHtml(t)}
@@ -4908,6 +4898,8 @@ function showFloatingTip(anchor) {
 }
 /* Stroke-drawn like the pencil / eye / regen glyphs — the filled Fluent triangle stood
    out as the one solid icon in an otherwise line-drawn set. */
+/* A state badge's word in sentence case: the API's states are lower case. */
+function cap(v) { const t = String(v ?? ""); return t.charAt(0).toUpperCase() + t.slice(1); }
 function warnIconSvg(cls) {
   return `<svg${cls ? ` class="${cls}"` : ""} viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6.9 2.9 1.55 12.2a1.27 1.27 0 0 0 1.1 1.9h10.7a1.27 1.27 0 0 0 1.1-1.9L9.1 2.9a1.27 1.27 0 0 0-2.2 0z"/><path d="M8 6.2v3.3"/><path d="M8 11.7h.01"/></svg>`;
 }
@@ -4992,7 +4984,7 @@ function navBadge(id) {
   if (id === "licenses" && (state.windowsLicenses || []).length) {
     const bad = state.windowsLicenses.filter(w => !w.imageId || !productKeyOk(w.productKey)).length;
     return bad ? `<span class="nav-badge err" title="${bad} licence(s) without an image or a valid key">${state.windowsLicenses.length}</span>`
-      : `<span class="nav-badge">${state.windowsLicenses.length}</span>`;
+      : `<span class="nav-badge ok">${state.windowsLicenses.length}</span>`;
   }
   if (id === "servers") {
     const noGold = goldsLoaded() ? state.servers.filter(s => s.imageSource === "custom" || !goldFor(s)).length : 0;
@@ -5117,7 +5109,23 @@ function highlightShell(code) {
 function gs(key, defaultOpen) { return (state.expanded[key] === undefined ? !!defaultOpen : !!state.expanded[key]); }
 /* `badge` is trusted markup pinned to the right of the head — status pills belong there,
    never stacked under the title where they read as part of the description. */
+/* A card head whose right side holds badges AND buttons: the badges move beside the title,
+   at their small size, and only the buttons stay right - a badge never stands next to a
+   taller button. Badges alone stay where they are. Returns [title badges, the rest]. */
+function splitHeadBadges(html) {
+  if (!html || !/class="[^"]*\bbtn\b/.test(html) || !/class="[^"]*\bpill\b/.test(html)) return ["", html || ""];
+  const t = document.createElement("template");
+  t.innerHTML = html;
+  const pills = [...t.content.querySelectorAll(".pill")].filter(p => !p.parentElement || !p.parentElement.closest(".btn, .pill"));
+  const moved = pills.map(p => p.outerHTML).join("");
+  pills.forEach(p => p.remove());
+  return [moved, t.innerHTML];
+}
+function titleBadges(html) { return html ? `<span class="title-badges">${html}</span>` : ""; }
+
 function gsCard(key, icon, title, meta, bodyHtml, iconAttrs, defaultOpen, badge) {
+  const [moved, rest] = splitHeadBadges(badge);
+  badge = rest.trim();
   return `
     <div class="card collapsible ${gs(key, defaultOpen) ? "" : "collapsed"}">
       <div class="card-head" data-toggle="${esc(key)}">
@@ -5125,7 +5133,7 @@ function gsCard(key, icon, title, meta, bodyHtml, iconAttrs, defaultOpen, badge)
           <span class="card-chevron">${chevron()}</span>
           <div class="card-icon"><img src="${String(icon).startsWith("data:") ? icon : iconSrc(icon)}" ${iconAttrs || ""}></div>
           <div>
-            <div class="card-title">${title}</div>
+            <div class="card-title">${title}${titleBadges(moved)}</div>
             ${meta ? `<div class="card-meta">${meta}</div>` : ""}
           </div>
         </div>
@@ -5285,7 +5293,7 @@ function renderNetworksBlade() {
         const rows = inv
           ? inv.nodes.flatMap(nd => (nd.bridges || []).map(b => `<tr><td><div class="name-cell"><img src="${iconSrc("vlan.svg")}" alt=""><b>${esc(b.iface)}</b></div></td>
               <td>${esc(nd.node)}</td><td class="mono">${esc(b.cidr || "")}</td>
-              <td><span class="pill status ${b.bridge_vlan_aware === 1 ? "on" : "off"}">${b.bridge_vlan_aware === 1 ? "yes" : "no"}</span></td>
+              <td><span class="pill status ${b.bridge_vlan_aware === 1 ? "on" : "off"}">${b.bridge_vlan_aware === 1 ? "Yes" : "No"}</span></td>
               <td class="muted">${esc(b.comments || "")}</td></tr>`))
             .concat((inv.vnets || []).map(v => `<tr><td><div class="name-cell"><img src="${iconSrc("vnet.svg")}" alt=""><b>${esc(v.vnet)}</b></div></td>
               <td class="muted">SDN zone ${esc(v.zone || "")}</td><td></td><td class="muted">${v.tag ? "tag " + esc(v.tag) : ""}</td><td class="muted">${esc(v.alias || "")}</td></tr>`)).join("")
@@ -5716,6 +5724,99 @@ function renderServerRolesSection(s) {
 
 function renderServerArcSection(s) { return ""; }
 
+/* Applications from WinGet (Windows with Desktop Experience): installed at first boot by
+   GuestProvision as SYSTEM, machine-wide, the newest version. A failure never stops the
+   deploy - the VM comes up and its result lists the app as not installed. */
+const wgPick = { sid: null, q: "", hits: [], busy: false, timer: null };
+function wingetCapable(s) { const img = findImage(s.imageId); return !isLinuxServer(s) && img.kind !== "core"; }
+function renderServerWingetSection(s) {
+  if (isLinuxServer(s)) return "";
+  const open = isNestedOpen(s._id + "-winget", false);
+  const head = (meta, muted) => `<div class="section-head" data-nested="${esc(s._id)}-winget"${muted ? ' style="color:var(--fg-muted)"' : ""}>
+      <span class="section-chevron">${chevron()}</span><img src="${iconSrcBand("app-stack.svg", "deploy")}" alt=""> Applications (WinGet)
+      <span class="section-meta">${meta}</span></div>`;
+  if (!wingetCapable(s)) {
+    return `<div class="section collapsible collapsed">${head("not on Server Core - WinGet ships with Desktop Experience", true)}</div>`;
+  }
+  const apps = Array.isArray(s.wingetApps) ? s.wingetApps : [];
+  const on = !!s.wingetEnabled;
+  const picking = wgPick.sid === s._id;
+  const rows = apps.map((a, i) => `<tr>
+      <td><div class="wg-app"><span class="wg-ico"><img src="${iconSrc("app-stack.svg")}" alt=""></span><span>${esc(a.name || a.id)}</span></div></td>
+      <td class="mono">${esc(a.id)}</td><td class="muted">Latest</td>
+      <td><input data-wg-over="${esc(s._id)}" data-wg-i="${i}" value="${esc(a.override || "")}" placeholder="the installer's own switches" spellcheck="false" autocomplete="off" aria-label="Override for ${esc(a.id)}"></td>
+      <td class="row-actions"><button class="btn icon sm danger-text" type="button" data-wg-del="${esc(s._id)}" data-wg-i="${i}" title="Take ${esc(a.id)} off the list" aria-label="Remove ${esc(a.id)}">${trashIcon()}</button></td></tr>`).join("");
+  return `<div class="section collapsible ${open ? "" : "collapsed"}">
+    ${head([on ? `${apps.length} at first boot` : "", s.wingetUpgrade ? "updates" : ""].filter(Boolean).join(" · ") || "off")}
+    <div class="section-body">
+      <div class="warn-box">${warnIconSvg()}<span>Installed at first boot from the internet: the VM needs a way out to Microsoft's WinGet catalog and the vendors' download servers. An app that only installs per user, or whose installer asks questions, can fail - the VM still comes up, the failure is in its log.</span></div>
+      <div class="toggle-grid" style="grid-template-columns:1fr">${toggle(`data-wg-on="${esc(s._id)}"`, "Install applications from WinGet", on)}${toggle(`data-wg-up="${esc(s._id)}"`, "Update installed applications", !!s.wingetUpgrade)}</div>
+      ${on ? `${apps.length ? `<div class="table-wrap"><table class="data wg-table"><thead><tr><th>Application</th><th>WinGet ID</th><th>Version</th><th>Override</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
+      <div class="wg-add">
+        ${picking ? `<div class="wg-pick">
+          <input id="wgq-${esc(s._id)}" data-wg-q="${esc(s._id)}" value="${esc(wgPick.q)}" placeholder="Search WinGet - 7zip, Notepad++, PowerShell" spellcheck="false" autocomplete="off" aria-label="Search WinGet">
+          <div class="wg-res" id="wgres-${esc(s._id)}">${wingetHits(s)}</div>
+          <div class="wg-foot"><span>WinGet's catalog, machine-wide installers only</span><button class="btn sm" type="button" data-wg-close>Close</button></div>
+        </div>` : `<button class="btn primary sm" type="button" data-wg-add="${esc(s._id)}"><img src="${iconSrcOnAccent("app-stack.svg")}" alt=""> Add application</button>`}
+      </div>` : ""}
+    </div></div>`;
+}
+function wingetHits(s) {
+  const have = new Set((s.wingetApps || []).map(a => a.id.toLowerCase()));
+  if (wgPick.busy) return `<div class="wg-empty">Searching…</div>`;
+  if (wgPick.q.trim().length < 2) return `<div class="wg-empty">Type two letters or more.</div>`;
+  if (!wgPick.hits.length) return `<div class="wg-empty">Nothing in WinGet's catalog for "${esc(wgPick.q)}".</div>`;
+  return wgPick.hits.map(h => {
+    const inList = have.has(h.id.toLowerCase());
+    return `<button class="wg-hit" type="button" data-wg-pick="${esc(s._id)}" data-wg-id="${esc(h.id)}" data-wg-name="${esc(h.name)}"${inList ? " disabled" : ""}>
+      <span class="wg-ico"><img src="${iconSrc("app-stack.svg")}" alt=""></span><span class="wg-n">${esc(h.name)}<small>${esc(h.id)}</small></span>
+      <span class="mono muted">${esc(h.version)}</span>${inList ? '<span class="pill status ok">In the list</span>' : ""}</button>`;
+  }).join("");
+}
+function wingetRepaintHits(sid) {
+  const s = state.servers.find(x => x._id === sid); const box = document.getElementById("wgres-" + sid);
+  if (s && box) box.innerHTML = wingetHits(s);
+}
+document.addEventListener("change", e => {
+  const u = e.target.closest("[data-wg-up]");
+  if (u) { const s = state.servers.find(x => x._id === u.dataset.wgUp); if (s) { s.wingetUpgrade = u.checked; render(); } return; }
+  const t = e.target.closest("[data-wg-on]"); if (!t) return;
+  const s = state.servers.find(x => x._id === t.dataset.wgOn); if (!s) return;
+  s.wingetEnabled = t.checked; if (!Array.isArray(s.wingetApps)) s.wingetApps = [];
+  render();
+});
+document.addEventListener("input", e => {
+  const o = e.target.closest("[data-wg-over]");
+  if (o) { const s = state.servers.find(x => x._id === o.dataset.wgOver); if (s && s.wingetApps[+o.dataset.wgI]) { s.wingetApps[+o.dataset.wgI].override = o.value; if (typeof saveSoon === "function") saveSoon(); } return; }
+  const q = e.target.closest("[data-wg-q]"); if (!q) return;
+  wgPick.q = q.value; clearTimeout(wgPick.timer);
+  wgPick.timer = setTimeout(async () => {
+    const asked = wgPick.q;
+    wgPick.busy = true; wingetRepaintHits(q.dataset.wgQ);
+    try { const hits = await api("GET", "/winget/search?q=" + encodeURIComponent(asked)); if (asked === wgPick.q) wgPick.hits = hits; }
+    catch (err) { toast(err.message, true); wgPick.hits = []; }
+    wgPick.busy = false; wingetRepaintHits(q.dataset.wgQ);
+  }, 300);
+});
+document.addEventListener("click", async e => {
+  const add = e.target.closest("[data-wg-add]");
+  if (add) { Object.assign(wgPick, { sid: add.dataset.wgAdd, q: "", hits: [] }); render(); const f = document.getElementById("wgq-" + wgPick.sid); if (f) f.focus(); return; }
+  if (e.target.closest("[data-wg-close]")) { wgPick.sid = null; render(); return; }
+  const del = e.target.closest("[data-wg-del]");
+  if (del) { const s = state.servers.find(x => x._id === del.dataset.wgDel); if (s) { s.wingetApps.splice(+del.dataset.wgI, 1); render(); } return; }
+  const pick = e.target.closest("[data-wg-pick]"); if (!pick) return;
+  const s = state.servers.find(x => x._id === pick.dataset.wgPick); if (!s) return;
+  try {
+    // The package's own manifest says whether it installs machine-wide - as SYSTEM it must.
+    const p = await api("GET", "/winget/package?id=" + encodeURIComponent(pick.dataset.wgId));
+    if (!p.machine) { toast(`${p.name} only installs per user - WinGet cannot install it as SYSTEM`, true); return; }
+    s.wingetApps = (s.wingetApps || []).concat({ id: p.id, name: p.name, override: "" });
+    toast(`${p.name} added - ${p.publisher || "WinGet"}${p.license ? " · " + p.license : ""}`);
+    render();
+    const f = document.getElementById("wgq-" + s._id); if (f) f.focus();
+  } catch (err) { toast(err.message, true); }
+});
+
 function renderServerAppsSection(s) {
   if (isLinuxServer(s)) return "";
   if (!supportsAppRemoval(s.imageId)) return "";
@@ -6098,19 +6199,18 @@ function renderServerCard(s) {
         <span class="card-chevron">${chevron()}</span>
         <div class="card-icon"><img src="${iconSrcBand("vm.svg", serverGlyphBand(s))}"></div>
         <div>
-          <div class="card-title" data-name-title="${esc(s._id)}">${esc(hyperVName)}</div>
+          <div class="card-title"><span data-name-title="${esc(s._id)}">${esc(hyperVName)}</span>${titleBadges(`${djBadge}${arcBadge}${clusterBadge}<span class="pill role ${pillClass}">${esc(img.kind)}</span>${built
+            ? `<span class="pill status ok" title="VM ${esc(built.vmid)} on ${esc(built.node)}">Built</span>`
+            : clash ? `<span class="pill status warn" title="${esc(clash.what)} ${esc(clash.vmid)} on ${esc(clash.node)} has this name">Name in use</span>` : ""}`)}</div>
           <div class="card-meta"><span data-name-guest="${esc(s._id)}">${hyperVName !== shortName ? "guest " + esc(shortName) + " · " : ""}</span>${esc(displayImageLabel)} · ${esc(s.memoryGB)} GB / ${esc(s.cpuCount)} CPU · ${esc(s.switchName || "no switch")}${s.vlanId != null ? " · VLAN " + esc(s.vlanId) : ""}${disks.length ? " · " + disks.length + " data disk(s)" : ""}<span data-name-folder="${esc(s._id)}">${folderName !== hyperVName ? " · folder " + esc(folderName) + "\\" : ""}</span></div>
         </div>
       </div>
       <div class="card-actions">
-        ${djBadge}${arcBadge}${clusterBadge}
-        <span class="pill role ${pillClass}">${esc(img.kind)}</span>
         <span class="card-ip${String(s.ipAddress || "").trim() ? "" : " is-none"}" style="--ip-col:${ipColumnWidth(state.servers)}ch">${esc(s.ipAddress || "no IP")}</span>
         ${psObjectButton("vm", s._id)}
         ${built
-          ? `<span class="pill status ok" title="VM ${esc(built.vmid)} on ${esc(built.node)}">built</span>
-             <button class="btn icon danger-text" type="button" data-clear-vm="${esc(s._id)}" title="Clear from view - takes this VM out of the studio's view; the VM in Proxmox VE is not touched" aria-label="Clear from view">${trashIcon()}</button>`
-          : `${clash ? `<span class="pill status warn" title="${esc(clash.what)} ${esc(clash.vmid)} on ${esc(clash.node)} has this name">name in use</span>` : ""}<button class="btn icon danger-text" type="button" title="Remove from the design" aria-label="Remove from the design" data-del="${esc(s._id)}">${trashIcon()}</button>`}
+          ? `<button class="btn icon danger-text" type="button" data-clear-vm="${esc(s._id)}" title="Clear from view - takes this VM out of the studio's view; the VM in Proxmox VE is not touched" aria-label="Clear from view">${trashIcon()}</button>`
+          : `<button class="btn icon danger-text" type="button" title="Remove from the design" aria-label="Remove from the design" data-del="${esc(s._id)}">${trashIcon()}</button>`}
       </div>
     </div>
     <div class="card-body">
@@ -6203,8 +6303,8 @@ function renderServerCard(s) {
                 <button type="button" class="picker-btn" data-image-picker-toggle="${esc(s._id)}" aria-expanded="${pickerOpen ? "true" : "false"}">
                   <img src="${displayImageIconSrc}" alt="">
                   <span class="picker-label">${esc(displayImageLabel)}${s.goldLanguage ? ` · ${esc(s.goldLanguage)}` : ""}</span>
-                  ${s.goldId ? `<span class="pill status warn" title="Pinned to gold ${esc(s.goldId)} - rebakes are not picked up">pinned</span>` : ""}
-                  ${goldsLoaded() && !current ? `<span class="pill status off">no gold</span>` : ""}
+                  ${s.goldId ? `<span class="pill status warn" title="Pinned to gold ${esc(s.goldId)} - rebakes are not picked up">Pinned</span>` : ""}
+                  ${goldsLoaded() && !current ? `<span class="pill status off">No gold</span>` : ""}
                   <span class="picker-chevron">${chevron()}</span>
                 </button>
                 ${pickerOpen ? `<div class="picker-list" role="listbox">
@@ -6214,7 +6314,7 @@ function renderServerCard(s) {
                       <img src="${displayImageIconSrc}" alt="">
                       <span class="opt-body"><span class="opt-label">${esc(displayImageLabel)}${s.goldLanguage ? ` · ${esc(s.goldLanguage)}` : ""}</span>
                         <span class="opt-meta">${isCustomImage ? "a Hyper-V custom VHDX - Proxmox VE builds from golds only" : "no ready gold - bake one, or pick a gold below"}</span></span>
-                      <span class="pill status off">no gold</span>
+                      <span class="pill status off">No gold</span>
                     </button>` : ""}
                   ${!goldsLoaded() ? `<div class="opt-empty hint">Reading the golds…</div>`
                     : !groups.length ? `<div class="opt-empty hint">No gold is ready yet. A VM builds from a gold - bake one first.</div>`
@@ -6370,7 +6470,7 @@ function renderServerCard(s) {
         <div class="section-body">
           <div class="disk-pane">
             <div class="disk-cmdbar">
-              <p class="hint">The OS disk is the gold's (a linked clone, or a full copy); grow it here if the VM needs more. Data disks are
+              <p class="hint">The OS disk is the gold's (a linked clone, or a full copy), at the size the gold was baked with. Data disks are
                 thin-provisioned on the VM's storage and ${isLinuxServer(s) ? "attached raw" : "formatted and lettered at first boot"}.</p>
               <button class="btn primary" type="button" data-add-disk="${esc(s._id)}"><img src="${iconSrcOnAccent("disk.svg")}"> Create and attach</button>
             </div>
@@ -6381,8 +6481,7 @@ function renderServerCard(s) {
               <div class="disk-grid-row is-os">
                 <span class="disk-name-cell"><span class="disk-badge">OS</span> <code>scsi0</code></span>
                 <span class="disk-drive">${isLinuxServer(s) ? "system" : "C:"}</span>
-                <input type="number" min="1" data-s="${esc(s._id)}" data-k="osDiskGB" value="${esc(s.osDiskGB || "")}" placeholder="gold's" aria-label="OS disk size GB"
-                       title="Blank keeps the gold's size (Linux 32-40 GB, Windows 64 GB). A disk only grows.">
+                <span class="disk-muted" title="Baked into the gold - a VM has its gold's system disk">${(() => { const gb = goldManifest(goldFor(s) || {}).diskSizeGB; return gb ? esc(gb) : "gold's"; })()}</span>
                 <span class="disk-muted">${s.useDifferencingDisk === true ? "Linked clone" : "Full copy"}</span>
                 <span class="disk-muted" title="The OS volume comes formatted in the gold">—</span>
                 <span class="disk-muted" title="The OS volume comes formatted in the gold">—</span>
@@ -6471,6 +6570,7 @@ function renderServerCard(s) {
         </div>
       </div>`}
 
+      ${renderServerWingetSection(s)}
       ${renderServerRolesSection(s)}
       ${renderServerAppsSection(s)}
 
@@ -6764,6 +6864,8 @@ function renderLicensesBlade() {
         const img = w.imageId ? findImage(w.imageId) : null;
         const vms = serversForLicense(w);
         const keyUnlocked = !!state.nameEdit[`wlkey:${w._id}`];
+        // Hidden like a password; editing shows it - nobody types into a row of dots.
+        const keyShown = keyUnlocked || !!passwordsVisible["wlkey:" + w._id];
         const keyBad = !!w.productKey && !productKeyOk(w.productKey);
         return `
         <article class="card collapsible ${open ? "" : "collapsed"}" data-wl-card="${esc(w._id)}">
@@ -6793,7 +6895,9 @@ function renderLicensesBlade() {
               })())}
               ${field(`<span class="field-label">Product key ${infoTip("Product key", "Installed over the gold's KMS client key on every VM built from this image, then activated online at first boot (slmgr /ipk, then /ato). A failed activation is logged in C:\\Windows\\Temp\\pvs-firstboot.log and does not hold the VM up. MAK, retail or a KMS host key - the key must match the image's edition.")}</span>`,
                 `<div class="edit-field">
-                <input class="mono keep-border key-input${keyBad ? " is-invalid" : ""}" data-wl="${esc(w._id)}" data-wk="productKey" data-name-input="wlkey:${esc(w._id)}" value="${esc(w.productKey || "")}" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" spellcheck="false" autocomplete="off" maxlength="29"${keyUnlocked ? "" : " readonly"}>
+                <input type="${keyShown ? "text" : "password"}" class="mono keep-border key-input${keyBad ? " is-invalid" : ""}" data-wl="${esc(w._id)}" data-wk="productKey" data-name-input="wlkey:${esc(w._id)}" value="${esc(w.productKey || "")}" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" spellcheck="false" autocomplete="off" maxlength="29"${keyUnlocked ? "" : " readonly"}>
+                <button class="btn icon" type="button" data-pw-toggle="wlkey:${esc(w._id)}"${keyUnlocked || !w.productKey ? " disabled" : ""}
+                  title="${keyUnlocked ? "Visible while editing" : keyShown ? "Hide" : "Reveal"}" aria-label="${keyShown ? "Hide" : "Reveal"} product key">${keyShown ? eyeOffIcon() : eyeIcon()}</button>
                 <button class="btn icon" type="button" data-name-edit="wlkey:${esc(w._id)}"
                   title="${keyUnlocked ? "Done" : "Edit the key"}" aria-label="${keyUnlocked ? "Done" : "Edit the key"}">${keyUnlocked ? checkIcon() : pencilIcon()}</button>
               </div>`)}
@@ -6808,7 +6912,7 @@ function renderLicensesBlade() {
               ${vms.map(s => {
                 const fits = normalizeImageId(s.imageId) === w.imageId;
                 return `<div class="cl-row">${vmGridCell(s)}
-                <div>${fits ? `<span class="hint">${esc(findImage(s.imageId).label)}</span>` : `<span class="pill status warn" title="Builds from ${esc(findImage(s.imageId).label)} - this key is not used">other gold</span>`}</div><div></div>
+                <div>${fits ? `<span class="hint">${esc(findImage(s.imageId).label)}</span>` : `<span class="pill status warn" title="Builds from ${esc(findImage(s.imageId).label)} - this key is not used">Other gold</span>`}</div><div></div>
                 <div class="cl-detach"><button class="btn icon danger-text" type="button" title="Detach ${esc(serverDisplayName(s))}" aria-label="Detach ${esc(serverDisplayName(s))}" data-wl-detach="${esc(s._id)}">${trashIcon()}</button></div>
               </div>`;
               }).join("")}
@@ -7884,7 +7988,7 @@ function reviewSummaryCards() {
     ${gsCard("rev-files", "storage.svg", "Placement", "Where each VM goes on the cluster", `
       <div class="table-wrap"><table class="data"><thead><tr><th>VM</th><th>Image</th><th>Disk</th><th>Node</th><th>Storage</th></tr></thead><tbody>
       ${state.servers.map(s => `<tr><td><b>${esc(s.name || "(no name)")}</b></td><td>${esc(findImage(s.imageId).label)}</td>
-        <td>${s.useDifferencingDisk === true ? "Linked clone" : "Full copy"}${s.osDiskGB ? " · " + esc(s.osDiskGB) + " GB" : ""}</td>
+        <td>${s.useDifferencingDisk === true ? "Linked clone" : "Full copy"}</td>
         <td class="mono">${esc(s.pveNode || state.defaults.pveNode || "the gold's")}</td>
         <td class="mono">${esc(s.useDifferencingDisk === true ? "the gold's" : (s.pveStorage || state.defaults.pveStorage || "the gold's"))}</td></tr>`).join("")}
       </tbody></table></div>
@@ -8084,9 +8188,9 @@ function renderPasswords() {
       ${sshRows.length ? `<span class="pill">${sshRows.filter(r => r.pub).length} of ${sshRows.length} Linux VM(s) with an SSH key</span>` : ""}
     </div>
 
-    <div class="warn-box">These are the real passwords. They are part of the design in the studio's database, and each VM's
+    <div class="warn-box">${warnIconSvg()}<span>These are the real passwords. They are part of the design in the studio's database, and each VM's
     seed carries its own only until its first boot is done - then the seed is deleted. Copy works while a row is masked —
-    a secret never has to be on screen to reach the clipboard.</div>
+    a secret never has to be on screen to reach the clipboard.</span></div>
 
     ${rows.length
       ? `<div class="card"><div class="pw-list">${rows.map(renderPasswordRow).join("")}</div></div>`
@@ -8095,8 +8199,8 @@ function renderPasswords() {
     ${sshRows.length ? `
       <div class="pw-section"><img src="${iconSrc("keys.svg")}" alt=""> SSH keys${infoTip("SSH keys",
         "Ed25519, one pair per VM. Only the public key goes into the design and the VM. Generating a new pair replaces the VM's key; the downloaded file is <vm>_id_ed25519 - chmod 600 it.")}</div>
-      ${sshPending ? `<div class="warn-box">${sshPending} private key(s) not downloaded yet. They are held in this tab and nowhere else — not in
-      the design, not on the server — so after a reload only the public halves remain.</div>` : ""}
+      ${sshPending ? `<div class="warn-box">${warnIconSvg()}<span>${sshPending} private key(s) not downloaded yet. They are held in this tab and nowhere else — not in
+      the design, not on the server — so after a reload only the public halves remain.</span></div>` : ""}
       <div class="card"><div class="pw-list">${sshRows.map(renderSshKeyRow).join("")}</div></div>` : ""}
     ${sshRows.length ? gsCard("ov-ssh", "keys.svg", "Using the SSH keys", "Lock the key file down, then connect - Linux, macOS, Windows", renderSshKeyHowto(), "", false) : ""}`;
 }
@@ -8202,6 +8306,27 @@ function ovCopy(value, shown) {
   return `<span class="ov-cv" data-ov-copy="${esc(v)}" title="Copy ${esc(v)}"><span>${shown != null ? shown : esc(v)}</span>${copyIcon()}</span>`;
 }
 function ovOff(text) { return `<span class="ov-off">${esc(text)}</span>`; }
+/* Applications from WinGet on Connect: what first boot installed (green) or did not (red);
+   before the build, the list as designed. */
+function ovWingetStrip(s) {
+  if (!wingetCapable(s) || !s.wingetEnabled || !(s.wingetApps || []).length) return "";
+  const v = liveVm(s);
+  const done = v && v.spec && Array.isArray(v.spec.winget_result) ? v.spec.winget_result : null;
+  const chips = done
+    ? done.map(a => `<span class="${a.success ? "on" : "off"}" title="${esc(a.success ? (a.version || "installed") : (a.message || "not installed"))}">${esc(((s.wingetApps || []).find(x => x.id === a.id) || {}).name || a.id)}${a.success && a.version ? ` <span class="mono">${esc(a.version)}</span>` : ""}</span>`).join("")
+    : s.wingetApps.map(a => `<span>${esc(a.name || a.id)}</span>`).join("");
+  return `<section class="ov-features"><span class="ov-flabel">Applications</span><span class="ov-ticks">${chips}</span>${done ? "" : '<span class="ov-muted" style="margin-left:6px">at first boot</span>'}</section>`;
+}
+/* WinGet's updates on Connect: each application old -> new (green) or not updated (red). */
+function ovWingetUpdates(s) {
+  if (!wingetCapable(s) || !s.wingetUpgrade) return "";
+  const v = liveVm(s);
+  const ups = v && v.spec && Array.isArray(v.spec.winget_upgrades) ? v.spec.winget_upgrades : null;
+  const chips = ups
+    ? (ups.filter(a => !a.skipped).length ? ups.filter(a => !a.skipped).map(a => `<span class="${a.success ? "on" : "off"}" title="${esc(a.success ? `${a.from} → ${a.to}` : (a.message || "not updated"))}">${esc(a.name || a.id)} <span class="mono">${esc(a.success ? a.to : a.from)}</span></span>`).join("") : '<span class="on">Everything current</span>')
+    : "";
+  return `<section class="ov-features"><span class="ov-flabel">Updates</span><span class="ov-ticks">${chips}</span>${ups ? "" : '<span class="ov-muted">at first boot</span>'}</section>`;
+}
 function ovTick(on, label) { return `<span class="${on ? "on" : ""}">${esc(label)}</span>`; }
 function ovVlan(v) { return (v === "" || v == null) ? ovOff("untagged") : esc(String(v)); }
 
@@ -8270,9 +8395,14 @@ function renderOverviewCard(s) {
   const dns = (s.dnsServers || []).map(x => String(x || "").trim()).filter(Boolean);
   const user = ovSignInUser(s);
   const disks = s.additionalDisks || [];
-  const sets = state.vhdSets.filter(v => (v.attachTo || []).some(n => String(n).toLowerCase() === String(s.name || "").toLowerCase()));
-  const integ = Object.assign(defaultIntegrationServices(), s.integrationServices || {});
-  const integOn = Object.keys(integ).filter(k => integ[k]);
+  // The disks as PVE has them: scsi0 is the gold's disk, at the gold's size, on the VM's
+  // storage - the one it was built on, else the card's, the design's, the gold's.
+  const built = liveVm(s);
+  const gold = goldFor(s);
+  const osGb = gold ? goldManifest(gold).diskSizeGB : 0;
+  const linked = s.useDifferencingDisk === true && s.linkedCloneChosen === true;
+  const osStorage = linked ? (gold && gold.storage) : ((built && built.spec && built.spec.storage) || s.pveStorage || state.defaults.pveStorage || (gold && gold.storage) || "");
+  const onboot = ["Start", "StartIfRunning"].includes(serverAutoStartAction(s));
   const pillClass = img.kind === "core" ? "core" : img.kind === "client" ? "client" : img.kind === "linux" ? "linux" : "desktop";
   const features = ovFeaturePills(s);
   const cmds = ovConnectCommands(s);
@@ -8333,21 +8463,18 @@ function renderOverviewCard(s) {
           <dt>vCPU</dt><dd>${Number(s.cpuCount) || 0}</dd>
           <dt>RAM</dt><dd>${Number(s.memoryGB) || 0} GB</dd>
           <dt>Security</dt><dd><span class="ov-ticks">${ovTick(effectiveSecureBoot(s), "Secure Boot")}${ovTick(s.enableVtpm, "vTPM")}${ovTick(s.nestedVirtualization, "Nested")}</span></dd>
-          <dt>Host start</dt><dd class="txt">${esc(autoStartActionLabel(s))}</dd>
+          <dt>Start at boot</dt><dd class="txt">${onboot ? `Yes${serverAutoStartDelay(s) ? ` · after ${serverAutoStartDelay(s)} s` : ""}` : ovOff("no")}</dd>
           <dt>After create</dt><dd class="txt">${s.startAfterCreate ? `<span class="ov-yes">Starts</span>` : ovOff("stays off")}</dd>
-          <dt>Integration</dt><dd class="txt">${integOn.length ? esc(integOn.join(", ")) : ovOff("all disabled")}</dd>
+          <dt>Guest agent</dt><dd class="txt">QEMU guest agent</dd>
         </dl></div>
       <div class="ov-sec"><div class="ov-sec-h"><img src="${iconSrc("storage.svg")}" alt="">Storage</div>
         <dl class="ov-kv">
-          <dt>OS disk</dt><dd><div class="ov-disk">${ovCopy(effectiveOsDiskFileName(s))}<span class="ov-muted">${s.useDifferencingDisk ? "differencing on the gold" : "full copy"}${hasCustomOsDiskName(s) ? " · renamed" : ""}</span></div></dd>
+          <dt>OS disk</dt><dd><div class="ov-disk"><span><code>scsi0</code>${osGb ? ` · ${esc(osGb)} GB` : ""}</span><span class="ov-muted">${[osStorage, linked ? "linked clone" : "full copy"].filter(Boolean).map(esc).join(" · ")}</span></div></dd>
           <dt>Data disks</dt><dd>${disks.length ? disks.map((disk, i) => {
             const fs = diskFileSystem(disk);
-            return `<div class="ov-disk"><span>${esc(dataDiskTag(s, i, disk))} ${Number(disk.sizeGB) || 0} GB ${disk.type === "Dynamic" ? "dynamic" : "fixed"}</span>
+            return `<div class="ov-disk"><span><code>scsi${i + 1}</code> · ${isLinuxServer(s) ? "" : esc(dataDiskTag(s, i, disk)) + " "}${Number(disk.sizeGB) || 0} GB</span>
               <span class="ov-muted">${fs === "None" ? "raw, not formatted" : `${esc(fs)} "${esc(effectiveDataDiskLabel(disk, i))}"`}</span></div>`;
           }).join("") : ovOff("none")}</dd>
-          <dt>VHD Sets</dt><dd class="txt">${sets.length ? sets.map(v => `${Number(v.sizeGB) || 0} GB shared with ${esc((v.attachTo || []).filter(n => String(n).toLowerCase() !== String(s.name || "").toLowerCase()).join(", ") || "nobody")}`).join("<br>") : ovOff("none")}</dd>
-          <dt>VM path</dt><dd>${esc(serverUsesCustomPaths(s) && String(s.vmPath || "").trim() ? String(s.vmPath).trim() : (state.defaults.vmPath || "host default"))}</dd>
-          <dt>VHD path</dt><dd>${esc(serverUsesCustomPaths(s) && String(s.vhdPath || "").trim() ? String(s.vhdPath).trim() : (state.defaults.vhdPath || state.defaults.vmPath || "host default"))}</dd>
         </dl></div>
       <div class="ov-sec"><div class="ov-sec-h"><img src="${iconSrc("identity.svg")}" alt="">Identity &amp; management</div>
         <dl class="ov-kv">
@@ -8356,9 +8483,6 @@ function renderOverviewCard(s) {
           ${dj && s.domainJoin && s.domainJoin.ouPath ? `<dt>Target OU</dt><dd>${ovCopy(s.domainJoin.ouPath)}</dd>` : ""}
           ${dj ? `<dt>Join timing</dt><dd class="txt">${linux ? "cloud-init at first boot" : effectiveDomainJoinMode(s) === "deferred" ? "After first boot (scheduled task)" : "During specialize (unattend)"}</dd>` : ""}
           <dt>Azure Arc</dt><dd class="txt">${arc ? `${esc(arc.resourceGroup)} <span class="ov-muted">· ${esc(azureRegionLabel(arc.location))} · ${arc.authMode === "hostContext" ? "host context" : "service principal"}</span>` : ovOff("off")}</dd>
-          <dt>Cluster</dt><dd class="txt">${(state.defaults.cluster && state.defaults.cluster.enabled)
-            ? (clusterIncludesServer(s) ? "Added to " + esc(state.defaults.cluster.name || "the host's cluster") : ovOff("standalone"))
-            : ovOff("off")}</dd>
           ${supportsAppCompatFod(s) ? `<dt>App Compat FOD</dt><dd class="txt">${s.appCompatFod ? "Yes" : ovOff("no")}</dd>` : ""}
           ${supportsAppRemoval(s.imageId) ? `<dt>Built-in apps</dt><dd class="txt">${!s.removeBuiltInApps ? ovOff("kept")
             : appRemovalCount(s) === APP_REMOVAL_CATALOG.length ? "All " + APP_REMOVAL_CATALOG.length + " removed" : appRemovalCount(s) + " of " + APP_REMOVAL_CATALOG.length + " removed"}</dd>` : ""}
@@ -8367,6 +8491,8 @@ function renderOverviewCard(s) {
     </section>
 
     <section class="ov-features"><span class="ov-flabel">${features.label}</span>${features.html}</section>
+    ${ovWingetStrip(s)}
+    ${ovWingetUpdates(s)}
   </article>`;
 }
 
@@ -8410,10 +8536,10 @@ function vmNameClash(s) {
 function liveVmPills(s) {
   const v = liveVm(s);
   if (typeof cluster === "undefined" || !cluster.vms) return "";
-  if (!v && vmNameClash(s)) return `<span class="pill status warn" title="Another VM has this name - rename the card">name in use</span>`;
-  if (!v) return `<span class="pill" title="Not on the cluster yet - Deploy builds it">not built</span>`;
-  if (v.status !== "ready") return `<span class="pill status ${{ building: "run", failed: "bad" }[v.status] || "idle"}">${esc(v.status)}</span>`;
-  return `<span class="pill status ${v.power === "running" ? "ok" : "idle"}" title="${esc(v.node)} · VMID ${esc(v.vmid)}">${esc(v.power || "unknown")}</span>`;
+  if (!v && vmNameClash(s)) return `<span class="pill status warn" title="Another VM has this name - rename the card">Name in use</span>`;
+  if (!v) return `<span class="pill status none idle" title="Not on the cluster yet - Deploy builds it">Not built</span>`;
+  if (v.status !== "ready") return `<span class="pill status ${{ building: "run", failed: "bad" }[v.status] || "idle"}">${esc(cap(v.status))}</span>`;
+  return `<span class="pill status ${v.power === "running" ? "ok" : "idle"}" title="${esc(v.node)} · VMID ${esc(v.vmid)}">${esc(cap(v.power || "unknown"))}</span>`;
 }
 /* Proxmox VE's own noVNC console for a built VM, on the node it runs on. */
 function pveConsoleUrl(v) {
@@ -8485,7 +8611,7 @@ function renderExport() {
         <button class="btn primary" type="button" onclick="downloadConfig()"><img src="${iconSrcOnAccent("export.svg")}"> Download config.json</button>
       </div>
     </div>
-    <div class="warn-box">Passwords sit in this file as plain JSON. Protect it, and delete it once the build has run.</div>
+    <div class="warn-box">${warnIconSvg()}<span>Passwords sit in this file as plain JSON. Protect it, and delete it once the build has run.</span></div>
     <div class="card json-card"><pre id="jsonPreview" tabindex="0">${highlightJson(json)}</pre></div>`;
 }
 

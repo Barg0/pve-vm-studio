@@ -1697,6 +1697,7 @@ dependencies = [
  "axum-server",
  "base64 0.23.1",
  "chrono",
+ "flate2",
  "futures",
  "lettre",
  "mime_guess",
