@@ -72,6 +72,24 @@ impl Index {
 }
 
 static INDEX: std::sync::RwLock<Option<Index>> = std::sync::RwLock::new(None);
+static SYNCING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether Microsoft Update has answered for this category yet (its labels are facts, not
+/// estimates), and whether a sync runs right now.
+pub fn checked(category: &str) -> bool {
+    INDEX.read().ok().and_then(|g| g.as_ref().map(|i| i.synced.contains_key(category))).unwrap_or(false)
+}
+pub fn syncing() -> bool {
+    SYNCING.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Clears the syncing flag however the sync ends.
+struct Syncing;
+impl Drop for Syncing {
+    fn drop(&mut self) {
+        SYNCING.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
 static SYNC: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// What Microsoft Update said about a build: None while this category was never synced,
@@ -110,6 +128,8 @@ pub async fn refresh(data_dir: &Path, max_age: std::time::Duration) -> Result<()
     if !stale {
         return Ok(());
     }
+    SYNCING.store(true, std::sync::atomic::Ordering::Relaxed);
+    let _flag = Syncing;
     let client = Client::new()?;
     let cookie = client.auth().await?;
     for cat in CATEGORIES {

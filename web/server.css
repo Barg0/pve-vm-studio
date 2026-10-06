@@ -485,9 +485,6 @@ fieldset.built-lock:disabled { opacity: .72; }
 .wm-build { font-family: var(--mono); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .wm-build .base { color: var(--fg-muted); font-weight: 400; }
 .wm-newest { margin-left: 6px; }
-.wm-kind { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: var(--radius); border: 1px solid var(--divider); color: var(--fg-muted); white-space: nowrap; }
-.wm-kind.b { color: var(--fg); border-color: var(--border-strong); }
-.wm-kind.ins { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
 .wm-panel { padding: 0; margin-bottom: 0; }
 .wm-panel-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border-bottom: 1px solid var(--border); background: var(--bg-subtle); }
 .wm-panel-head .wm-build { font-size: 19px; }
@@ -654,12 +651,14 @@ a.btn, a.btn:hover { text-decoration: none; }
 
 /* Every trash-can button has a frame - in card heads, disk rows, tables - like every other
    button; the red is the icon's. Specific enough to win over the frameless icon rules. */
-.btn.icon.btn:has(img.glyph-trash) {
+.btn.icon.btn:has(img.glyph-trash), .btn.icon.close-x {
   border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border-strong));
   background: transparent; opacity: 1;
 }
-.btn.icon.btn:has(img.glyph-trash):hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.btn.icon.btn:has(img.glyph-trash):hover, .btn.icon.close-x:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .btn.icon.btn:has(img.glyph-trash):disabled { opacity: .45; }
+/* A panel's close X: the trash button's red hairline and colour. */
+.btn.icon.close-x { color: var(--danger); }
 
 /* One height per row of buttons, everywhere (a general rule): a card head's actions, an
    overlay's or a form's footer - 32 px for every button, icon button and pill; a table row's

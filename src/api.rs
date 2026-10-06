@@ -1756,7 +1756,12 @@ async fn media_builds(State(app): State<AppState>, _user: User, axum::extract::Q
             json!({ "uuid": b.uuid, "build": b.build, "title": b.title, "created": b.created, "kind": uup::release_kind(p, &b.build, b.created), "isos": isos })
         })
         .collect();
-    Ok(Json(json!({ "product": p.id, "builds": out })))
+    // Microsoft Update's answer for this product: until its first sync, the labels are dates.
+    let wu = match crate::wu::category(p.id) {
+        Some(c) => json!({ "checked": crate::wu::checked(c), "syncing": crate::wu::syncing() }),
+        None => json!({ "checked": true, "syncing": false }),
+    };
+    Ok(Json(json!({ "product": p.id, "builds": out, "wu": wu })))
 }
 
 /// A build's languages and, in one of them, its editions with Microsoft's names.

@@ -628,7 +628,7 @@ function dashGolds(golds) {
 function langTag(t) {
   return String(t || "").split("-").map((p, i) => i === 0 ? p.toLowerCase() : p.length === 4 ? p[0].toUpperCase() + p.slice(1).toLowerCase() : p.toUpperCase()).join("-");
 }
-const wmUi = { product: "ws2025", uuid: "", lang: "", editions: null, kind: "", search: "", products: null, builds: {}, eds: {}, size: {}, isos: [], err: "" };
+const wmUi = { product: "ws2025", uuid: "", lang: "", editions: null, kind: "", search: "", products: null, builds: {}, wu: {}, wuTimer: null, eds: {}, size: {}, isos: [], err: "" };
 const WM_SIZE_KEY = () => `${wmUi.uuid}|${wmUi.lang}|${wmBaseEditions().sort().join(",")}`;
 const gb = b => (b / 1e9).toFixed(b >= 1e10 ? 0 : 1) + " GB";
 function wmDate(sec) { return sec ? new Date(sec * 1000).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }) : ""; }
@@ -655,9 +655,12 @@ async function bladeWinMedia(main, stale) {
 async function wmLoadBuilds(fresh) {
   const id = wmUi.product;
   if (!wmUi.builds[id] || fresh) {
-    try { wmUi.builds[id] = (await api("GET", `/media/builds?product=${encodeURIComponent(id)}${fresh ? "&fresh=1" : ""}`)).builds; }
+    try { const r = await api("GET", `/media/builds?product=${encodeURIComponent(id)}${fresh ? "&fresh=1" : ""}`); wmUi.builds[id] = r.builds; wmUi.wu[id] = r.wu; }
     catch (e) { wmUi.err = e.message; }
   }
+  // Until Microsoft Update has answered, the labels are estimates: asked again shortly.
+  clearTimeout(wmUi.wuTimer);
+  if (wmUi.wu[id] && !wmUi.wu[id].checked) wmUi.wuTimer = setTimeout(() => { if (wmUi.product === id && location.hash === "#/winmedia") wmLoadBuilds(true); }, 10000);
   const list = wmUi.builds[id] || [];
   // The newest stable (Patch Tuesday) build - what the default filter shows first.
   if (!list.some(b => b.uuid === wmUi.uuid)) { const first = list.find(b => / (B|OOB)$/.test(b.kind)) || list[0]; wmUi.uuid = first ? first.uuid : ""; wmUi.editions = null; }
@@ -736,7 +739,7 @@ function paintWinMedia() {
 
   const filter = `<div class="card wm-filter">
       <div class="wm-filter-row">
-        ${field(fieldLabel("os-window.svg", "Product"), `<select id="wmProduct">${groups.map(g => `<optgroup label="${esc(g)}">${prods.filter(p => p.group === g).map(p =>
+        ${field(fieldLabel("windows-layers.svg", "Product"), `<select id="wmProduct">${groups.map(g => `<optgroup label="${esc(g)}">${prods.filter(p => p.group === g).map(p =>
           `<option value="${esc(p.id)}" ${p.id === wmUi.product ? "selected" : ""}>${esc(p.name)}${p.newest ? ` - ${esc(p.newest.build)}` : ""}</option>`).join("")}</optgroup>`).join("")}</select>`)}
         <div class="field-like">${fieldLabel("update.svg", "Releases")}
           <div class="ov-seg" role="group" aria-label="Releases">${[["b", "Stable"], ["other", prod.insider ? "Insider" : "Preview"], ["all", "All"]].map(([k, l]) =>
@@ -744,14 +747,14 @@ function paintWinMedia() {
         ${field(fieldLabel("validate.svg", "Search"), `<input id="wmSearch" type="search" placeholder="Build, month or date - 33438, 2026-08, Jul" value="${esc(wmUi.search)}">`)}
       </div>
       <div class="wm-filter-meta">${prod.insider ? `<span class="pill status warn">Insider Preview</span>` : `<span class="pill">Supported</span>`}
-        <span class="hint">${esc(prod.support || "")}${all ? ` · ${all.length} build${all.length === 1 ? "" : "s"} in the catalog${builds.length !== all.length ? `, ${builds.length} shown` : ""}` : ""}</span></div>
+        <span class="hint">${esc(prod.support || "")}${all ? ` · ${all.length} build${all.length === 1 ? "" : "s"} in the catalog${builds.length !== all.length ? `, ${builds.length} shown` : ""}` : ""}${wmUi.wu[wmUi.product] && !wmUi.wu[wmUi.product].checked ? ` · <span class="wm-wu">Checking Microsoft Update…</span>${infoTip("Microsoft Update", "Which builds are Patch Tuesday (B) and out-of-band security releases comes from Microsoft Update. Until it has answered - about a minute and a half on a fresh install - the labels are estimates from the date (B?), and Stable shows none.")}` : ""}</span></div>
     </div>`;
 
   const rows = !all ? `<tr><td colspan="5" class="muted">Asking the catalog…</td></tr>`
-    : !builds.length ? `<tr><td colspan="5" class="muted">No build matches - clear the search or pick All.</td></tr>`
+    : !builds.length ? `<tr><td colspan="5" class="muted">${kind === "b" && !q && wmUi.wu[wmUi.product] && !wmUi.wu[wmUi.product].checked ? "Checking Microsoft Update for the security releases…" : "No build matches - clear the search or pick All."}</td></tr>`
     : builds.map(x => `<tr class="${x.uuid === wmUi.uuid ? "sel" : ""}" data-wm-build="${esc(x.uuid)}">
       <td>${wmBuild(x.build)}${x.uuid === all[0].uuid ? ' <span class="pill status ok wm-newest">Newest</span>' : ""}</td>
-      <td><span class="wm-kind ${/ (B|OOB)$/.test(x.kind) ? "b" : x.kind === "Insider" ? "ins" : ""}">${esc(x.kind)}</span></td>
+      <td>${x.kind === "Insider" ? `<span class="pill status warn">Insider</span>` : `<span class="pill">${esc(x.kind)}</span>`}</td>
       <td class="muted">${esc(wmDate(x.created))}</td>
       <td>${(x.isos || []).length ? `<span class="pill status ok">Built</span>` : ""}</td>
       <td class="row-actions"><button class="btn sm${x.uuid === wmUi.uuid ? " primary" : ""}" type="button" data-wm-build="${esc(x.uuid)}">${x.uuid === wmUi.uuid ? "Selected" : "Select"}</button></td></tr>`).join("");
@@ -765,7 +768,7 @@ function paintWinMedia() {
   const tight = sz && sz.free != null && sz.total * 3 > sz.free;
   const panel = !b ? `<p class="hint">Pick a build.</p>` : `
       ${prod.insider ? `<div class="warn-banner"><div class="warn-banner-text">Insider Preview: for trying things, not for production. It expires, and Microsoft supports it only through the Feedback Hub.</div></div>` : ""}
-      <div class="field-like">${fieldLabel("os-window.svg", "Editions - one image each, all in one ISO")}
+      <div class="field-like">${fieldLabel("windows-layers.svg", "Editions - one image each, all in one ISO")}
         ${!ed ? `<p class="hint">Asking the catalog…</p>` : ed.error ? `<p class="hint err">${esc(ed.error)}</p>` : `<div class="wm-eds">${wmEditionRows(ed)}</div>`}</div>
       <div class="field-like">${fieldLabel("language.svg", "Language")}
         <select id="wmLang" ${ed && ed.langs ? "" : "disabled"}>${ed && ed.langs ? opts(ed.langs.slice().sort().map(l => [l, langTag(l)]), wmUi.lang) : "<option>…</option>"}</select></div>
@@ -955,7 +958,7 @@ function bakePlaceChips(r, s) {
     <img src="${iconSrc(icon)}" alt=""><span class="k">${label}</span><b>${esc(value || "?")}</b></button>`;
   return `<div class="bake-place">
     ${chip("node", "servers.svg", "Node", node)}${chip("net", "vnet.svg", "Network", bridge + (vlan ? " · VLAN " + vlan : ""))}${chip("addr", "static-ip.svg", "Address", addr && addr.toLowerCase() !== "dhcp" ? addr : "DHCP")}
-    ${changed ? `<span class="pill tag" title="Media's defaults: ${esc(r.node)} · ${esc(r.bridge)}">this bake only</span>` : ""}
+    ${changed ? `<span class="pill" title="Media's defaults: ${esc(r.node)} · ${esc(r.bridge)}">this bake only</span>` : ""}
     ${goldsUi.placeOpen ? `<div class="bake-place-pop" role="dialog" aria-label="Where this bake runs">
       ${field(fieldLabel("servers.svg", "Node"), `<select id="bpNode">${opts(nodes, node)}</select>`)}
       ${field(fieldLabel("vnet.svg", "Network"), `<select id="bpBridge">${opts(bridges, bridge)}</select>`)}
@@ -1135,7 +1138,7 @@ function cleanupPanel(golds) {
   const picked = inv.filter(e => pick.has(e.g.id) && !e.locked);
   return `<div class="card bake-panel">
     <div class="bake-head"><div class="card-title"><img src="${iconSrcDanger("trash.svg")}" alt=""> Clean up golds</div>
-      <button class="btn icon ghost" type="button" id="cleanupClose" title="Close" aria-label="Close">${chipRemoveIcon()}</button></div>
+      <button class="btn icon close-x" type="button" id="cleanupClose" title="Close" aria-label="Close">${chipRemoveIcon()}</button></div>
     <p class="hint bake-lead">Pre-ticked: older golds of the same kind (image, language, disk size) and the rows failed bakes left. Golds with linked clones are locked - a linked clone needs its gold; full copies do not.</p>
     <div class="table-wrap"><table class="data"><thead><tr><th></th><th>Gold</th><th>Image</th><th>Language · build · disk · age</th><th>Kind</th><th>Picked by</th><th></th></tr></thead><tbody>
     ${inv.map(e => `<tr class="${e.locked ? "muted-row" : ""}"><td>${toggle(`data-cleanup="${esc(e.g.id)}" aria-label="Remove ${esc(goldShortId(e.g))}"`, "", pick.has(e.g.id) && !e.locked, !!e.locked, "", "bare")}</td>
@@ -1221,7 +1224,7 @@ async function bladeGolds(main, stale) {
         <div class="ov-seg" role="group" aria-label="Operating system">
           <button class="btn${goldsUi.os === "linux" ? " on" : ""}" type="button" data-bake-os="linux">Linux</button><button class="btn${goldsUi.os === "windows" ? " on" : ""}" type="button" data-bake-os="windows">Windows</button>
         </div>
-        <button class="btn icon ghost" type="button" id="bakeClose" title="Close" aria-label="Close">${chipRemoveIcon()}</button>
+        <button class="btn icon close-x" type="button" id="bakeClose" title="Close" aria-label="Close">${chipRemoveIcon()}</button>
       </div>
       <p class="hint bake-lead">${goldsUi.os === "linux"
         ? "Proxmox VE downloads the cloud image and checks its checksum; the studio bakes updates, packages, region and features into it and seals it."
