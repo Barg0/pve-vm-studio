@@ -369,6 +369,7 @@ async fn deploy_inner(
 
     // ---- 1. clone ----
     let mut pr = Progress::new(log, format!("Building {}", spec.name));
+    pr.calibrate(if win { "WinPE deploy pass" } else { "removing the seed" }).await;
     pr.stage(0.0, 20.0, "cloning the gold");
     log.run(format!(
         "{} clone of {} (template {template}) on {node}",
@@ -391,7 +392,11 @@ async fn deploy_inner(
         clone.push(("pool".into(), spec.pool.clone()));
     }
     let cloned = pve
-        .run_task(&format!("/nodes/{}/qemu/{template}/clone", enc(&gold.node)), clone, |_| {})
+        .run_task(&format!("/nodes/{}/qemu/{template}/clone", enc(&gold.node)), clone, |l| {
+            if let Some(f) = crate::pve::Pve::transferred(l) {
+                pr.within(f, format!("full copy · {:.0}%", f * 100.0));
+            }
+        })
         .await;
     drop(guard);
     if cloned.is_err() && pve.vm_status(&node, vmid).await.is_ok() {
@@ -586,6 +591,8 @@ async fn deploy_inner(
     // AHCI driver and would not see a SATA seed.
     let slot = if !win { linux::SEED_SLOT } else if pass_media.is_some() { "sata2" } else { "sata0" };
     let seed_storage = if spec.storage.is_empty() { gold.storage.clone() } else { spec.storage.clone() };
+    // The deploy pass's plan (its steps, weighted) - when there is one.
+    let mut deploy_units: Vec<(String, f64)> = Vec::new();
     let seed_disk = if let Some(img) = img {
         let mut nics = vec![linux::NicCfg {
             mac: mac.clone(),
@@ -686,17 +693,16 @@ async fn deploy_inner(
                 caps.push("ServerCore.AppCompatibility~~~~0.0.1.0".into());
             }
             let fod = spec.fod.as_ref();
-            files.push((
-                "pvs/pe.cmd",
-                windows::pe_deploy_cmd(&windows::DeployPass {
-                    capabilities: &caps,
-                    fod_root: fod.map(|f| f.root.as_str()).unwrap_or(""),
-                    fod_marker: fod.map(|f| f.marker.as_str()).unwrap_or(""),
-                    client_features: if ws.client { &spec.client_features } else { &[] },
-                    server_features: &server_dism,
-                    remove_apps: if ws.client { &spec.remove_apps } else { &[] },
-                }),
-            ));
+            let dp = windows::DeployPass {
+                capabilities: &caps,
+                fod_root: fod.map(|f| f.root.as_str()).unwrap_or(""),
+                fod_marker: fod.map(|f| f.marker.as_str()).unwrap_or(""),
+                client_features: if ws.client { &spec.client_features } else { &[] },
+                server_features: &server_dism,
+                remove_apps: if ws.client { &spec.remove_apps } else { &[] },
+            };
+            deploy_units = windows::deploy_units(&dp);
+            files.push(("pvs/pe.cmd", windows::pe_deploy_cmd(&dp)));
         }
         let refs: Vec<(&str, &str)> = files.iter().map(|(n, c)| (*n, c.as_str())).collect();
         SeedDisk::build(work, &seed_name, "PVSVM", &refs).await?
@@ -726,7 +732,7 @@ async fn deploy_inner(
         windows::set_boot(pve, &node, vmid, "sata0").await?;
         log.run("WinPE deploy pass: capabilities, features, app removal, the VM's answer file and GuestProvision").await;
         pr.stage(35.0, 50.0, "WinPE deploy pass");
-        let m = windows::run_pass(pve, log, &mut pr, &node, vmid, "deploy pass", 30, &[]).await?;
+        let m = windows::run_pass(pve, log, &mut pr, &node, vmid, "deploy pass", 30, &deploy_units).await?;
         let count = |p: &str| m.iter().filter(|l| l.starts_with(p)).count();
         for l in m.iter().filter(|l| l.starts_with("PVS-CAP-FAIL") || l.starts_with("PVS-FEATURE-FAIL") || l.starts_with("PVS-APP-FAIL")) {
             log.warn(format!("{} - see the debug lines above", crate::markers::text(l))).await;

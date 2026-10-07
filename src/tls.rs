@@ -410,11 +410,12 @@ pub async fn acme_issue(
     if acme.staging {
         log.warn("Staging: the certificate will not be trusted by browsers - for testing the setup only").await;
     }
-    // lego reports no progress of its own; the bar marks the two steps there are.
-    log.progress("Let's Encrypt", Some(10.0), "ordering and validating");
+    // lego reports no progress of its own, and DNS takes as long as it takes: the step,
+    // never a percentage.
+    log.progress("Let's Encrypt", None, "ordering and validating");
     args.push("run".into());
     run_lego(args, env, Some(log)).await?;
-    log.progress("Let's Encrypt", Some(90.0), "installing the certificate");
+    log.progress("Let's Encrypt", None, "installing the certificate");
     let info = install_from_lego(paths, live, fqdn).await?;
     log.ok(format!("Certificate for {} from {}, valid until {}", info.names.join(", "), info.issuer, info.not_after)).await;
     Ok(info)

@@ -699,10 +699,18 @@
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent);
   }
   :is(.card-head, .card-actions, .gs-head, .ov-title) .pill.role { font-size: 10.5px; }
+  /* The VM cards alone (2026-10-07, variant A): their head's badges at the small size, so
+     the name line is the name's height and the line below has room. Every other head keeps
+     the 22 px badges. */
+  .vm-card > .card-head .title-badges .pill { height: 18px; padding: 0 6px; font-size: 11px; }
+  .vm-card > .card-head .title-badges .pill.role { font-size: 10px; }
+  .vm-card > .card-head .card-meta { margin-top: 4px; }
   .pill.role.core { --c: var(--warn); }
   .pill.role.desktop { --c: var(--role-server); }
   .pill.role.client { --c: var(--role-client); }
   .pill.role.linux { --c: var(--role-linux); }
+  /* A state that stops a build (no gold, a full storage): the kind pill's hairline in red. */
+  .pill.role.danger { --c: var(--danger); }
   .pill.role.virtual { --c: var(--band-ident, var(--flag-nested)); }
 
   .pill.status {
@@ -1704,20 +1712,16 @@
 
   /* VM settings → Hardware defaults: the nodes as PVE reports them, toggles in a row of
      their own under the fields (never beside them). */
-  /* The nodes as a table in a box of its own (T1 of the 2026-10-07 mockup): every fact a
-     column, CPU load and memory as bars with their figures. */
-  .hw-box { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-subtle); overflow-x: auto; }
-  .hw-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .hw-table th { text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--fg-muted); padding: 8px 12px; background: var(--bg-hover); border-bottom: 1px solid var(--border); white-space: nowrap; }
-  .hw-table td { padding: 9px 12px; border-bottom: 1px solid var(--divider); white-space: nowrap; vertical-align: middle; }
-  .hw-table tr:last-child td { border-bottom: 0; }
+  /* The nodes in the studio's data table (T1 of the 2026-10-07 mockup): every fact a column,
+     CPU load and memory as bars with their figures. */
+  .hw-table td { white-space: nowrap; }
   .hw-table tr.odd td { background: color-mix(in srgb, var(--warn) 7%, var(--bg-subtle)); }
   .hw-table td.mono, .hw-bar .mono { font-size: 12.5px; }
   .hw-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--success); margin-right: 8px; vertical-align: middle; }
   .hw-bar { display: grid; grid-template-columns: minmax(80px, 120px) auto; gap: 10px; align-items: center; }
   .hw-bar .meter-track { display: block; }
   .hw-state { text-align: right; }
-  .card .warn-box + .field-group, .hw-box + .warn-box { margin-top: 10px; }
+  .card .warn-box + .field-group, .table-wrap + .warn-box { margin-top: 10px; }
   .hw-own.off { opacity: .55; }
   .toggle-grid.hw-toggles { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 12px; }
   @media (max-width: 900px) { .toggle-grid.hw-toggles { grid-template-columns: 1fr; } }

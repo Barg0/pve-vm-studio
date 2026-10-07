@@ -900,6 +900,22 @@ function Test-WingetInstalled {
     return $version
 }
 
+# The studio's progress bar for this boot: "<done> <total> <step>" in seconds as these steps
+# take (a WinGet app ~50, a feature ~40, a capability ~60, an Arc connect ~60), rewritten as
+# each step starts and ends. The studio reads it through the guest agent.
+$script:pvsDone = 0
+$script:pvsTotal = 1
+$pvsProgressPath = "C:\ProgramData\PVS\progress.txt"
+function Set-PvsProgress {
+    param([string]$Step, [double]$Add = 0)
+    $script:pvsDone += $Add
+    try {
+        New-Item -ItemType Directory -Path (Split-Path -Path $pvsProgressPath) -Force | Out-Null
+        Set-Content -Path $pvsProgressPath -Value ("{0} {1} {2}" -f [int]$script:pvsDone, [int]$script:pvsTotal, $Step) -Encoding ASCII
+    }
+    catch { }
+}
+
 function Install-WingetApplications {
     # The VM card's Applications: machine-wide from the winget source, always the newest
     # version. Never fatal - a failed app is reported and the VM still comes up. Exit codes
@@ -931,6 +947,7 @@ function Install-WingetApplications {
     foreach ($a in $Apps) {
         $id = [string]$a.id
         if (-not $id) { continue }
+        Set-PvsProgress -Step "WinGet: $id"
         $over = [string]$a.override
         $base = "install -e --id $id --source winget --silent --disable-interactivity --skip-dependencies --accept-package-agreements --accept-source-agreements --force"
         if ($over) { $base += ' --override "' + ($over -replace '"', '\"') + '"' }
@@ -962,6 +979,7 @@ function Install-WingetApplications {
         $message = ""
         if (-not $ok) { $message = if ($code -eq -1) { "timed out" } elseif ($success -contains $code) { "winget reported success, but does not list it" } else { "exit $code" } }
         $results += @{ id = $id; success = $ok; exitCode = $code; version = $version; message = $message }
+        Set-PvsProgress -Step "WinGet: $id" -Add 50
     }
     return , $results
 }
@@ -1121,13 +1139,21 @@ try {
     $state.rsatOnline         = $pendingRsat
     $state.capabilitiesOnline = $pendingCapabilities
 
+    $wingetCount = @($manifest.wingetApps | Where-Object { $_ }).Count
+    $script:pvsTotal = [math]::Max(1, 2 * $nicPlan.Count + 5 * $dataDiskJobs.Count + 60 * $pendingCapabilities.Count + 40 * $pendingFeatures.Count +
+        60 * $pendingRsat.Count + $(if ($manifest.azureArc) { 60 } else { 0 }) + $(if ($wingetCount) { 5 + 50 * $wingetCount } else { 0 }) +
+        $(if ([bool]$manifest.hotpatchReady) { 1 } else { 0 }) + $(if ($manifest.domainJoin) { 2 } else { 0 }))
+    Set-PvsProgress -Step "network adapters"
+
     # Adapter names before anything else: it is the cheapest step here and the one whose
     # result is read back the most, so a failure further down still leaves usable names.
     $state.networkAdapters = @(Rename-GuestNetworkAdapters -Plan $nicPlan)
+    Set-PvsProgress -Step "data disks" -Add (2 * $nicPlan.Count)
 
     # Data volumes first: a role installed below may be pointed at one of these drives,
     # and formatting needs nothing else to be in place.
     $state.dataDisks = @(Initialize-GuestDataDisks -DiskJobs $dataDiskJobs -SharedDiskCount $sharedDiskCount)
+    Set-PvsProgress -Step "capabilities" -Add (5 * $dataDiskJobs.Count)
 
     # Server Core App Compatibility FOD must land before Windows Features/Roles - it is a
     # Core-only capability, never present alongside RSAT (client-only), but roles installed
@@ -1135,24 +1161,29 @@ try {
     if (Install-PendingCapabilities -CapabilityNames $pendingCapabilities -Label "Windows capability") {
         $restartNeeded = $true
     }
+    Set-PvsProgress -Step "roles and features" -Add (60 * $pendingCapabilities.Count)
 
     if (Install-PendingWindowsFeatures -FeatureNames $pendingFeatures -IncludeManagementTools:$includeManagementTools) {
         $restartNeeded = $true
     }
+    Set-PvsProgress -Step "RSAT" -Add (40 * $pendingFeatures.Count)
 
     if (Install-PendingCapabilities -CapabilityNames $pendingRsat -Label "RSAT capability") {
         $restartNeeded = $true
     }
+    Set-PvsProgress -Step "Azure Arc" -Add (60 * $pendingRsat.Count)
 
     if ($manifest.azureArc) {
         $state.arc.attempted = [bool]$manifest.azureArc.enabled
         $state.arc.authMode  = [string]$manifest.azureArc.authMode
         Connect-GuestProvisionAzureArc -ArcConfig $manifest.azureArc
+        Set-PvsProgress -Step "WinGet" -Add 60
     }
 
     # Applications from WinGet before the join task is registered: the task restarts the
     # VM five minutes after it is in place, and an installer must not be cut off by it.
     if ($manifest.wingetApps) {
+        Set-PvsProgress -Step "WinGet: catalog" -Add 5
         try { $state.wingetApps = Install-WingetApplications -Apps @($manifest.wingetApps) }
         catch { Write-Log "WinGet applications: $($_.Exception.Message)" -Tag "Error" }
     }
@@ -1175,8 +1206,10 @@ try {
     # Last: everything above must be finished before the join task can fire, because the
     # boot after the join is the one where domain policy lands on this machine.
     if ($manifest.domainJoin) {
+        Set-PvsProgress -Step "domain join"
         $state.domainJoin = Register-DeferredDomainJoin -JoinConfig $manifest.domainJoin
     }
+    Set-PvsProgress -Step "done" -Add ($script:pvsTotal - $script:pvsDone)
 
     $state.restartNeeded = $restartNeeded
     $state.success       = $true

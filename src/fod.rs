@@ -331,6 +331,7 @@ pub struct Built {
 pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Path, node: &str, storage: &str, src: &Source, lang: &str) -> Result<Built> {
     let prod = uup::product(src.product).context("no such product in the catalog")?;
     let mut pr = Progress::new(log, format!("Building the {} Features on Demand ISO", src.name));
+    pr.calibrate("reading Microsoft's package lists").await;
     let dir: PathBuf = work.join(format!("fod-{}", uuid::Uuid::new_v4().simple()));
     // Its own cache: a media build's files share names with these, not content.
     let dl = work.join("uup-files").join(format!("fod-{}", src.key));
@@ -487,7 +488,7 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
         let label: String = format!("FOD_{}_{base}", src.short.to_uppercase().replace('-', "_")).chars().take(32).collect();
         log.run(format!("Building the ISO: {name}")).await;
         let (iso_s, tree_s) = (iso.display().to_string(), dir.join("iso").display().to_string());
-        run(log, "genisoimage", &["-quiet", "-udf", "-iso-level", "3", "-allow-limited-size", "-V", &label, "-o", &iso_s, &tree_s]).await?;
+        crate::winpe::run_progress(log, "genisoimage", &["-udf", "-iso-level", "3", "-allow-limited-size", "-V", &label, "-o", &iso_s, &tree_s], |f| pr.within(f, format!("building the ISO · {:.0}%", f * 100.0))).await?;
         let size = tokio::fs::metadata(&iso).await?.len();
         log.ok(format!("{name}: {:.2} GB", size as f64 / 1e9)).await;
 
@@ -497,7 +498,7 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
             pve.delete_volume(node, &volid).await?;
         }
         log.run(format!("Uploading into {storage} on {node}")).await;
-        let volid = pve.upload(node, storage, "iso", &iso, &name).await?;
+        let volid = pve.upload_progress(node, storage, "iso", &iso, &name, |f| pr.within(f, format!("uploading · {:.0}%", f * 100.0))).await?;
         log.ok(format!("{volid} is ready - new {} VMs install their capabilities from it", src.name)).await;
         Ok(Built { volid, packages, satellites })
     }

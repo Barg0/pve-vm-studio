@@ -13,26 +13,53 @@ pub struct Progress {
     /// The current stage's span of the whole bar.
     from: f64,
     to: f64,
+    /// The part of the stage a sub-step covers (0.0-1.0): `within` fills it.
+    part: (f64, f64),
+    /// Each stage's span from earlier runs (`calibrate`), in place of the code's own.
+    plan: Vec<(String, f64, f64)>,
 }
 
 impl Progress {
     pub fn new(log: &JobLog, label: impl Into<String>) -> Self {
-        Self { log: log.clone(), label: label.into(), pct: 0.0, from: 0.0, to: 0.0 }
+        Self { log: log.clone(), label: label.into(), pct: 0.0, from: 0.0, to: 0.0, part: (0.0, 1.0), plan: vec![] }
     }
 
     /// Enters a stage covering `from..to` of the bar; the bar moves to its start.
     pub fn stage(&mut self, from: f64, to: f64, detail: impl Into<String>) {
+        let detail = detail.into();
+        let (from, to) = self.plan.iter().find(|(n, _, _)| *n == detail).map_or((from, to), |(_, f, t)| (*f, *t));
         self.from = from;
         self.to = to;
-        let detail = detail.into();
+        self.part = (0.0, 1.0);
         self.log.mark_step(&detail);
         self.set(from, detail);
     }
 
-    /// How far into the current stage (0.0-1.0).
+    /// The stages' spans from what they took before: the median of the last five finished
+    /// runs that went through `anchor` (a stage only that kind of job has - "WinPE pass 1"
+    /// is a Windows bake). Without such a run, the code's own spans stay.
+    pub async fn calibrate(&mut self, anchor: &str) {
+        let (Some(dir), anchor) = (self.log.steps_dir(), anchor.to_owned()) else { return };
+        if let Ok(plan) = tokio::task::spawn_blocking(move || history(&dir, &anchor, 5)).await {
+            self.plan = plan;
+        }
+    }
+
+    /// How far into the current stage (0.0-1.0) - or into its current part (`part`).
     pub fn within(&mut self, fraction: f64, detail: impl Into<String>) {
-        let f = fraction.clamp(0.0, 1.0);
+        let f = self.part.0 + (self.part.1 - self.part.0) * fraction.clamp(0.0, 1.0);
         self.set(self.from + (self.to - self.from) * f, detail);
+    }
+
+    /// A stage made of weighted sub-steps: the next `within` calls fill sub-step `i` of
+    /// `weights` (measured durations), and the bar moves to its start now.
+    pub fn part(&mut self, weights: &[f64], i: usize, detail: impl Into<String>) {
+        let total: f64 = weights.iter().sum::<f64>().max(f64::EPSILON);
+        let start: f64 = weights.iter().take(i).sum::<f64>() / total;
+        let end = start + weights.get(i).copied().unwrap_or(0.0) / total;
+        self.part = (0.0, 1.0);
+        self.within(start, detail);
+        self.part = (start, end.min(1.0));
     }
 
     /// A new detail line, the bar where it is (a sub-step's own percentage, say).
@@ -48,6 +75,73 @@ impl Progress {
         let step = if self.to > self.from { Some(((self.pct - self.from) / (self.to - self.from) * 100.0).clamp(0.0, 100.0)) } else { None };
         self.log.progress_step(&self.label, Some(self.pct.min(100.0)), step, detail);
     }
+}
+
+/// Each stage's span (percent of the job) from the newest `runs` finished jobs whose steps
+/// include `anchor`: their stage times (the .steps file; the last stage ends with the log),
+/// the median per stage, in the newest run's order.
+fn history(dir: &std::path::Path, anchor: &str, runs: usize) -> Vec<(String, f64, f64)> {
+    use chrono::{DateTime, Utc};
+    let Ok(rd) = std::fs::read_dir(dir) else { return vec![] };
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = rd
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "steps"))
+        .filter_map(|p| Some((std::fs::metadata(&p).ok()?.modified().ok()?, p)))
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut seen: Vec<Vec<(String, f64)>> = Vec::new();
+    for (_, p) in files {
+        if seen.len() >= runs {
+            break;
+        }
+        let log = p.with_extension("log");
+        let Ok(text) = std::fs::read_to_string(&log) else { continue };
+        if !text.lines().last().is_some_and(|l| l.contains("[ end")) {
+            continue;
+        }
+        let Ok(steps) = std::fs::read_to_string(&p) else { continue };
+        let marks: Vec<(DateTime<Utc>, String)> = steps
+            .lines()
+            .filter_map(|l| {
+                let (t, n) = l.split_once('\t')?;
+                Some((DateTime::parse_from_rfc3339(t).ok()?.with_timezone(&Utc), n.to_owned()))
+            })
+            .collect();
+        if !marks.iter().any(|(_, n)| n == anchor) {
+            continue;
+        }
+        let Some(end) = std::fs::metadata(&log).ok().and_then(|m| m.modified().ok()).map(DateTime::<Utc>::from) else { continue };
+        let run: Vec<(String, f64)> = marks
+            .iter()
+            .enumerate()
+            .map(|(i, (t, n))| {
+                let next = marks.get(i + 1).map_or(end, |(t, _)| *t);
+                (n.clone(), (next - *t).num_milliseconds().max(0) as f64 / 1000.0)
+            })
+            .collect();
+        seen.push(run);
+    }
+    let Some(newest) = seen.first() else { return vec![] };
+    let median = |name: &str| {
+        let mut v: Vec<f64> = seen.iter().filter_map(|r| r.iter().find(|(n, _)| n == name).map(|(_, s)| *s)).collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        v.get(v.len() / 2).copied().unwrap_or(0.0)
+    };
+    let times: Vec<(String, f64)> = newest.iter().map(|(n, _)| (n.clone(), median(n))).collect();
+    let total: f64 = times.iter().map(|(_, s)| s).sum();
+    if total <= 0.0 {
+        return vec![];
+    }
+    let mut at = 0.0;
+    times
+        .into_iter()
+        .map(|(n, s)| {
+            let from = at;
+            at += s / total * 100.0;
+            (n, from, at.min(100.0))
+        })
+        .collect()
 }
 
 /// Reads the package manager's own counters out of cloud-init's output, across however
@@ -179,4 +273,20 @@ mod tests {
         assert_eq!(cloud_init_stage("Cloud-init v. 25.1.4 running 'modules:final' at Wed"), Some(4));
         assert_eq!(cloud_init_stage("random"), None);
     }
+
+    #[test]
+    fn spans_from_history() {
+        let dir = std::env::temp_dir().join(format!("pvs-hist-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.steps"), "2026-10-06T17:36:00+00:00\tcreating the bake VM\n2026-10-06T17:36:10+00:00\tWinPE pass 1\n2026-10-06T17:38:40+00:00\taudit mode and sysprep\n").unwrap();
+        std::fs::write(dir.join("a.log"), "x\n2026-10-06 19:42:54 [ end   ] Bake: done\n").unwrap();
+        std::fs::write(dir.join("b.steps"), "2026-10-06T17:36:00+00:00\tcloud image\n").unwrap();
+        std::fs::write(dir.join("b.log"), "2026-10-06 19:42:54 [ end   ] Bake: done\n").unwrap();
+        let plan = history(&dir, "WinPE pass 1", 5);
+        assert_eq!(plan.iter().map(|(n, _, _)| n.as_str()).collect::<Vec<_>>(), vec!["creating the bake VM", "WinPE pass 1", "audit mode and sysprep"]);
+        assert!(plan[0].1 == 0.0 && plan[2].2 <= 100.0 && plan[1].2 > plan[1].1);
+        assert!(history(&dir, "no such stage", 5).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
+

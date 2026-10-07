@@ -361,9 +361,23 @@ impl Pve {
 
     /// Uploads a local file (an ISO the studio built) into a storage. Returns the volid.
     pub async fn upload(&self, node: &str, storage: &str, content: &str, file: &Path, name: &str) -> Result<String> {
+        self.upload_progress(node, storage, content, file, name, |_| {}).await
+    }
+
+    /// `upload`, with how much of the file is sent (0.0-1.0) about every second.
+    pub async fn upload_progress(&self, node: &str, storage: &str, content: &str, file: &Path, name: &str, mut sent: impl FnMut(f64)) -> Result<String> {
+        use futures::StreamExt;
+        use std::sync::atomic::{AtomicU64, Ordering};
         let f = tokio::fs::File::open(file).await?;
         let len = f.metadata().await?.len();
-        let body = reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(f));
+        let count = std::sync::Arc::new(AtomicU64::new(0));
+        let c = count.clone();
+        let stream = tokio_util::io::ReaderStream::new(f).inspect(move |r| {
+            if let Ok(b) = r {
+                c.fetch_add(b.len() as u64, Ordering::Relaxed);
+            }
+        });
+        let body = reqwest::Body::wrap_stream(stream);
         let part = reqwest::multipart::Part::stream_with_length(body, len)
             .file_name(name.to_owned())
             .mime_str("application/octet-stream")?;
@@ -372,20 +386,29 @@ impl Pve {
             .part("filename", part);
         let path = format!("/nodes/{}/storage/{}/upload", enc(node), enc(storage));
         let ep = self.endpoint();
-        let resp = ep
-            .upload_http
-            .post(format!("{}{}", ep.base, path))
-            .header(header::AUTHORIZATION, &self.token_header)
-            .multipart(multipart)
-            .send()
-            .await
-            .with_context(|| format!("uploading {name}"))?;
+        let send = ep.upload_http.post(format!("{}{}", ep.base, path)).header(header::AUTHORIZATION, &self.token_header).multipart(multipart).send();
+        tokio::pin!(send);
+        let resp = loop {
+            tokio::select! {
+                r = &mut send => break r.with_context(|| format!("uploading {name}"))?,
+                _ = tokio::time::sleep(Duration::from_secs(1)) => sent(count.load(Ordering::Relaxed) as f64 / len.max(1) as f64),
+            }
+        };
         let upid: String = decode(resp, &Method::POST, &path).await?;
         self.wait_task(&upid, |_| {}).await?;
         Ok(format!("{storage}:{content}/{name}"))
     }
 
     // ---- VMs ----
+
+    /// A disk copy's share done in a PVE task log line: "transferred 63.4 GiB of 64.0 GiB
+    /// (99.10%)" (full clone, drive import).
+    pub fn transferred(line: &str) -> Option<f64> {
+        if !line.contains("transferred") {
+            return None;
+        }
+        crate::winpe::pct_in(line).map(|p| p / 100.0)
+    }
 
     /// Hold this from next_vmid() until the create (or clone) with that id returned.
     pub async fn vmid_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {

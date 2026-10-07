@@ -1138,7 +1138,7 @@ pub(crate) async fn run_pass(
                     }
                     if part.starts_with("PVS-") {
                         if let Some(key) = unit_key(part)
-                            && let Some(k) = units.iter().enumerate().skip(at.unwrap_or(0)).find(|(_, (u, _))| *u == key).map(|(k, _)| k)
+                            && let Some(k) = units.iter().enumerate().skip(at.unwrap_or(0)).find(|(_, (u, _))| *u == key || key.starts_with(&format!("{u} "))).map(|(k, _)| k)
                         {
                             at = Some(k);
                             done = units[..k].iter().map(|(_, w)| w).sum();
@@ -1181,18 +1181,59 @@ pub(crate) async fn run_pass(
     }
 }
 
+/// The bake's passes as plans for run_pass, weighted in seconds as a Windows 11 bake took
+/// them on pve-01 (2026-10-06, 5d0fd95c): pass 1 is the image (100 s, DISM's percentage) and
+/// little else; audit mode waits for Windows' own boot (2 min, nothing to measure), then the
+/// drivers, the agent and sysprep (46 s); pass 2 is short.
+pub(crate) fn pass1_units() -> Vec<(String, f64)> {
+    [("PASS1-START", 13.0), ("OS-DISK", 2.0), ("PARTITIONED", 100.0), ("APPLIED", 2.0), ("DRIVERS", 5.0), ("BCDBOOT", 1.0)]
+        .iter().map(|(k, w)| (k.to_string(), *w)).collect()
+}
+pub(crate) fn audit_units() -> Vec<(String, f64)> {
+    [("AUDIT-START", 8.0), ("VIRTIO", 5.0), ("QGA", 1.0), ("SYSPREP-START", 46.0)].iter().map(|(k, w)| (k.to_string(), *w)).collect()
+}
+pub(crate) fn pass2_units() -> Vec<(String, f64)> {
+    [("PASS2-START", 1.0), ("GENERALIZED", 5.0), ("LOCALE", 2.0), ("TIMEZONE", 4.0), ("ANSWERFILE", 2.0)].iter().map(|(k, w)| (k.to_string(), *w)).collect()
+}
+
+/// The deploy pass as a plan: the disk found, then each capability and feature (each one's
+/// verdict starts the next), the app removal, the answer file. A capability from the FoD ISO
+/// takes about a minute, a feature half of one.
+pub fn deploy_units(p: &DeployPass) -> Vec<(String, f64)> {
+    let mut v: Vec<(String, f64)> = vec![("DEPLOY-START".into(), 12.0)];
+    let mut items: Vec<(String, String, f64)> = Vec::new();
+    items.extend(p.capabilities.iter().map(|c| (format!("CAP {c}"), c.clone(), 60.0)));
+    items.extend(p.server_features.iter().chain(p.client_features).map(|f| (format!("FEATURE {f}"), f.clone(), 30.0)));
+    let mut start = "DISK".to_owned();
+    for (done, _, w) in &items {
+        v.push((start.clone(), *w));
+        start = done.clone();
+    }
+    if p.remove_apps.iter().any(|a| APP_REMOVAL.iter().any(|x| x.eq_ignore_ascii_case(a))) {
+        v.push((start.clone(), 30.0));
+        start = "APPS-DONE".into();
+    }
+    v.push((start, 2.0));
+    v.push(("ANSWERFILE".into(), 1.0));
+    v
+}
+
 /// The plan key a marker starts: "UPD 1 x.msu", "HEALTH 1-before", "INDEX 1". An app's
 /// verdict ("PROV-OK 1 <app>", -FAIL with its code) starts the next app: "PROV 1 <app>". An
 /// update's verdict starts nothing - the next marker does.
 pub(crate) fn unit_key(marker: &str) -> Option<String> {
     let rest = marker.strip_prefix("PVS-")?.trim();
     let (key, args) = rest.split_once(' ').map_or((rest, ""), |(k, a)| (k, a.trim()));
+    let first = || args.split_whitespace().next().map(str::to_owned);
     match key {
-        "UPD-OK" | "UPD-FAIL" => None,
+        "UPD-OK" | "UPD-FAIL" | "APP-REMOVED" | "APP-FAIL" => None,
         "PROV-OK" | "PROV-FAIL" => {
             let mut a = args.split_whitespace();
             Some(format!("PROV {} {}", a.next()?, a.next()?))
         }
+        // The deploy pass: a capability's or a feature's verdict starts the next one.
+        "CAP-OK" | "CAP-FAIL" | "CAP-SKIP" => Some(format!("CAP {}", first()?)),
+        "FEATURE-OK" | "FEATURE-FAIL" => Some(format!("FEATURE {}", first()?)),
         _ => Some(rest.to_owned()),
     }
 }
@@ -1230,7 +1271,8 @@ pub async fn bake(
     let client = img.installation_type == "Client";
     golds::check_node_memory(pve, log, node, p.memory_mb.max(4096)).await?;
     let mut pr = Progress::new(log, format!("Baking {display}"));
-    pr.stage(0.0, 3.0, "creating the bake VM");
+    pr.calibrate("WinPE pass 1").await;
+    pr.stage(0.0, 2.0, "creating the bake VM");
     let mut made: Option<u32> = None;
 
     let result: Result<(u32, String, Option<String>)> = async {
@@ -1306,8 +1348,8 @@ pub async fn bake(
 
         // ---- WinPE pass 1: apply ----
         log.run("WinPE pass 1: partition, apply, drivers, boot files").await;
-        pr.stage(3.0, 40.0, "WinPE pass 1");
-        let m = run_pass(pve, log, &mut pr, node, vmid, "pass 1", 40, &[]).await?;
+        pr.stage(2.0, 39.0, "WinPE pass 1");
+        let m = run_pass(pve, log, &mut pr, node, vmid, "pass 1", 40, &pass1_units()).await?;
         if !m.iter().any(|l| l == "PVS-PASS1-OK") {
             bail!("pass 1 failed: {}", m.last().map(|l| crate::markers::text(l)).unwrap_or_else(|| "nothing on the serial console".into()));
         }
@@ -1333,16 +1375,16 @@ pub async fn bake(
 
         // ---- audit boot: drivers, agent, generalize ----
         log.run("Audit mode: virtio drivers, guest agent, sysprep /generalize").await;
-        pr.stage(40.0, 70.0, "audit mode and sysprep");
+        pr.stage(39.0, 86.0, "audit mode and sysprep");
         set_boot(pve, node, vmid, "scsi0").await?;
-        let m = run_pass(pve, log, &mut pr, node, vmid, "audit", 60, &[]).await?;
+        let m = run_pass(pve, log, &mut pr, node, vmid, "audit", 60, &audit_units()).await?;
         if !m.iter().any(|l| l == "PVS-SYSPREP-START") {
             bail!("audit mode did not reach sysprep: {}", m.last().cloned().unwrap_or_else(|| "no markers".into()));
         }
 
         // ---- WinPE pass 2: verify, customize, key ----
         log.run("WinPE pass 2: verify generalize, locale, time zone, policies, key").await;
-        pr.stage(70.0, 95.0, "WinPE pass 2");
+        pr.stage(86.0, 98.0, "WinPE pass 2");
         // The pass 2 seed, now that the edition DISM will be handed is known; the VM is off
         // after sysprep, so the seed disks swap.
         let pass2 = SeedDisk::build(
@@ -1356,14 +1398,14 @@ pub async fn bake(
         seed::attach(pve, node, vmid, "sata3", &p.disk_storage, pass2, &s2).await.context("attaching the pass 2 seed disk")?;
         log.ok("Pass 2 seed attached as a disk (sata3)").await;
         set_boot(pve, node, vmid, "sata0").await?;
-        let m = run_pass(pve, log, &mut pr, node, vmid, "pass 2", 30, &[]).await?;
+        let m = run_pass(pve, log, &mut pr, node, vmid, "pass 2", 30, &pass2_units()).await?;
         if !m.iter().any(|l| l == "PVS-PASS2-OK") {
             let why = m.iter().find(|l| l.starts_with("PVS-NO-SYSPREP-TAG") || l.starts_with("PVS-NOT-GENERALIZED") || l.starts_with("PVS-EDITION-NOT-CHANGED") || l.ends_with("FAILED")).cloned();
             bail!("pass 2 failed: {}", why.or_else(|| m.last().cloned()).map(|l| crate::markers::text(&l)).unwrap_or_else(|| "nothing on the serial console".into()));
         }
 
         // ---- make it a gold ----
-        pr.stage(95.0, 100.0, "making it a template");
+        pr.stage(98.0, 100.0, "making it a template");
         pve.vm_set(
             node,
             vmid,
@@ -1777,8 +1819,21 @@ pub async fn follow_first_boot(pve: &Pve, log: &JobLog, pr: &mut Progress, node:
         if agent && pve.agent_read(node, vmid, r"C:\ProgramData\PVS\provisioned.txt", 0).await.is_some() {
             return Ok(());
         }
-        let f = if first { 0.6 } else if agent { 0.3 } else { 0.0 };
-        pr.within(f, if first { "OOBE" } else if agent { "specialize" } else { "booting" });
+        // GuestProvision's own steps, once it runs ("<done> <total> <step>", weighted in
+        // seconds): it is most of this boot - 5 of 6 minutes on vm-ws2025-02 (2026-10-06).
+        let gp = if agent {
+            pve.agent_read(node, vmid, r"C:\ProgramData\PVS\progress.txt", 0).await.and_then(|(t, _)| {
+                let mut it = t.trim().splitn(3, ' ');
+                let (d, n) = (it.next()?.parse::<f64>().ok()?, it.next()?.parse::<f64>().ok()?);
+                Some((d / n.max(1.0), it.next().unwrap_or("").trim().to_owned()))
+            })
+        } else {
+            None
+        };
+        match gp {
+            Some((f, step)) => pr.within(0.2 + 0.8 * f, format!("GuestProvision: {step}")),
+            None => pr.within(if first { 0.15 } else if agent { 0.1 } else { 0.0 }, if first { "OOBE" } else if agent { "specialize" } else { "booting" }),
+        }
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
@@ -1797,6 +1852,23 @@ pub fn check_name(name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pass_plans_follow_the_scripts() {
+        let src = include_str!("windows.rs");
+        for (k, _) in pass1_units().iter().chain(&audit_units()).chain(&pass2_units()) {
+            assert!(src.contains(&format!("echo PVS-{k}")), "no marker for {k}");
+        }
+        let caps = vec!["Rsat.Dns.Tools~~~~0.0.1.0".to_owned()];
+        let feats = vec!["DNS".to_owned()];
+        let apps = vec!["Microsoft.BingNews".to_owned()];
+        let p = DeployPass { capabilities: &caps, fod_root: "", fod_marker: "x", client_features: &[], server_features: &feats, remove_apps: &apps };
+        let u: Vec<String> = deploy_units(&p).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(u, vec!["DEPLOY-START", "DISK", "CAP Rsat.Dns.Tools~~~~0.0.1.0", "FEATURE DNS", "APPS-DONE", "ANSWERFILE"]);
+        assert_eq!(unit_key("PVS-CAP-OK Rsat.Dns.Tools~~~~0.0.1.0").as_deref(), Some("CAP Rsat.Dns.Tools~~~~0.0.1.0"));
+        assert_eq!(unit_key("PVS-FEATURE-FAIL DNS").as_deref(), Some("FEATURE DNS"));
+        assert_eq!(unit_key("PVS-APP-REMOVED x"), None);
+    }
 
     #[test]
     fn edge_search_engines_survive_cmd() {

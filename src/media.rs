@@ -1061,6 +1061,7 @@ impl Checkpoint {
 pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Client, work: &Path, p: &Placement, link: Link, req: Request) -> Result<MediaIso> {
     let prod = req.product;
     let mut pr = Progress::new(log, format!("Building {} {}", prod.name, req.build));
+    pr.calibrate("putting the image together").await;
     let run_id = req.run.clone();
     let dir: PathBuf = work.join(format!("media-{run_id}"));
     // What the worker fetches and sends back, served by worker_router while it runs.
@@ -1172,11 +1173,20 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         let first_s = first_meta.display().to_string();
         log.run(format!("Putting the image together: Setup media, boot.wim, install.wim ({})", base.join(", "))).await;
         let cabs: Vec<PathBuf> = files.iter().filter(|f| f.name.to_lowercase().ends_with(".cab") && !is_update(&f.name) && !is_aggregated(&f.name)).map(|f| dl.join(&f.name)).collect();
+        // The stage's steps, weighted by what they took on the studio (2026-10-05..07): the
+        // package CABs 50 s, the Setup media 1-2, WinRE 45, boot.wim 5, each edition 3-4 min,
+        // the inbox apps' download and layout 5 min. wimlib's own percentage fills each.
+        let mut parts: Vec<f64> = vec![if cabs.is_empty() { 0.0 } else { 50.0 }, 5.0, 45.0, 5.0];
+        parts.extend(base.iter().map(|_| 200.0));
+        parts.push(if prod.kind == Kind::Client { 300.0 } else { 0.0 });
+        let (p_setup, p_winre, p_boot, p_apps) = (1, 2, 3, 4 + base.len());
+        pr.part(&parts, 0, "putting the image together");
         cabs_to_esd(log, &dir, &cabs).await?;
 
         let tree = dir.join("iso");
         log.line("Applying the Setup media (ESD image 1)").await;
-        run(log, "wimlib-imagex", &["apply", &first_s, "1", &tree.display().to_string(), "--no-acls", "--no-attributes"]).await?;
+        pr.part(&parts, p_setup, "the Setup media");
+        crate::winpe::run_progress(log, "wimlib-imagex", &["apply", &first_s, "1", &tree.display().to_string(), "--no-acls", "--no-attributes"], |f| pr.within(f, format!("the Setup media · {:.0}%", f * 100.0))).await?;
         // The Setup dynamic update: its files into sources\ - before boot.wim takes Setup from there.
         for (f, _) in picks.iter().filter(|(_, t)| *t == Target::Setup) {
             let x = dir.join("setupdu");
@@ -1189,9 +1199,11 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         }
         let winre = dir.join("winre.wim");
         let winre_s = winre.display().to_string();
-        run(log, "wimlib-imagex", &["export", &first_s, "2", &winre_s, "--compress=maximum", "--boot"]).await?;
+        pr.part(&parts, p_winre, "WinRE");
+        crate::winpe::run_progress(log, "wimlib-imagex", &["export", &first_s, "2", &winre_s, "--compress=maximum", "--boot"], |f| pr.within(f, format!("WinRE · {:.0}%", f * 100.0))).await?;
 
         log.line("Building boot.wim: WinPE and the Setup environment").await;
+        pr.part(&parts, p_boot, "boot.wim");
         let n = build_boot_wim(log, &tree, &winre).await?;
         log.ok(format!("boot.wim: WinPE and the Setup environment ({n} Setup files)")).await;
 
@@ -1221,7 +1233,9 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             if prod.kind == Kind::Client {
                 args.push(refs.as_str());
             }
-            if let Err(e) = run(log, "wimlib-imagex", &args).await {
+            pr.part(&parts, 4 + i, format!("exporting {name}"));
+            let what = name.clone();
+            if let Err(e) = crate::winpe::run_progress(log, "wimlib-imagex", &args, |f| pr.within(f, format!("exporting {what} · {:.0}%", f * 100.0))).await {
                 if deferred.is_empty() {
                     return Err(e);
                 }
@@ -1255,6 +1269,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         let mut extra = Extras::default();
         let edge_file = files.iter().find(|f| f.name.eq_ignore_ascii_case("edge.wim")).map(|f| dl.join(&f.name)).filter(|p| p.exists());
         let mut apps_root: Option<(PathBuf, Vec<uup::File>)> = None;
+        pr.part(&parts, p_apps, "the inbox apps");
         if prod.kind == Kind::Client {
             extra.edge = edge_file.is_some();
             if let Some(agg) = files.iter().find(|f| is_aggregated(&f.name)).map(|f| dl.join(&f.name)) {
@@ -1736,13 +1751,13 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         let label: String = format!("{}_{}", prod.short.to_uppercase().replace('-', "_"), req.build.replace('.', "_")).chars().take(32).collect();
         log.run(format!("Building the ISO: {name}")).await;
         let tree_s = tree.display().to_string();
-        let mut args = vec!["-quiet"];
+        let mut args: Vec<&str> = vec![];
         if tree.join("boot/etfsboot.com").exists() {
             args.extend(["-b", "boot/etfsboot.com", "-no-emul-boot", "-eltorito-alt-boot"]);
         }
         let iso_s = iso.display().to_string();
         args.extend(["-b", "efi/microsoft/boot/efisys.bin", "-no-emul-boot", "-udf", "-iso-level", "3", "-allow-limited-size", "-hide", "*", "-V", &label, "-o", &iso_s, &tree_s]);
-        run(log, "genisoimage", &args).await?;
+        crate::winpe::run_progress(log, "genisoimage", &args, |f| pr.within(f, format!("building the ISO · {:.0}%", f * 100.0))).await?;
         let _ = tokio::fs::remove_dir_all(&tree).await;
         let size = tokio::fs::metadata(&iso).await?.len();
         let sum = run(log, "sha256sum", &[&iso_s]).await?;
@@ -1760,7 +1775,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             pve.delete_volume(&p.node, &volid).await?;
         }
         log.run(format!("Uploading into {} on {}", p.iso_storage, p.node)).await;
-        let volid = pve.upload(&p.node, &p.iso_storage, "iso", &iso, &name).await?;
+        let volid = pve.upload_progress(&p.node, &p.iso_storage, "iso", &iso, &name, |f| pr.within(f, format!("uploading · {:.0}%", f * 100.0))).await?;
         log.ok(format!("{volid} is ready - bake a gold from it under Media")).await;
         Ok(MediaIso {
             volid,

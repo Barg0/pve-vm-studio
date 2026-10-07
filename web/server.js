@@ -484,7 +484,7 @@ function dashVms(states) {
         return `<button type="button" class="dash-vm" data-goto="${st.v ? "access" : "servers"}">
           <span class="dot ${st.key}"></span><span class="dash-vm-name">${esc(s.name || "(no name)")}</span>
           <span class="dash-vm-os"><img src="${imageIconSrc(img)}" alt="">${esc(img.label.replace(/^Windows Server /, "WS ").replace(/^Windows /, "W"))}
-            ${g ? `<span class="mono muted">${esc(goldBuildLabel(g))}</span>` : `<span class="dash-bad">no gold</span>`}</span>
+            ${g ? `<span class="mono muted">${esc(goldBuildLabel(g))}</span>` : `<span class="pill role danger">no gold</span>`}</span>
           <span class="dash-vm-ip mono">${esc(ip)}</span>
           <span class="pill status ${{ ok: "ok", run: "run", bad: "bad", warn: "warn" }[st.key] || "idle"}">${esc(cap(st.label))}</span></button>`;
       }).join("")}</div>`
@@ -520,7 +520,7 @@ function dashSystem(inv) {
     const k = st.shared === 1 ? st.storage : st.storage + "@" + st.node; if (seen.has(k)) return false; seen.add(k); return true; });
   const storage = vmStor.map(st => {
     const p = pct(st.disk, st.maxdisk);
-    return `${line(p >= 90 ? "bad" : p >= 75 ? "warn" : "ok", `<b>${esc(st.storage)}</b> <span class="muted">${esc(st.plugintype || "")}${st.shared === 1 ? ", shared" : inv.nodes.length > 1 ? " on " + esc(st.node) : ""}</span>`, p >= 90 ? `<span class="dash-bad">${Math.round(p)}% full</span>` : "")}
+    return `${line(p >= 90 ? "bad" : p >= 75 ? "warn" : "ok", `<b>${esc(st.storage)}</b> <span class="muted">${esc(st.plugintype || "")}${st.shared === 1 ? ", shared" : inv.nodes.length > 1 ? " on " + esc(st.node) : ""}</span>`, p >= 90 ? `<span class="pill role danger">${Math.round(p)}% full</span>` : "")}
       <div class="dash-mini wide">${bar(p, sizePair(st.disk, st.maxdisk))}</div>`;
   }).join("");
 

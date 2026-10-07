@@ -210,6 +210,8 @@ pub async fn run(web: reqwest::Client, data: PathBuf, log: JobLog, jobs: crate::
     }
     let target = if tag == DEVELOPMENT { format!("development build {}", st["development"]["commit"].as_str().unwrap_or("")) } else { rel.version.clone() };
     log.run(format!("Update to {target} - from {} ({})", env!("CARGO_PKG_VERSION"), env!("STUDIO_COMMIT"))).await;
+    // What it is doing, never a percentage: a few seconds each, except the wait.
+    log.progress("Studio update", None, "checking");
     // Every other job first: the restart would cut them off.
     let mut said = false;
     loop {
@@ -220,6 +222,7 @@ pub async fn run(web: reqwest::Client, data: PathBuf, log: JobLog, jobs: crate::
         }
         if !said {
             log.line(format!("Waiting for {others} running job(s) to finish - the restart would cut them off")).await;
+            log.progress("Studio update", None, "waiting for the running jobs");
             said = true;
         }
         tokio::time::sleep(Duration::from_secs(15)).await;
@@ -228,6 +231,7 @@ pub async fn run(web: reqwest::Client, data: PathBuf, log: JobLog, jobs: crate::
     tokio::fs::create_dir_all(&d).await?;
     let staged = d.join("pve-vm-studio.new");
     log.get(format!("Downloading {ASSET} ({:.1} MB)", rel.asset_size as f64 / 1e6)).await;
+    log.progress("Studio update", None, "downloading");
     let bytes = web.get(&rel.asset_url).send().await?.error_for_status()?.bytes().await?;
     tokio::fs::write(&staged, &bytes).await?;
     let sums = web.get(&rel.sums_url).send().await?.error_for_status()?.text().await?;
@@ -250,6 +254,7 @@ pub async fn run(web: reqwest::Client, data: PathBuf, log: JobLog, jobs: crate::
     tokio::fs::write(d.join("request.tmp"), req).await?;
     tokio::fs::rename(d.join("request.tmp"), d.join("request")).await?;
     log.run("Handing over to the updater - the studio restarts into the new version").await;
+    log.progress("Studio update", None, "restarting");
     // The helper restarts the service; this job ends in the next process (finish_pending).
     for _ in 0..24 {
         log.check_abort()?;

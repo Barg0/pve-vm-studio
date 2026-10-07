@@ -101,6 +101,64 @@ pub(crate) async fn run(log: &JobLog, cmd: &str, args: &[&str]) -> Result<String
     Ok(text)
 }
 
+/// A tool's percentage in one line of its output: the number right before the first '%' -
+/// wimlib "... (92%) done", genisoimage "  2.56% done, estimate ...", xorriso
+/// "xorriso : UPDATE :  80.26% done", 7z -bsp1 "  1% 1 + d/f" (checked 2026-10-07).
+pub(crate) fn pct_in(line: &str) -> Option<f64> {
+    let head = &line[..line.find('%')?];
+    let num: String = head.chars().rev().take_while(|c| c.is_ascii_digit() || *c == '.').collect::<Vec<_>>().into_iter().rev().collect();
+    num.parse::<f64>().ok().filter(|p| (0.0..=100.0).contains(p))
+}
+
+/// `run`, with the tool's own percentage as it goes, from either stream (lines end in \r,
+/// \n or a 7z backspace).
+pub(crate) async fn run_progress(log: &JobLog, cmd: &str, args: &[&str], mut pct: impl FnMut(f64)) -> Result<String> {
+    use tokio::io::AsyncReadExt;
+    let mut child = tokio::process::Command::new(cmd)
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .with_context(|| format!("running {cmd} - is it installed?"))?;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(usize, Vec<u8>)>();
+    fn pump<R: tokio::io::AsyncRead + Unpin + Send + 'static>(mut r: R, id: usize, tx: tokio::sync::mpsc::UnboundedSender<(usize, Vec<u8>)>) {
+        tokio::spawn(async move {
+            let mut buf = [0u8; 8192];
+            while let Ok(n) = r.read(&mut buf).await {
+                if n == 0 || tx.send((id, buf[..n].to_vec())).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    pump(child.stdout.take().expect("piped"), 0, tx.clone());
+    pump(child.stderr.take().expect("piped"), 1, tx);
+    let mut all: [Vec<u8>; 2] = [Vec::new(), Vec::new()];
+    let mut line: [Vec<u8>; 2] = [Vec::new(), Vec::new()];
+    while let Some((id, chunk)) = rx.recv().await {
+        all[id].extend_from_slice(&chunk);
+        for c in chunk {
+            if c == b'\r' || c == b'\n' || c == 8 {
+                if let Some(p) = pct_in(&String::from_utf8_lossy(&line[id])) {
+                    pct(p / 100.0);
+                }
+                line[id].clear();
+            } else {
+                line[id].push(c);
+            }
+        }
+    }
+    let status = child.wait().await?;
+    let text = format!("{}{}", String::from_utf8_lossy(&all[0]), String::from_utf8_lossy(&all[1]));
+    if !status.success() {
+        for l in text.lines().rev().take(5).collect::<Vec<_>>().into_iter().rev() {
+            log.debug(format!("{cmd} | {l}")).await;
+        }
+        bail!("{cmd} failed ({status})");
+    }
+    Ok(text)
+}
+
 /// What either source hands the shared back end: the ISO tree's boot files (bootmgr,
 /// bootmgr.efi, boot/, efi/ - nothing else), a one-image Setup-environment WIM, its build.
 struct Staged {
@@ -123,11 +181,11 @@ pub(crate) async fn image_build(log: &JobLog, wim: &Path, index: &str) -> Result
 /// From a Windows ISO: its boot files, and boot.wim index 2 - the Setup environment.
 /// Index 1, the bare WinPE, applies images but cannot host DISM's offline servicing: every
 /// /Image: call fails with 0x80004002.
-async fn stage_iso(log: &JobLog, dir: &Path, source_volid: &str, iso_path: &Path) -> Result<Staged> {
+async fn stage_iso(log: &JobLog, pr: &mut Progress, dir: &Path, source_volid: &str, iso_path: &Path) -> Result<Staged> {
     let root = dir.join("root");
     log.run(format!("Extracting the boot files and boot.wim from {source_volid}")).await;
     let out = format!("-o{}", root.display());
-    run(log, "7z", &["x", "-y", "-bd", &out, &iso_path.display().to_string(), "bootmgr", "bootmgr.efi", "boot", "efi", "sources/boot.wim"]).await?;
+    run_progress(log, "7z", &["x", "-y", "-bsp1", &out, &iso_path.display().to_string(), "bootmgr", "bootmgr.efi", "boot", "efi", "sources/boot.wim"], |f| pr.within(f, format!("extracting {:.0}%", f * 100.0))).await?;
     let wim = root.join("sources/boot.wim");
     if !wim.exists() || !root.join("efi/microsoft/boot/efisys_noprompt.bin").exists() {
         bail!("{source_volid} has no sources/boot.wim or efi/microsoft/boot/efisys_noprompt.bin - not a Windows ISO?");
@@ -179,7 +237,7 @@ wdsclient.dll.mui wdsimage.dll.mui wimgapi.dll.mui wimprovider.dll.mui WinDlp.dl
 
 /// From an edition's ESD (UUP media): image 1's boot files, and the Setup environment
 /// built the way Windows' own media has it - WinRE (image 2) with Setup's sources added.
-async fn stage_esd(log: &JobLog, dir: &Path, esd: &Path) -> Result<Staged> {
+async fn stage_esd(log: &JobLog, pr: &mut Progress, dir: &Path, esd: &Path) -> Result<Staged> {
     let media = dir.join("media");
     let root = dir.join("root");
     tokio::fs::create_dir_all(&root).await?;
@@ -191,7 +249,10 @@ async fn stage_esd(log: &JobLog, dir: &Path, esd: &Path) -> Result<Staged> {
     }
     log.run("Building the Setup environment from the ESD").await;
     log.line("Applying the Setup media (ESD image 1)").await;
-    run(log, "wimlib-imagex", &["apply", &esd_s, "1", &media.display().to_string(), "--no-acls", "--no-attributes"]).await?;
+    // Applying the Setup media is quick; WinRE's export is most of this stage.
+    let parts = [10.0, 90.0];
+    pr.part(&parts, 0, "the Setup media");
+    run_progress(log, "wimlib-imagex", &["apply", &esd_s, "1", &media.display().to_string(), "--no-acls", "--no-attributes"], |f| pr.within(f, format!("the Setup media · {:.0}%", f * 100.0))).await?;
     for f in ["bootmgr", "bootmgr.efi", "boot", "efi"] {
         let from = media.join(f);
         if !from.exists() {
@@ -206,7 +267,8 @@ async fn stage_esd(log: &JobLog, dir: &Path, esd: &Path) -> Result<Staged> {
     log.line(format!("Exporting WinRE (ESD image 2, build {build}) as the Setup environment")).await;
     let pe = dir.join("pe.wim");
     let pe_s = pe.display().to_string();
-    run(log, "wimlib-imagex", &["export", &esd_s, "2", &pe_s, "--compress=maximum", "--boot"]).await?;
+    pr.part(&parts, 1, "WinRE");
+    run_progress(log, "wimlib-imagex", &["export", &esd_s, "2", &pe_s, "--compress=maximum", "--boot"], |f| pr.within(f, format!("WinRE · {:.0}%", f * 100.0))).await?;
     // Named and flagged as Setup's index 2 is (FLAGS 2), not as WinRE.
     run(log, "wimlib-imagex", &["info", &pe_s, "1", "Microsoft Windows Setup", "Microsoft Windows Setup", "--image-property", "FLAGS=2"]).await?;
 
@@ -318,7 +380,7 @@ async fn finish(
 
     pr.stage(at(0.4), at(0.6), "building the ISO");
     let iso = dir.join("winpe.iso");
-    make_iso(log, &st.root, &iso).await?;
+    make_iso(log, pr, &st.root, &iso).await?;
 
     pr.stage(at(0.6), at(1.0), "uploading to PVE");
     let name = format!("winpe-{}.iso", st.build);
@@ -327,7 +389,7 @@ async fn finish(
     if pve.storage_content(node, iso_storage, "iso").await?.iter().any(|v| v.volid == volid) {
         pve.delete_volume(node, &volid).await?;
     }
-    let volid = pve.upload(node, iso_storage, "iso", &iso, &name).await?;
+    let volid = pve.upload_progress(node, iso_storage, "iso", &iso, &name, |f| pr.within(f, format!("uploading · {:.0}%", f * 100.0))).await?;
     log.ok(format!("WinPE uploaded as {volid}")).await;
     let pe = WinPe {
         source_iso: source.to_owned(),
@@ -384,15 +446,16 @@ async fn make_ours(log: &JobLog, dir: &Path, wim: &Path, virtio: Option<(&str, &
 }
 
 /// The ISO around a WinPE root (boot files, sources/boot.wim), booting without a key press.
-async fn make_iso(log: &JobLog, root: &Path, iso: &Path) -> Result<()> {
-    run(
+async fn make_iso(log: &JobLog, pr: &mut Progress, root: &Path, iso: &Path) -> Result<()> {
+    run_progress(
         log,
         "xorriso",
         &[
-            "-as", "mkisofs", "-quiet", "-iso-level", "3", "-J", "-joliet-long", "-R", "-V", "PVSWINPE",
+            "-as", "mkisofs", "-iso-level", "3", "-J", "-joliet-long", "-R", "-V", "PVSWINPE",
             "-e", "efi/microsoft/boot/efisys_noprompt.bin", "-no-emul-boot",
             "-o", &iso.display().to_string(), &root.display().to_string(),
         ],
+        |f| pr.within(f, format!("building the ISO · {:.0}%", f * 100.0)),
     )
     .await?;
     Ok(())
@@ -413,11 +476,12 @@ pub async fn build(
     virtio: Option<(&str, &Path)>,
 ) -> Result<WinPe> {
     let mut pr = Progress::new(log, "Building WinPE");
+    pr.calibrate("extracting the boot files").await;
     let dir: PathBuf = work.join(format!("winpe-{}", uuid::Uuid::new_v4().simple()));
     let result = async {
         tokio::fs::create_dir_all(&dir).await?;
         pr.stage(0.0, 25.0, "extracting the boot files");
-        let st = stage_iso(log, &dir, source_volid, iso_path).await?;
+        let st = stage_iso(log, &mut pr, &dir, source_volid, iso_path).await?;
         finish(pve, db, log, &mut pr, (25.0, 100.0), &dir, st, source_volid, node, iso_storage, virtio).await
     }
     .await;
@@ -442,6 +506,7 @@ pub async fn build_uup(
     virtio: Option<(&str, &Path)>,
 ) -> Result<WinPe> {
     let mut pr = Progress::new(log, "Building WinPE");
+    pr.calibrate("asking the UUP dump catalog").await;
     let dir: PathBuf = work.join(format!("winpe-{}", uuid::Uuid::new_v4().simple()));
     let result = async {
         tokio::fs::create_dir_all(&dir).await?;
@@ -468,7 +533,7 @@ pub async fn build_uup(
         let keep = settings::load::<crate::media::WorkerSettings>(db, "worker").await.unwrap_or_default().keep_downloads;
 
         pr.stage(70.0, 85.0, "building the Setup environment");
-        let st = stage_esd(log, &dir, &path).await?;
+        let st = stage_esd(log, &mut pr, &dir, &path).await?;
         if !keep {
             let _ = tokio::fs::remove_file(&path).await;
         }
@@ -478,4 +543,18 @@ pub async fn build_uup(
     .await;
     let _ = tokio::fs::remove_dir_all(&dir).await;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_percentages() {
+        assert_eq!(pct_in("Archiving file data: 265 MiB of 286 MiB (92%) done"), Some(92.0));
+        assert_eq!(pct_in("  2.56% done, estimate finish Wed Oct  7 12:08:02 2026"), Some(2.56));
+        assert_eq!(pct_in("xorriso : UPDATE :  80.26% done"), Some(80.26));
+        assert_eq!(pct_in("  1% 1 + d/f"), Some(1.0));
+        assert_eq!(pct_in("no percentage here"), None);
+    }
 }

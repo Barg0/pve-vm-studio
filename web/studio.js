@@ -94,6 +94,7 @@ const FRESH = {
   "bell.svg": ["accent", "Notifications - a bell, in the theme's accent", '<g fill="@H"><path d="M9 1.8a1 1 0 0 1 1 1v.6a5 5 0 0 1 4 4.9v3.3l1.4 2a.6.6 0 0 1-.5 1H3.1a.6.6 0 0 1-.5-1l1.4-2V8.3a5 5 0 0 1 4-4.9v-.6a1 1 0 0 1 1-1z"/></g>' + S + '<path d="M7.2 15.6a1.9 1.9 0 0 0 3.6 0"/></g>'],
   "pool.svg": ["ident", "A PVE resource pool - a tag, as PVE's own resource tree draws pools (fa-tags)", '<g fill="@H"><path d="M2 3.4V8l6.6 6.6a1.2 1.2 0 0 0 1.7 0l4-4a1.2 1.2 0 0 0 0-1.7L7.7 2.3H3.1A1.1 1.1 0 0 0 2 3.4z"/></g>' + S + '<circle cx="5.2" cy="5.4" r="1.1"/><path d="M10.3 2.3l5.6 5.6a1.2 1.2 0 0 1 0 1.7l-4.6 4.6"/></g>'],
   "image-settings.svg": ["host", "How golds are built: the gold with a gear", '<g fill="@H"><path d="M1.6 4.4c0-1.3 2.2-2.3 5-2.3s5 1 5 2.3v7.6c0 1.3-2.2 2.3-5 2.3s-5-1-5-2.3z"/><path d="M16.24 12.81L17.27 12.92 17.27 13.88 16.24 13.99 15.83 14.99 16.48 15.8 15.8 16.48 14.99 15.83 13.99 16.24 13.88 17.27 12.92 17.27 12.81 16.24 11.81 15.83 11 16.48 10.32 15.8 10.97 14.99 10.56 13.99 9.53 13.88 9.53 12.92 10.56 12.81 10.97 11.81 10.32 11 11 10.32 11.81 10.97 12.81 10.56 12.92 9.53 13.88 9.53 13.99 10.56 14.99 10.97 15.8 10.32 16.48 11 15.83 11.81Z"/></g>' + S + '<path d="M1.9 4.4c0 1.2 2.1 2.1 4.7 2.1s4.7-.9 4.7-2.1"/><path d="M16.24 12.81L17.27 12.92 17.27 13.88 16.24 13.99 15.83 14.99 16.48 15.8 15.8 16.48 14.99 15.83 13.99 16.24 13.88 17.27 12.92 17.27 12.81 16.24 11.81 15.83 11 16.48 10.32 15.8 10.97 14.99 10.56 13.99 9.53 13.88 9.53 12.92 10.56 12.81 10.97 11.81 10.32 11 11 10.32 11.81 10.97 12.81 10.56 12.92 9.53 13.88 9.53 13.99 10.56 14.99 10.97 15.8 10.32 16.48 11 15.83 11.81Z"/><circle cx="13.4" cy="13.4" r="1.2"/></g>'],
+  "extras.svg": ["deploy", "Extras: three tiles and a plus (2026-10-07 mockup)", '<g fill="none" stroke="@H" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><rect x="2" y="2" width="6" height="6" rx="1"/><rect x="10" y="2" width="6" height="6" rx="1"/><rect x="2" y="10" width="6" height="6" rx="1"/><path d="M13 10v6M10 13h6"/></g>'],
   "gold-image.svg": ["host", "A generalized gold VHDX", '<g fill="@H"><path d="M3 5c0-1.5 2.7-2.7 6-2.7s6 1.2 6 2.7v8c0 1.5-2.7 2.7-6 2.7S3 14.5 3 13z"/></g>' + S + '<path d="M3.3 5c0 1.4 2.6 2.5 5.7 2.5S14.7 6.4 14.7 5"/><path d="M9 9.6l1.9 1.9L9 13.4l-1.9-1.9z"/></g>'],
   "differencing.svg": ["host", "A child disk on its parent", '<g fill="@H"><path d="M1.6 4.4c0-1.3 2.2-2.3 4.9-2.3s4.9 1 4.9 2.3v4c0 1.3-2.2 2.3-4.9 2.3S1.6 9.7 1.6 8.4z"/><path d="M7.6 11.2c0-1.2 2-2.1 4.4-2.1s4.4.9 4.4 2.1v3.6c0 1.2-2 2.1-4.4 2.1s-4.4-.9-4.4-2.1z"/></g>' + S + '<path d="M1.9 4.4c0 1.2 2.1 2.1 4.6 2.1M7.9 11.2c0 1.1 1.9 1.9 4.1 1.9s4.1-.8 4.1-1.9"/></g>'],
   "checkpoint.svg": ["host", "Checkpoints on or off", '<g fill="@H"><rect x="3" y="1.6" width="1.9" height="14.8" rx=".9"/><path d="M5.6 2.6h9.6l-2.2 3.4 2.2 3.4H5.6z"/></g>' + S + '<path d="M8.6 4.4h3.4"/></g>'],
@@ -5184,7 +5185,7 @@ function hardwareDefaultsCard() {
   const odd = n => first && (n.model !== first.model || n.vendor !== first.vendor);
   const nodeCards = c.error ? `<div class="warn-box">${warnIconSvg()}<span>The nodes did not answer: ${esc(c.error)}</span></div>`
     : !nodes.length ? `<div class="hint">Asking the nodes…</div>`
-    : `<div class="hw-box"><table class="hw-table"><thead><tr><th>Node</th><th>CPU</th><th>Sockets</th><th>Cores</th><th>Threads</th><th>CPU load</th><th>Memory</th><th></th></tr></thead><tbody>${nodes.map(n => {
+    : `<div class="table-wrap"><table class="data hw-table"><thead><tr><th>Node</th><th>CPU</th><th>Sockets</th><th>Cores</th><th>Threads</th><th>CPU load</th><th>Memory</th><th></th></tr></thead><tbody>${nodes.map(n => {
         const cpu = Math.min(100, (n.cpu_load || 0) * 100), mem = n.memory_gb ? Math.min(100, n.memory_used_gb / n.memory_gb * 100) : 0;
         const tone = p => p >= 90 ? "danger" : p >= 75 ? "warn" : "";
         const bar = (p, text) => `<div class="hw-bar"><span class="meter-track"><span class="meter-fill ${tone(p)}" style="width:${p.toFixed(1)}%"></span></span><span class="mono">${text}</span></div>`;
@@ -5825,7 +5826,7 @@ function renderServerArcSection(s) { return ""; }
    deploy - the VM comes up and its result lists the app as not installed. */
 const wgPick = { sid: null, q: "", hits: [], busy: false, timer: null };
 function wingetCapable(s) { const img = findImage(s.imageId); return !isLinuxServer(s) && img.kind !== "core"; }
-/* Optional features: what a VM can be made ready for at first boot. Hotpatch - Windows
+/* Extras: what a VM can be made ready for at first boot. Hotpatch - Windows
    Server 2025 only - turns VBS on and checks it runs after the restart; Hotpatch itself is
    switched on for the VM in Azure. */
 function hotpatchCapable(s) { return !isLinuxServer(s) && String(s.imageId || "").startsWith("ws2025-"); }
@@ -5840,7 +5841,7 @@ function renderServerOptionalSection(s) {
     : `<div class="hw-status"><span class="pill status warn">Not ready</span><span>VBS ${r.vbs === 1 ? "configured, not running" : "off"}</span><span class="muted">needs host or a named CPU model with nesting</span></div>`;
   return `<div class="section collapsible ${open ? "" : "collapsed"}">
     <div class="section-head" data-nested="${esc(s._id)}-optional">
-      <span class="section-chevron">${chevron()}</span><img src="${iconSrc("first-boot.svg")}" alt=""> Optional features
+      <span class="section-chevron">${chevron()}</span><img src="${iconSrc("extras.svg")}" alt=""> Extras
       <span class="section-meta">${on ? "Hotpatch ready" : "none"}</span>
     </div>
     <div class="section-body">
@@ -6321,7 +6322,7 @@ function renderServerCard(s) {
      clustered role, and it fits the fixed badge width that "Clustered" was straining. */
   const clusterBadge = clusterOn ? `<span class="pill status on" title="Highly available — clustered role on ${esc(state.defaults.cluster.name || "the host's own cluster")}"><img src="${iconSrc("virtual-clusters.svg")}" alt="">HA</span>` : "";
   return `
-  <article class="card collapsible ${open ? "" : "collapsed"}" data-sid="${esc(s._id)}">
+  <article class="card collapsible vm-card ${open ? "" : "collapsed"}" data-sid="${esc(s._id)}">
     <div class="card-head" data-toggle="${esc(s._id)}">
       <div class="card-lead">
         <span class="card-chevron">${chevron()}</span>

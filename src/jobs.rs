@@ -150,6 +150,11 @@ impl JobLog {
 
     /// A progress stage begins: its name and the time, one line in <id>.steps. Small and
     /// synchronous - Progress::stage is called from code that does not await.
+    /// Where the jobs' .steps files are (progress.rs reads earlier runs from there).
+    pub fn steps_dir(&self) -> Option<std::path::PathBuf> {
+        self.live.steps.parent().map(|p| p.to_path_buf())
+    }
+
     pub fn mark_step(&self, name: &str) {
         use std::io::Write;
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&self.live.steps) {

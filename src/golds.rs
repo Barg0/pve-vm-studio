@@ -375,6 +375,7 @@ async fn bake_linux_inner(
 ) -> Result<()> {
     let pve = &ctx.pve;
     let mut pr = Progress::new(log, format!("Baking {}", img.name));
+    pr.calibrate("cloud image").await;
     pr.stage(0.0, 25.0, "cloud image");
     // The bake form's node and network for this bake, over the bake settings'.
     let settings = opt.placement_over(settings);
@@ -515,7 +516,11 @@ async fn bake_linux_inner(
                 ("tags", crate::tags::BAKE),
                 ("description", format!("PVE VM Studio: baking {} - removed or made a template when done.", img.name)),
             ],
-            |_| {},
+            |l| {
+                if let Some(f) = crate::pve::Pve::transferred(l) {
+                    pr.within(f, format!("importing the disk · {:.0}%", f * 100.0));
+                }
+            },
         )
         .await;
     drop(vmid_guard);
