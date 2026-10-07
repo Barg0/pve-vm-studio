@@ -48,6 +48,8 @@ pub fn router() -> Router<AppState> {
         .route("/jobs/cluster-check", post(start_cluster_check))
         .route("/jobs/{id}", get(get_job))
         .route("/jobs/{id}/retry", post(retry_job))
+        .route("/hardware/cluster", get(hardware_cluster))
+        .route("/jobs/{id}/continue", get(job_resume).post(continue_job))
         .route("/jobs/{id}/abort", post(abort_job))
         .route("/jobs/{id}/events", get(job_events))
         .route("/catalog", get(catalog_info))
@@ -363,6 +365,93 @@ async fn retry_job(State(app): State<AppState>, user: User, Path(id): Path<Strin
         other => return Err(ApiError::bad_request(format!("a {other} job is retried from its own page"))),
     };
     Ok(r)
+}
+
+/// What the nodes' processors are, and what "auto" makes of them (VM settings → Hardware
+/// defaults): the CPU type and why, a generic type's security flags, the CPU types PVE offers.
+async fn hardware_cluster(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    let nodes = crate::hardware::cluster(&app.pve).await?;
+    let (cpu, why) = crate::hardware::pick_cpu(&nodes);
+    #[derive(Deserialize)]
+    struct Model {
+        name: String,
+        #[serde(default)]
+        vendor: String,
+        #[serde(default)]
+        custom: u8,
+    }
+    let models: Vec<Model> = match nodes.first() {
+        Some(n) => app.pve.get(&format!("/nodes/{}/capabilities/qemu/cpu", crate::pve::enc(&n.node))).await.unwrap_or_default(),
+        None => vec![],
+    };
+    let vendor = nodes.first().map(|n| n.vendor.clone()).unwrap_or_default();
+    let mut names: Vec<serde_json::Value> = models
+        .into_iter()
+        .filter(|m| m.custom == 1 || m.vendor == vendor || m.name.starts_with("x86-64-v") || m.name == "host")
+        .map(|m| json!({ "name": m.name, "custom": m.custom == 1, "vendor": m.vendor }))
+        .collect();
+    names.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    let same = nodes.windows(2).all(|w| w[0].model == w[1].model);
+    Ok(Json(json!({
+        "nodes": nodes,
+        "auto": { "cpu": cpu, "why": why, "flags": crate::hardware::security_flags(&nodes, "x86-64-v3") },
+        "sameCpu": same,
+        "multiSocket": nodes.iter().any(|n| n.sockets > 1),
+        "nestedFlag": crate::hardware::nested_flag(&app.pve).await,
+        "models": names,
+    })))
+}
+
+/// What an interrupted or failed media build left to continue from: its work folder's
+/// checkpoint, else the downloads (whole files and a cut-off one). Null: nothing - Retry.
+async fn resume_of(app: &AppState, job: &crate::jobs::JobRow) -> Option<serde_json::Value> {
+    if job.kind != "media" || !["failed", "interrupted"].contains(&job.status.as_str()) || app.jobs.is_running(&job.id).await {
+        return None;
+    }
+    let p: serde_json::Value = serde_json::from_str(&job.params).unwrap_or_default();
+    let work = app.config.data_dir.join("work");
+    if let Some(run) = p["run"].as_str()
+        && let Some(c) = media::Checkpoint::load(&work.join(format!("media-{run}"))).await
+    {
+        return Some(json!({ "run": run, "label": c.done() }));
+    }
+    let (mut whole, mut part) = (0usize, 0u64);
+    if let Some(uuid) = p["uuid"].as_str().filter(|u| !u.is_empty() && !u.contains('/') && !u.contains(".."))
+        && let Ok(mut rd) = tokio::fs::read_dir(work.join("uup-files").join(uuid)).await
+    {
+        while let Ok(Some(e)) = rd.next_entry().await {
+            let len = e.metadata().await.map(|m| m.len()).unwrap_or(0);
+            if e.file_name().to_string_lossy().ends_with(".part") { part += len } else { whole += 1 }
+        }
+    }
+    (whole > 0 || part > 0).then(|| {
+        json!({ "label": format!("{whole} downloaded file(s) kept{}", if part > 0 { format!(", one cut off at {:.2} GB", part as f64 / 1e9) } else { String::new() }) })
+    })
+}
+
+async fn job_resume(State(app): State<AppState>, _user: User, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
+    let job = app.jobs.get(&id).await?.ok_or_else(|| ApiError::not_found("no such job"))?;
+    Ok(Json(resume_of(&app, &job).await))
+}
+
+/// Continue: the build again with the same settings, in the interrupted run's work folder -
+/// the stages it finished are skipped, the downloads it has are kept.
+async fn continue_job(State(app): State<AppState>, user: User, Path(id): Path<String>) -> ApiResult<axum::response::Response> {
+    let job = app.jobs.get(&id).await?.ok_or_else(|| ApiError::not_found("no such job"))?;
+    let Some(r) = resume_of(&app, &job).await else {
+        return Err(ApiError::bad_request("nothing of this job is kept - Retry starts it again"));
+    };
+    user.require(&app, "/vms", "VM.Allocate").await?;
+    let p: serde_json::Value = serde_json::from_str(&job.params).unwrap_or_default();
+    let s = |k: &str| p[k].as_str().unwrap_or_default().to_owned();
+    let editions = p["editions"].as_array().into_iter().flatten().filter_map(|e| e.as_str().map(str::to_owned)).collect();
+    let mut extra = json!({ "continues": job.id });
+    if let Some(run) = r["run"].as_str() {
+        extra["run"] = json!(run);
+    }
+    let q = MediaBuild { product: s("media"), uuid: s("uuid"), build: s("build"), lang: s("lang"), editions };
+    let id = spawn_media_build(&app, &user.session.user, q, extra).await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "id": id }))).into_response())
 }
 
 async fn get_job(State(app): State<AppState>, _user: User, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
@@ -1842,15 +1931,19 @@ pub async fn spawn_media_build(app: &AppState, by: &str, q: MediaBuild, extra: s
     let (pve, db, web, work) = (app.pve.clone(), app.db.clone(), app.web.clone(), app.config.data_dir.join("work"));
     let link = worker_link(app).await?;
     let title = format!("Build {} {} media ({})", p.name, q.build, uup::lang_tag(&q.lang));
+    // The run's work folder: a new one, or the interrupted run's when it is continued.
+    let run = extra["run"].as_str().filter(|r| r.starts_with("run-") && r[4..].chars().all(|c| c.is_ascii_hexdigit())).map(str::to_owned)
+        .unwrap_or_else(|| format!("run-{}", uuid::Uuid::new_v4().simple()));
     let mut params = json!({ "media": p.id, "build": q.build, "uuid": q.uuid, "lang": q.lang, "editions": q.editions });
     if let (Some(o), Some(e)) = (params.as_object_mut(), extra.as_object()) {
         o.extend(e.clone());
     }
+    params["run"] = json!(run);
     let job = app
         .jobs
         .spawn("media", &title, by, params, move |log| async move {
             let pl = bake.resolve(&pve).await?;
-            let req = media::Request { product: p, uuid: q.uuid, build: q.build, lang: q.lang, editions: q.editions };
+            let req = media::Request { product: p, uuid: q.uuid, build: q.build, lang: q.lang, editions: q.editions, run };
             media::build(&pve, &db, &log, &web, &work, &pl, link, req).await.map(|_| ())
         })
         .await?;
@@ -2114,6 +2207,13 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
     let builtin_admin = s["builtInAdminOnly"].as_bool().unwrap_or(false);
     let user = if builtin_admin { "Administrator".to_owned() } else { str_of("localUserName") };
     let bridge = str_of("switchName");
+    // Hardware: the design's defaults (VM settings), or the card's own under "Override the
+    // defaults" (CPU type, NUMA, nesting, network queues).
+    let hw: crate::hardware::Defaults = serde_json::from_value(defaults["hardware"].clone()).unwrap_or_default();
+    let own = s["hwOverride"].as_bool() == Some(true);
+    let pick = |k: &str, d: &str| if own { s[k].as_str().filter(|v| !v.is_empty()).unwrap_or(d).to_owned() } else { d.to_owned() };
+    let cpu_type = pick("cpuType", &hw.cpu);
+    let hotpatch = s["hotpatchReady"].as_bool() == Some(true) && str_of("imageId").starts_with("ws2025-");
     VmSpec {
         name: str_of("name").to_lowercase(),
         card: str_of("_id"),
@@ -2168,7 +2268,16 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
                     .collect()
             })
             .unwrap_or_default(),
-        nested: s["nestedVirtualization"].as_bool().unwrap_or(false),
+        // Azure Local runs its own hypervisor, Hotpatch needs VBS: nested whatever the
+        // defaults say.
+        hotpatch: hotpatch,
+        nested: str_of("imageId") == "azl" || hotpatch || if own { s["nestedVirtualization"].as_bool().unwrap_or(hw.nested) } else { hw.nested },
+        cpu_type: if cpu_type == "auto" { String::new() } else { cpu_type },
+        security_flags: hw.security_flags != "off",
+        numa: pick("numa", &hw.numa),
+        ksm: hw.ksm,
+        queues: if own { s["netQueues"].as_bool().unwrap_or(hw.queues != "off") } else { hw.queues != "off" },
+        protection: hw.protection,
         startup_delay: s["automaticStartDelay"].as_u64().unwrap_or(0) as u32,
         vtpm: s["enableVtpm"].as_bool().unwrap_or(false),
         domain_join: domain_join_for(s, state),
@@ -2186,7 +2295,6 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
         } else {
             vec![]
         },
-        winget_upgrade: s["wingetUpgrade"].as_bool() == Some(true),
         nic_name: str_of("nicName"),
         windows_features: s["windowsFeatures"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default(),
         include_management_tools: s["includeManagementTools"].as_bool().unwrap_or(true),

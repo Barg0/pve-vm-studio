@@ -14,6 +14,7 @@ mod cis;
 mod fod;
 mod golds;
 mod guest;
+mod hardware;
 mod jobs;
 mod labs;
 mod linux;
@@ -311,7 +312,9 @@ async fn clean_work(app: AppState) {
             while let Ok(Some(e)) = entries.next_entry().await {
                 let Ok(meta) = e.metadata().await else { continue };
                 // The Windows media download cache waits six hours for a retry of a failed build.
-                let limit = if e.file_name() == "uup-files" { 6 * 3600 } else { 600 };
+                // So does the work folder of a media build that can be continued (Jobs → Continue).
+                let resumable = e.file_name().to_string_lossy().starts_with("media-run-") && e.path().join(media::CHECKPOINT).exists();
+                let limit = if e.file_name() == "uup-files" || resumable { 6 * 3600 } else { 600 };
                 // Kept downloads (Media worker card) stay until the switch goes off.
                 if e.file_name() == "uup-files"
                     && settings::load::<media::WorkerSettings>(&app.db, "worker").await.unwrap_or_default().keep_downloads
@@ -470,6 +473,17 @@ async fn reconcile_after_restart(app: AppState) {
         match app.pve.vm_destroy(node, vmid).await {
             Ok(()) => tracing::info!("removed leftover bake VM {vmid}"),
             Err(e) => tracing::warn!("could not remove leftover bake VM {vmid}: {e:#}"),
+        }
+    }
+    // Worker VMs (media, FoD) the same: the job that watched them is gone, and a continued
+    // build boots a fresh one. Only worker-<id>, tagged worker, never a template.
+    for vm in res.iter().filter(|r| {
+        r.kind == "qemu" && r.template != Some(1) && r.name.as_deref().is_some_and(|n| n.starts_with("worker-")) && r.tags.as_deref().is_some_and(|t| t.split(';').any(|t| t == tags::WORKER))
+    }) {
+        let (Some(node), Some(vmid)) = (vm.node.as_deref(), vm.vmid) else { continue };
+        match app.pve.vm_destroy(node, vmid).await {
+            Ok(()) => tracing::info!("removed leftover worker VM {vmid}"),
+            Err(e) => tracing::warn!("could not remove leftover worker VM {vmid}: {e:#}"),
         }
     }
 }

@@ -18,6 +18,20 @@ HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 [[ -x $HERE/pve-vm-studio ]] || { echo "no pve-vm-studio binary next to this script" >&2; exit 1; }
 pct status "$VMID" | grep -q running || { echo "container $VMID is not running" >&2; exit 1; }
 
+# A restart cuts off every running job (a bake, a two-hour media build). Refused while one
+# runs: its log does not end with "[ end" or "[ error" yet - the studio writes one of them when a
+# job ends, and an "interrupted" line at start for every job a stopped studio left behind.
+# A stopped studio runs nothing. FORCE=1 restarts anyway.
+if [[ ${FORCE:-0} != 1 ]] && pct exec "$VMID" -- systemctl is-active -q pve-vm-studio; then
+    running=$(pct exec "$VMID" -- bash -c 'for f in /var/lib/pve-vm-studio/jobs/*.log; do [ -f "$f" ] || continue; l=$(tail -n 1 "$f"); case $l in *"[ end"*|*"[ error"*) ;; *) echo "  $(head -n 1 "$f" | sed "s/.*\] //")";; esac; done')
+    if [[ -n $running ]]; then
+        echo "not updated: a job is running - the restart would cut it off:" >&2
+        echo "$running" >&2
+        echo "wait for it, or FORCE=1 $0 $VMID" >&2
+        exit 3
+    fi
+fi
+
 # Packages a newer studio needs, installed when missing (the same list as install.sh).
 PACKAGES="ca-certificates curl xorriso lego 7zip wimtools dosfstools mtools cabextract genisoimage gcab"
 pct exec "$VMID" -- bash -c "missing=\$(for p in $PACKAGES; do dpkg -s \$p >/dev/null 2>&1 || echo \$p; done); [ -z \"\$missing\" ] || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \$missing >/dev/null; }"

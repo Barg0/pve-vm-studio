@@ -41,12 +41,18 @@ pub struct BakeSettings {
     pub iso_storage: String,
     pub bridge: String,
     pub vlan: Option<u16>,
-    /// x86-64-v3 by default: EL10 needs it, and unlike `host` a clone still live-migrates
-    /// between nodes of different CPU generations.
+    /// The VMs' CPU type. x86-64-v3 by default: EL10 needs it, and unlike `host` a clone still
+    /// live-migrates between nodes of different CPU generations. Bakes too, without bake_host.
     pub cpu: String,
-    /// Windows bakes: a named model. Windows on `host` under nested virtualization (PVE in
+    /// Windows VMs: a named model. Windows on `host` under nested virtualization (PVE in
     /// Hyper-V, say) stops KVM with an internal error as soon as it sees VMX.
     pub cpu_windows: String,
+    /// Bake, WinPE and worker VMs on the node's own CPU: they never migrate, so `host` costs
+    /// nothing and gives them every instruction the node has. Windows ones without VMX
+    /// (-nested-virt): no KVM stop under nested virtualization, and Windows Setup decides
+    /// nothing about VBS from a CPU the clones may not have.
+    #[serde(default = "yes")]
+    pub bake_host: bool,
     pub memory_mb: u32,
     pub cores: u32,
     pub timeout_min: u64,
@@ -73,6 +79,7 @@ impl Default for BakeSettings {
             vlan: None,
             cpu: CPU_DEFAULT.into(),
             cpu_windows: CPU_DEFAULT.into(),
+            bake_host: true,
             // New-Vhdx's bake VMs get 4 GB; the Windows bake raised anything smaller to it anyway.
             memory_mb: 4096,
             // New-Vhdx gives every bake VM 4 vCPUs.
@@ -94,6 +101,7 @@ pub struct Placement {
     pub iso_storage: String,
     pub bridge: String,
     pub vlan: Option<u16>,
+    /// The bake, WinPE and worker VMs' CPU types (Linux, Windows).
     pub cpu: String,
     pub cpu_windows: String,
     pub memory_mb: u32,
@@ -105,6 +113,10 @@ pub struct Placement {
 }
 
 const CPU_DEFAULT: &str = "x86-64-v3";
+
+fn yes() -> bool {
+    true
+}
 
 impl BakeSettings {
     /// The Linux bake addresses and their prefix, checked; None for DHCP.
@@ -224,6 +236,36 @@ impl BakeSettings {
             self.bridge.clone()
         };
 
+        // The bake VMs' CPU: `host` - unless the node is itself a VM (its CPU says
+        // "hypervisor": PVE in Hyper-V or VMware, where Windows on host stops KVM) or PVE
+        // predates the nested-virt flag (9.1), which takes VMX off Windows.
+        let (mut bake_cpu, mut bake_cpu_windows) = (self.cpu_for(false), self.cpu_for(true));
+        if self.bake_host {
+            #[derive(Deserialize)]
+            struct Cpu {
+                #[serde(default)]
+                flags: String,
+            }
+            #[derive(Deserialize)]
+            struct Status {
+                cpuinfo: Cpu,
+            }
+            let virtual_node = match pve.get::<Status>(&format!("/nodes/{}/status", crate::pve::enc(&node))).await {
+                Ok(s) => s.cpuinfo.flags.split_whitespace().any(|f| f == "hypervisor"),
+                Err(_) => true,
+            };
+            let nested_flag = pve.version().await.ok().and_then(|v| {
+                let mut it = v.release.split('.').map(|x| x.parse::<u32>().unwrap_or(0));
+                Some((it.next()?, it.next().unwrap_or(0)))
+            }).is_some_and(|(maj, min)| maj > 9 || (maj == 9 && min >= 1));
+            if !virtual_node {
+                bake_cpu = "host".into();
+                if nested_flag {
+                    bake_cpu_windows = "host,flags=-nested-virt".into();
+                }
+            }
+        }
+
         Ok(Placement {
             node,
             disk_storage,
@@ -231,8 +273,8 @@ impl BakeSettings {
             iso_storage,
             bridge,
             vlan: self.vlan,
-            cpu: self.cpu_for(false),
-            cpu_windows: self.cpu_for(true),
+            cpu: bake_cpu,
+            cpu_windows: bake_cpu_windows,
             memory_mb: self.memory_mb.max(1024),
             cores: self.cores.max(1),
             timeout_min: self.timeout_min.max(10),

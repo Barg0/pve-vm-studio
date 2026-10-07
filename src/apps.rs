@@ -35,7 +35,7 @@ struct Feature {
 }
 
 /// What the worker provisions into one image.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct App {
     /// The app's family name (Microsoft.WindowsStore_8wekyb3d8bbwe), its folder under apps\.
     pub id: String,

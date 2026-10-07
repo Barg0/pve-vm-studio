@@ -806,7 +806,7 @@ async fn mail_failed(app: &AppState, run: &Run) {
     }
     r.error = Some(run.error.clone().unwrap_or_default());
     r.buttons = vec![mail::button("Windows updates", "#/media", "update", true), mail::button("Jobs", "#/jobs", "log", false)];
-    r.notice = Some((Tone::Accent, "The old ISO and golds stay current. Retry the run under Media → Windows updates, or wait for the next build.".into()));
+    r.notice = Some((Tone::Accent, "The old ISO and golds stay current. Retry the run under Image settings → Windows updates, or wait for the next build.".into()));
     r.link = Some("#/media".into());
     notify::send(app, "update_failed", r).await;
 }

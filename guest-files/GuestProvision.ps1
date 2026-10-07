@@ -839,8 +839,6 @@ function Get-WingetPath {
 function Add-WingetDependencyPath {
     # winget.exe needs the VC++ UWP runtime and WinUI next to it; for SYSTEM those packages
     # are not on the PATH, so their newest x64 folders go in front of it for this process.
-    # Resolved again before every call: an upgrade of the runtime itself replaces its folder,
-    # and a PATH still naming the old one leaves winget.exe without its DLLs (0xC0000135).
     $root = Join-Path -Path $env:ProgramW6432 -ChildPath "WindowsApps"
     $env:PATH = (@($env:PATH -split ';') | Where-Object { $_ -and $_ -notlike "$root\*" }) -join ';'
     foreach ($pattern in @("Microsoft.VCLibs.140.00.UWPDesktop_*_x64__8wekyb3d8bbwe", "Microsoft.UI.Xaml.2.*_x64__8wekyb3d8bbwe")) {
@@ -968,133 +966,6 @@ function Install-WingetApplications {
     return , $results
 }
 
-function ConvertFrom-WingetUpgradeTable {
-    # Intune-WinGet-Update's parser: the columns of `winget upgrade` by the header line above
-    # its dashes (Name, Id, Version, Available, Source); a row with "Unknown" is skipped.
-    param(
-        [string]$RawOutput
-    )
-    $rows = @()
-    if (-not ($RawOutput -match "-----")) { return , $rows }
-    $lines = @($RawOutput.Split([Environment]::NewLine) | Where-Object { $_ } | ForEach-Object { $_ -replace "[…]", " " })
-    $fl = 0
-    while ($fl -lt $lines.Count -and -not $lines[$fl].StartsWith("-----")) { $fl++ }
-    $fl = $fl - 1
-    if ($fl -lt 0 -or $fl -ge $lines.Count) { return , $rows }
-    $index = $lines[$fl] -split '(?<=\s)(?!\s)'
-    if ($index.Count -lt 3) { return , $rows }
-    $idStart = $index[0].Length
-    $versionStart = $idStart + $index[1].Length
-    $availableStart = $versionStart + $index[2].Length
-    for ($i = $fl + 2; $i -lt $lines.Count; $i++) {
-        $line = $lines[$i]
-        if ($line.Length -le $availableStart -or -not ($line -match "\w\.\w")) { continue }
-        $name = $line.Substring(0, $idStart).TrimEnd()
-        $id = $line.Substring($idStart, $versionStart - $idStart).TrimEnd()
-        $current = $line.Substring($versionStart, $availableStart - $versionStart).TrimEnd()
-        $available = ($line.Substring($availableStart) -split '\s+')[0]
-        if ($current -eq "Unknown" -or $available -eq "Unknown" -or -not $id -or $id -match '\s') { continue }
-        if ($current -ne $available) { $rows += @{ id = $id; name = $name; from = $current; to = $available } }
-    }
-    return , $rows
-}
-
-function Update-WingetApplications {
-    # The VM card's "Update installed applications": everything WinGet can upgrade on this
-    # fresh VM - Edge, the inbox apps, the applications just installed. The ladder of
-    # Intune-WinGet-Update's remediation: machine scope, then winget's default; a busy
-    # installer is waited for, a hash mismatch refreshes the source, a failed download is
-    # tried once more. Never fatal - each result is reported, the VM still comes up.
-    $results = @()
-    $winget = Get-WingetPath
-    if (-not $winget) {
-        Write-Log "WinGet is not on this VM - nothing updated" -Tag "Warn"
-        return , $results
-    }
-    Add-WingetDependencyPath
-    $outDir = Join-Path -Path $logFileDirectory -ChildPath "winget"
-    New-Item -ItemType Directory -Path $outDir -Force | Out-Null
-    [void](Invoke-Winget -Winget $winget -Arguments "source update --name winget --disable-interactivity" -OutFile (Join-Path $outDir "source-update.log") -TimeoutSeconds 300)
-
-    $previous = [Console]::OutputEncoding
-    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-    $pending = @()
-    try {
-        foreach ($scope in @($null, "machine")) {
-            $listArgs = @("upgrade", "--source", "winget", "--accept-source-agreements", "--disable-interactivity")
-            if ($scope) { $listArgs += @("--scope", $scope) }
-            $raw = & $winget @listArgs 2>&1 | Where-Object { [string]$_ -notlike " *" } | Out-String
-            foreach ($u in (ConvertFrom-WingetUpgradeTable -RawOutput $raw)) {
-                if (-not ($pending | Where-Object { $_.id -eq $u.id })) { $pending += $u }
-            }
-        }
-    }
-    finally {
-        [Console]::OutputEncoding = $previous
-    }
-    # WinGet's own runtime stays as it is (Intune-WinGet-Update's blacklist, Winget-
-    # SystemContext's PATH): App Installer is winget.exe itself, the VC++ UWP runtime, WinUI and
-    # the Windows App Runtime are what it loads - upgraded from under it, every later call
-    # fails with 0xC0000135. The Microsoft Store keeps them current.
-    $runtime = @('Microsoft.AppInstaller', 'Microsoft.VCLibs*', 'Microsoft.UI.Xaml*', 'Microsoft.WindowsAppRuntime*')
-    foreach ($u in @($pending | Where-Object { $i = $_.id; @($runtime | Where-Object { $i -like $_ }).Count -gt 0 })) {
-        $results += @{ id = $u.id; name = $u.name; from = $u.from; to = $u.from; success = $false; skipped = $true; exitCode = $null; message = "WinGet's own runtime - updated by the Microsoft Store" }
-    }
-    $pending = @($pending | Where-Object { $i = $_.id; @($runtime | Where-Object { $i -like $_ }).Count -eq 0 })
-    Write-Log "WinGet: $($pending.Count) application(s) to update, $($results.Count) of WinGet's own runtime left to the Store" -Tag "Info"
-
-    $success    = @(0, -1978335135, -1978334963, -1978334962, -1978334965)
-    $retryBusy  = @(-1978334974, -1978334975, -1978334973)
-    $retryHash  = @(-1978335215)
-    $retryLoad  = @(-1978335224, -1978335186, -1978335098)
-    foreach ($u in $pending) {
-        $id = $u.id
-        $file = Join-Path $outDir ("upgrade-" + ($id -replace '[^A-Za-z0-9._-]', '_') + ".log")
-        $base = "upgrade -e --id $id --source winget --silent --disable-interactivity --skip-dependencies --accept-package-agreements --accept-source-agreements --force"
-        # An MSIX package (App Installer, Terminal, the VC++ and WinUI runtimes) installs per
-        # user: WinGet as SYSTEM fails on it (0x80070057) and may take winget's own runtime down
-        # with it. The Microsoft Store keeps those current - reported, not attempted.
-        Add-WingetDependencyPath
-        $show = & $winget show -e --id $id --source winget --accept-source-agreements --disable-interactivity 2>&1 | Out-String
-        if ($show -match '(?im):\s*(msix|appx)\s*$') {
-            Write-Log "$id is an MSIX package - the Microsoft Store updates it" -Tag "Info"
-            $results += @{ id = $id; name = $u.name; from = $u.from; to = $u.from; success = $false; skipped = $true; exitCode = $null; message = "MSIX - updated by the Microsoft Store" }
-            continue
-        }
-        Write-Log "Updating $id $($u.from) -> $($u.to)" -Tag "Run"
-        $code = $null
-        foreach ($scopeArgs in @(" --scope machine", "")) {
-            $code = Invoke-Winget -Winget $winget -Arguments "$base$scopeArgs" -OutFile $file
-            $tries = 0
-            while (($retryBusy -contains $code) -and $tries -lt 5) {
-                $tries++
-                Write-Log "$id waits for another installer (exit $code), try $tries of 5" -Tag "Warn"
-                Start-Sleep -Seconds 60
-                $code = Invoke-Winget -Winget $winget -Arguments "$base$scopeArgs" -OutFile $file
-            }
-            if ($retryHash -contains $code) {
-                [void](Invoke-Winget -Winget $winget -Arguments "source update --name winget --disable-interactivity" -OutFile (Join-Path $outDir "source-update.log") -TimeoutSeconds 300)
-                $code = Invoke-Winget -Winget $winget -Arguments "$base$scopeArgs" -OutFile $file
-            }
-            elseif ($retryLoad -contains $code) {
-                Start-Sleep -Seconds 30
-                $code = Invoke-Winget -Winget $winget -Arguments "$base$scopeArgs" -OutFile $file
-            }
-            if ($success -contains $code) { break }
-        }
-        # The verdict is what winget list shows now, not the exit code alone.
-        $now = Test-WingetInstalled -Winget $winget -Id $id
-        $ok = ($success -contains $code) -or ($now -and $now -ne $u.from)
-        if ($now) { $to = $now } else { $to = $u.to }
-        if ($ok) { Write-Log "$id updated to $to (exit $code)" -Tag "Ok" }
-        else { Write-Log "$id was not updated (exit $code) - see $file" -Tag "Error" }
-        $message = ""
-        if (-not $ok) { $message = if ($code -eq -1) { "timed out" } else { "exit $code" } }
-        $results += @{ id = $id; name = $u.name; from = $u.from; to = $to; success = $ok; exitCode = $code; message = $message }
-    }
-    return , $results
-}
-
 function Register-DeferredDomainJoin {
     param(
         [object]$JoinConfig
@@ -1197,7 +1068,7 @@ $state = @{
     arc                = @{ attempted = $false; authMode = $null }
     domainJoin         = $null
     wingetApps         = @()
-    wingetUpgrades     = @()
+    hotpatchReady      = $null
     completedUtc       = $null
     restartNeeded      = $false
     success            = $false
@@ -1285,9 +1156,20 @@ try {
         try { $state.wingetApps = Install-WingetApplications -Apps @($manifest.wingetApps) }
         catch { Write-Log "WinGet applications: $($_.Exception.Message)" -Tag "Error" }
     }
-    if ([bool]$manifest.wingetUpgrade) {
-        try { $state.wingetUpgrades = Update-WingetApplications }
-        catch { Write-Log "WinGet updates: $($_.Exception.Message)" -Tag "Error" }
+
+    # Hotpatch ready (Windows Server 2025): VBS on, Secure Boot required - Microsoft's
+    # documented switch. It runs after the restart; the studio checks it then.
+    if ([bool]$manifest.hotpatchReady) {
+        try {
+            $dg = "HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard"
+            New-Item -Path $dg -Force | Out-Null
+            Set-ItemProperty -Path $dg -Name EnableVirtualizationBasedSecurity -Value 1 -Type DWord
+            Set-ItemProperty -Path $dg -Name RequirePlatformSecurityFeatures -Value 1 -Type DWord
+            $state.hotpatchReady = "configured"
+            $restartNeeded = $true
+            Write-Log "VBS turned on for Hotpatch - it runs after the restart" -Tag "Info"
+        }
+        catch { $state.hotpatchReady = "failed"; Write-Log "Hotpatch ready: $($_.Exception.Message)" -Tag "Error" }
     }
 
     # Last: everything above must be finished before the join task can fire, because the

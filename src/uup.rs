@@ -403,11 +403,39 @@ async fn download_with(web: &reqwest::Client, log: &JobLog, file: &File, dest: &
         .connect_timeout(std::time::Duration::from_secs(30))
         .read_timeout(std::time::Duration::from_secs(60))
         .build()?;
-    let resp = dl.get(&file.url).send().await.with_context(|| format!("downloading {}", file.name))?.error_for_status()?;
-    let total = resp.content_length().unwrap_or(file.size).max(1);
-    let mut out = tokio::fs::File::create(dest).await.with_context(|| format!("creating {}", dest.display()))?;
+    // The bytes go to <name>.part and continue where a cut-off try stopped (an HTTP range):
+    // a restart of the studio in the middle of a 4.6 GB update costs only what was missing.
+    // A file left whole-named but short by a studio before 2026-10-07 is such a part too.
+    let part = dest.with_file_name(format!("{}.part", file.name));
+    if !tokio::fs::try_exists(&part).await.unwrap_or(false)
+        && tokio::fs::metadata(dest).await.is_ok_and(|m| m.len() < file.size)
+    {
+        let _ = tokio::fs::rename(dest, &part).await;
+    }
+    let mut from = tokio::fs::metadata(&part).await.map(|m| m.len()).unwrap_or(0);
+    if from >= file.size {
+        from = 0;
+    }
+    let mut req = dl.get(&file.url);
+    if from > 0 {
+        req = req.header(reqwest::header::RANGE, format!("bytes={from}-"));
+    }
+    let resp = req.send().await.with_context(|| format!("downloading {}", file.name))?.error_for_status()?;
+    // 206: the rest follows. 200: the server sends it all again - start over.
+    if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+        from = 0;
+    } else {
+        log.debug(format!("{}: continuing at {:.2} of {:.2} GB", file.name, from as f64 / 1e9, file.size as f64 / 1e9)).await;
+    }
+    let total = from + resp.content_length().unwrap_or(file.size - from);
+    let total = total.max(1);
+    let mut out = if from > 0 {
+        tokio::fs::OpenOptions::new().append(true).open(&part).await.with_context(|| format!("opening {}", part.display()))?
+    } else {
+        tokio::fs::File::create(&part).await.with_context(|| format!("creating {}", part.display()))?
+    };
     let mut stream = resp.bytes_stream();
-    let (mut got, mut shown) = (0u64, 0u64);
+    let (mut got, mut shown) = (from, from);
     let started = std::time::Instant::now();
     while let Some(chunk) = stream.next().await {
         log.check_abort()?;
@@ -417,23 +445,30 @@ async fn download_with(web: &reqwest::Client, log: &JobLog, file: &File, dest: &
         // Every half percent: often enough to move, rarely enough not to flood the log.
         if got - shown >= total / 200 || got == total {
             shown = got;
-            let rate = got as f64 / started.elapsed().as_secs_f64().max(0.1) / 1e6;
+            let rate = (got - from) as f64 / started.elapsed().as_secs_f64().max(0.1) / 1e6;
             tick(got, rate);
         }
     }
     out.flush().await?;
     drop(out);
     if file.size != 0 && got != file.size {
+        // More than the catalog's size: the part is not this file's - the next try starts over.
+        if got > file.size {
+            let _ = tokio::fs::remove_file(&part).await;
+        }
         bail!("{}: got {got} bytes, the catalog says {}", file.name, file.size);
     }
     if loud {
         log.debug(format!("Checking {} against the catalog's SHA-1", file.name)).await;
     }
-    let sum = tokio::process::Command::new("sha1sum").arg(dest).output().await.context("running sha1sum")?;
+    let sum = tokio::process::Command::new("sha1sum").arg(&part).output().await.context("running sha1sum")?;
     let hash = String::from_utf8_lossy(&sum.stdout).split_whitespace().next().unwrap_or_default().to_lowercase();
     if hash != file.sha1 {
+        // Damaged (or a continued part that was not this file's): never continued again.
+        let _ = tokio::fs::remove_file(&part).await;
         bail!("{}: SHA-1 {hash}, the catalog says {} - the download is damaged", file.name, file.sha1);
     }
+    tokio::fs::rename(&part, dest).await.with_context(|| format!("naming {}", dest.display()))?;
     if loud {
         log.ok(format!("{}: SHA-1 matches ({})", file.name, file.sha1)).await;
     } else {

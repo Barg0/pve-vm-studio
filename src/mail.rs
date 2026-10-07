@@ -825,13 +825,13 @@ pub fn icon_png(theme: &str, key: &str) -> &'static [u8] {
 
 /// A sample report in a theme, its icons inlined - the Mail card's preview.
 pub fn preview(theme: &str, studio: &str, node: &str) -> String {
-    let mut r = Report::new("VM provisioned: vm-ws2025-01", "vm", "vm-ws2025-01 is ready", "PROVISIONED", Tone::Success);
+    let mut r = Report::new("VM provisioned: vm-ws2025-01", "vm-work", "vm-ws2025-01 is ready", "PROVISIONED", Tone::Success);
     r.subtitle = "Windows Server 2025 Datacenter Desktop · from gold 9ce03b74".into();
     r.pills = vec![("Started by".into(), "root@pam".into())];
     r.tiles = vec![
         tile("static-ip", "Address", "10.10.0.50", "/24 · net0 · vmbr0", true),
         tile("servers", "Node", "pve-01", "VMID 101", true),
-        tile("gold-image", "Gold", "9ce03b74", "26100.33438", true),
+        tile("gold-image-work", "Gold", "9ce03b74", "26100.33438", true),
         tile("clock", "Time", "2m 43s", "09:54 - 09:56", false),
     ];
     let step = |n: &str, s| Step { name: n.into(), secs: s, state: StepState::Done };
@@ -853,7 +853,7 @@ pub fn preview(theme: &str, studio: &str, node: &str) -> String {
         ..Default::default()
     });
     let base = if studio.is_empty() { "#".to_owned() } else { format!("{studio}/#") };
-    r.buttons = vec![button("Open the VM", &format!("{base}/access"), "vm", true), button("Log", &format!("{base}/jobs"), "log", false)];
+    r.buttons = vec![button("Open the VM", &format!("{base}/access"), "vm-work", true), button("Log", &format!("{base}/jobs"), "log", false)];
     let (mut html, used) = render(&r, studio, node, theme);
     use base64::Engine;
     for k in used {

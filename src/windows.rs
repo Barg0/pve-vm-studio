@@ -1084,6 +1084,7 @@ pub(crate) async fn run_pass(
     vmid: u32,
     label: &str,
     timeout_min: u64,
+    units: &[(String, f64)],
 ) -> Result<Vec<String>> {
     pve.vm_action(node, vmid, "start").await?;
     // The console is there once the VM runs; a few tries while QEMU sets it up.
@@ -1101,6 +1102,14 @@ pub(crate) async fn run_pass(
     let started = Instant::now();
     let mut markers = Vec::new();
     let mut last_pct = -1.0;
+    // The step's own progress: DISM paints 0-100 % for every operation (a mount, an update,
+    // a scan), so its figure is the running operation's alone. With the pass's plan - its
+    // operations in order, each weighted by how long it takes - a marker that starts one
+    // moves the step to the sum of the ones before it, and DISM's figure fills only that
+    // operation's share. Without a plan the step shows DISM's figure as text, never as
+    // the step's percentage.
+    let total: f64 = units.iter().map(|(_, w)| w).sum::<f64>().max(1.0);
+    let (mut at, mut done, mut doing) = (None::<usize>, 0.0f64, String::new());
     loop {
         log.check_abort()?;
         if started.elapsed() > Duration::from_secs(timeout_min * 60) {
@@ -1119,11 +1128,24 @@ pub(crate) async fn run_pass(
                     {
                         if (pct - last_pct).abs() >= 1.0 {
                             last_pct = pct;
-                            pr.within(pct / 100.0, format!("{label}: DISM {pct:.0}%"));
+                            let what = if doing.is_empty() { String::new() } else { format!("{doing} · ") };
+                            match at {
+                                Some(k) => pr.within((done + units[k].1 * pct / 100.0) / total, format!("{label}: {what}DISM {pct:.0}%")),
+                                None => pr.note(format!("{label}: {what}DISM {pct:.0}%")),
+                            }
                         }
                         continue;
                     }
                     if part.starts_with("PVS-") {
+                        if let Some(key) = unit_key(part)
+                            && let Some(k) = units.iter().enumerate().skip(at.unwrap_or(0)).find(|(_, (u, _))| *u == key).map(|(k, _)| k)
+                        {
+                            at = Some(k);
+                            done = units[..k].iter().map(|(_, w)| w).sum();
+                            doing = crate::markers::text(part);
+                            last_pct = -1.0;
+                            pr.within(done / total, format!("{label}: {doing}"));
+                        }
                         // One line per feature, capability or app is detail: the caller sums
                         // them up per Server Manager feature. So is a worker's verdict per
                         // update, which the media build words itself.
@@ -1156,6 +1178,22 @@ pub(crate) async fn run_pass(
                 }
             }
         }
+    }
+}
+
+/// The plan key a marker starts: "UPD 1 x.msu", "HEALTH 1-before", "INDEX 1". An app's
+/// verdict ("PROV-OK 1 <app>", -FAIL with its code) starts the next app: "PROV 1 <app>". An
+/// update's verdict starts nothing - the next marker does.
+pub(crate) fn unit_key(marker: &str) -> Option<String> {
+    let rest = marker.strip_prefix("PVS-")?.trim();
+    let (key, args) = rest.split_once(' ').map_or((rest, ""), |(k, a)| (k, a.trim()));
+    match key {
+        "UPD-OK" | "UPD-FAIL" => None,
+        "PROV-OK" | "PROV-FAIL" => {
+            let mut a = args.split_whitespace();
+            Some(format!("PROV {} {}", a.next()?, a.next()?))
+        }
+        _ => Some(rest.to_owned()),
     }
 }
 
@@ -1269,7 +1307,7 @@ pub async fn bake(
         // ---- WinPE pass 1: apply ----
         log.run("WinPE pass 1: partition, apply, drivers, boot files").await;
         pr.stage(3.0, 40.0, "WinPE pass 1");
-        let m = run_pass(pve, log, &mut pr, node, vmid, "pass 1", 40).await?;
+        let m = run_pass(pve, log, &mut pr, node, vmid, "pass 1", 40, &[]).await?;
         if !m.iter().any(|l| l == "PVS-PASS1-OK") {
             bail!("pass 1 failed: {}", m.last().map(|l| crate::markers::text(l)).unwrap_or_else(|| "nothing on the serial console".into()));
         }
@@ -1297,7 +1335,7 @@ pub async fn bake(
         log.run("Audit mode: virtio drivers, guest agent, sysprep /generalize").await;
         pr.stage(40.0, 70.0, "audit mode and sysprep");
         set_boot(pve, node, vmid, "scsi0").await?;
-        let m = run_pass(pve, log, &mut pr, node, vmid, "audit", 60).await?;
+        let m = run_pass(pve, log, &mut pr, node, vmid, "audit", 60, &[]).await?;
         if !m.iter().any(|l| l == "PVS-SYSPREP-START") {
             bail!("audit mode did not reach sysprep: {}", m.last().cloned().unwrap_or_else(|| "no markers".into()));
         }
@@ -1318,7 +1356,7 @@ pub async fn bake(
         seed::attach(pve, node, vmid, "sata3", &p.disk_storage, pass2, &s2).await.context("attaching the pass 2 seed disk")?;
         log.ok("Pass 2 seed attached as a disk (sata3)").await;
         set_boot(pve, node, vmid, "sata0").await?;
-        let m = run_pass(pve, log, &mut pr, node, vmid, "pass 2", 30).await?;
+        let m = run_pass(pve, log, &mut pr, node, vmid, "pass 2", 30, &[]).await?;
         if !m.iter().any(|l| l == "PVS-PASS2-OK") {
             let why = m.iter().find(|l| l.starts_with("PVS-NO-SYSPREP-TAG") || l.starts_with("PVS-NOT-GENERALIZED") || l.starts_with("PVS-EDITION-NOT-CHANGED") || l.ends_with("FAILED")).cloned();
             bail!("pass 2 failed: {}", why.or_else(|| m.last().cloned()).map(|l| crate::markers::text(&l)).unwrap_or_else(|| "nothing on the serial console".into()));
@@ -1333,6 +1371,12 @@ pub async fn bake(
         )
         .await?;
         seed::detach(pve, node, vmid, "sata3").await?;
+        // Windows 11 Setup needed the TPM; the gold must not keep it. A clone copies the
+        // state volume bit for bit - every VM would share one endorsement key and whatever the
+        // bake sealed. Each VM gets its own at deploy (vms.rs), as Hyper-V gives each VM its own.
+        if client {
+            pve.vm_set(node, vmid, form![("delete", "tpmstate0"), ("force", 1)]).await?;
+        }
         set_boot(pve, node, vmid, "scsi0").await?;
         let gold_name = golds::gold_name(gold_id);
         let notes = format!(

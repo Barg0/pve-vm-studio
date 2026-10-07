@@ -93,6 +93,7 @@ const FRESH = {
   "iso-media.svg": ["host", "The Windows ISO, not a vendor logo", '<g fill="@H"><circle cx="9" cy="9" r="6.4"/></g>' + S + '<circle cx="9" cy="9" r="2"/><path d="M1.4 4.6V1.6h3M16.6 13.4v3h-3"/></g>'],
   "bell.svg": ["accent", "Notifications - a bell, in the theme's accent", '<g fill="@H"><path d="M9 1.8a1 1 0 0 1 1 1v.6a5 5 0 0 1 4 4.9v3.3l1.4 2a.6.6 0 0 1-.5 1H3.1a.6.6 0 0 1-.5-1l1.4-2V8.3a5 5 0 0 1 4-4.9v-.6a1 1 0 0 1 1-1z"/></g>' + S + '<path d="M7.2 15.6a1.9 1.9 0 0 0 3.6 0"/></g>'],
   "pool.svg": ["ident", "A PVE resource pool - a tag, as PVE's own resource tree draws pools (fa-tags)", '<g fill="@H"><path d="M2 3.4V8l6.6 6.6a1.2 1.2 0 0 0 1.7 0l4-4a1.2 1.2 0 0 0 0-1.7L7.7 2.3H3.1A1.1 1.1 0 0 0 2 3.4z"/></g>' + S + '<circle cx="5.2" cy="5.4" r="1.1"/><path d="M10.3 2.3l5.6 5.6a1.2 1.2 0 0 1 0 1.7l-4.6 4.6"/></g>'],
+  "image-settings.svg": ["host", "How golds are built: the gold with a gear", '<g fill="@H"><path d="M1.6 4.4c0-1.3 2.2-2.3 5-2.3s5 1 5 2.3v7.6c0 1.3-2.2 2.3-5 2.3s-5-1-5-2.3z"/><path d="M16.24 12.81L17.27 12.92 17.27 13.88 16.24 13.99 15.83 14.99 16.48 15.8 15.8 16.48 14.99 15.83 13.99 16.24 13.88 17.27 12.92 17.27 12.81 16.24 11.81 15.83 11 16.48 10.32 15.8 10.97 14.99 10.56 13.99 9.53 13.88 9.53 12.92 10.56 12.81 10.97 11.81 10.32 11 11 10.32 11.81 10.97 12.81 10.56 12.92 9.53 13.88 9.53 13.99 10.56 14.99 10.97 15.8 10.32 16.48 11 15.83 11.81Z"/></g>' + S + '<path d="M1.9 4.4c0 1.2 2.1 2.1 4.7 2.1s4.7-.9 4.7-2.1"/><path d="M16.24 12.81L17.27 12.92 17.27 13.88 16.24 13.99 15.83 14.99 16.48 15.8 15.8 16.48 14.99 15.83 13.99 16.24 13.88 17.27 12.92 17.27 12.81 16.24 11.81 15.83 11 16.48 10.32 15.8 10.97 14.99 10.56 13.99 9.53 13.88 9.53 12.92 10.56 12.81 10.97 11.81 10.32 11 11 10.32 11.81 10.97 12.81 10.56 12.92 9.53 13.88 9.53 13.99 10.56 14.99 10.97 15.8 10.32 16.48 11 15.83 11.81Z"/><circle cx="13.4" cy="13.4" r="1.2"/></g>'],
   "gold-image.svg": ["host", "A generalized gold VHDX", '<g fill="@H"><path d="M3 5c0-1.5 2.7-2.7 6-2.7s6 1.2 6 2.7v8c0 1.5-2.7 2.7-6 2.7S3 14.5 3 13z"/></g>' + S + '<path d="M3.3 5c0 1.4 2.6 2.5 5.7 2.5S14.7 6.4 14.7 5"/><path d="M9 9.6l1.9 1.9L9 13.4l-1.9-1.9z"/></g>'],
   "differencing.svg": ["host", "A child disk on its parent", '<g fill="@H"><path d="M1.6 4.4c0-1.3 2.2-2.3 4.9-2.3s4.9 1 4.9 2.3v4c0 1.3-2.2 2.3-4.9 2.3S1.6 9.7 1.6 8.4z"/><path d="M7.6 11.2c0-1.2 2-2.1 4.4-2.1s4.4.9 4.4 2.1v3.6c0 1.2-2 2.1-4.4 2.1s-4.4-.9-4.4-2.1z"/></g>' + S + '<path d="M1.9 4.4c0 1.2 2.1 2.1 4.6 2.1M7.9 11.2c0 1.1 1.9 1.9 4.1 1.9s4.1-.8 4.1-1.9"/></g>'],
   "checkpoint.svg": ["host", "Checkpoints on or off", '<g fill="@H"><rect x="3" y="1.6" width="1.9" height="14.8" rx=".9"/><path d="M5.6 2.6h9.6l-2.2 3.4 2.2 3.4H5.6z"/></g>' + S + '<path d="M8.6 4.4h3.4"/></g>'],
@@ -369,7 +370,8 @@ const LOCALE_CATALOG = {
 const BLADES = [
   { id: "dashboard",  group: "",              scope: "studio", label: "Dashboard",          icon: "overview.svg",   desc: "What runs and what ran, the designed VMs, and the system - cluster, storage, media, golds - at a glance.", server: true },
   { id: "studio",     group: "",              scope: "studio", label: "Studio settings",    icon: "certificate.svg", desc: "The studio's own DNS name, certificate, time format and confirmations.", server: true },
-  { id: "media",      group: "Images",        scope: "studio", label: "Media",              icon: "iso-media.svg",  desc: "What Windows golds are baked from - the ISOs and their editions, WinPE, virtio-win - and where bakes run.", server: true },
+  { id: "imagesettings", group: "Images",    scope: "studio", label: "Image settings",     icon: "image-settings.svg",   desc: "How images are built - the build environment's node, storage, network and CPU - and how Windows golds stay current.", server: true },
+  { id: "media",      group: "Images",        scope: "studio", label: "Media",              icon: "iso-media.svg",  desc: "What Windows golds are baked from - the ISOs and their editions, WinPE, virtio-win - .", server: true },
   { id: "winmedia",   group: "Images",        scope: "studio", label: "Windows media",      icon: "download.svg",   desc: "Install ISOs built from Microsoft's own update files - every supported Windows, patched to its newest build, Insider and vNext too.", server: true },
   { id: "golds",      group: "Images",        scope: "studio", label: "Golds",              icon: "gold-image.svg", desc: "Gold images: Linux from its publisher, Windows from an ISO - baked once, parked as templates, cloned for every VM.", server: true },
   { id: "general",    group: "VMs",           scope: "lab",    label: "VM settings",        icon: "settings.svg",   desc: "Naming, the local account generator and where new VMs go." },
@@ -2269,8 +2271,19 @@ const AUTO_START_ACTIONS = [
 function nestedVirtRequired(s) {
   return !!(s && findImage(s.imageId).requiresNestedVirt);
 }
-const NESTED_VIRT_INFO = "Sets the VM's CPU type to host, so the guest sees the node's hardware virtualization extensions (Intel VT-x / AMD-V) and can run Hyper-V and start VMs of its own. The node's KVM module needs nesting on - the default on current Proxmox VE. With CPU type host the VM only live-migrates to nodes with the same CPU.";
-const NESTED_VIRT_WARN = "Only for a guest that runs Hyper-V itself, or Azure Local.";
+const NESTED_VIRT_INFO = "The guest sees the processor's virtualization extensions (Intel VT-x / AMD-V): VBS, Credential Guard, Memory Integrity and Hotpatch need them, and so does a guest that runs Hyper-V itself. Needs host or a named CPU model - x86-64-vX has none to give.";
+/* A VM's hardware as it will be built: its own values under "Override the defaults", else
+   VM settings → Hardware defaults. Nesting is on regardless where the image needs it. */
+function hwOf(s) {
+  const d = hwDefaults(), own = !!s.hwOverride;
+  return {
+    own,
+    cpu: own && s.cpuType ? s.cpuType : d.cpu,
+    numa: own && s.numa ? s.numa : d.numa,
+    nested: nestedVirtRequired(s) || (hotpatchCapable(s) && !!s.hotpatchReady) || (own ? (s.nestedVirtualization ?? d.nested) : d.nested),
+    queues: own ? (s.netQueues ?? d.queues !== "off") : d.queues !== "off"
+  };
+}
 
 const AZURE_REGIONS = [
   { id: "westeurope", label: "West Europe" },
@@ -5143,6 +5156,87 @@ function gsCard(key, icon, title, meta, bodyHtml, iconAttrs, defaultOpen, badge)
     </div>`;
 }
 
+/* VM settings → Hardware defaults: the design keeps them (defaults.hardware), a VM card may
+   override them; "auto" is settled at deploy against the nodes (src/hardware.rs). */
+const HW_DEFAULTS = { cpu: "auto", securityFlags: "auto", nested: true, numa: "auto", ksm: true, queues: "auto", protection: true };
+function hwDefaults() { return Object.assign({}, HW_DEFAULTS, (state.defaults && state.defaults.hardware) || {}); }
+let hwCluster = null, hwClusterBusy = false, hwClusterAt = 0;
+/* The nodes once a page needs them, again after 30 s - the load bars stay current. */
+function loadHwCluster(force) {
+  if (typeof api !== "function" || hwClusterBusy || (hwCluster && !force && Date.now() - hwClusterAt < 30000)) return;
+  hwClusterBusy = true;
+  api("GET", "/hardware/cluster").then(r => { hwCluster = r; hwClusterAt = Date.now(); }).catch(e => { hwCluster = { error: e.message }; hwClusterAt = Date.now(); })
+    .finally(() => { hwClusterBusy = false; scheduleRender(); });
+}
+/* The CPU type a default of "auto" (or a named one) comes to. */
+function hwEffectiveCpu(cpu) {
+  if (cpu && cpu !== "auto") return cpu;
+  return hwCluster && hwCluster.auto ? hwCluster.auto.cpu : "";
+}
+function hardwareDefaultsCard() {
+  loadHwCluster();
+  const h = hwDefaults(), c = hwCluster || {};
+  const nodes = Array.isArray(c.nodes) ? c.nodes : [];
+  const eff = hwEffectiveCpu(h.cpu);
+  const generic = eff.startsWith("x86-64-v");
+  const auto = c.auto || {};
+  const first = nodes[0];
+  const odd = n => first && (n.model !== first.model || n.vendor !== first.vendor);
+  const nodeCards = c.error ? `<div class="warn-box">${warnIconSvg()}<span>The nodes did not answer: ${esc(c.error)}</span></div>`
+    : !nodes.length ? `<div class="hint">Asking the nodes…</div>`
+    : `<div class="hw-box"><table class="hw-table"><thead><tr><th>Node</th><th>CPU</th><th>Sockets</th><th>Cores</th><th>Threads</th><th>CPU load</th><th>Memory</th><th></th></tr></thead><tbody>${nodes.map(n => {
+        const cpu = Math.min(100, (n.cpu_load || 0) * 100), mem = n.memory_gb ? Math.min(100, n.memory_used_gb / n.memory_gb * 100) : 0;
+        const tone = p => p >= 90 ? "danger" : p >= 75 ? "warn" : "";
+        const bar = (p, text) => `<div class="hw-bar"><span class="meter-track"><span class="meter-fill ${tone(p)}" style="width:${p.toFixed(1)}%"></span></span><span class="mono">${text}</span></div>`;
+        const state = odd(n) ? '<span class="pill status warn">different CPU</span>' : n.virtual_node ? '<span class="pill status warn">itself a VM</span>' : nodes.length > 1 ? '<span class="pill status on">same CPU</span>' : "";
+        return `<tr${odd(n) ? ' class="odd"' : ""}>
+          <td><span class="hw-dot"></span><b>${esc(n.node)}</b></td>
+          <td>${esc(n.model)}</td>
+          <td class="mono">${n.sockets}</td><td class="mono">${n.cores * n.sockets}</td><td class="mono">${n.cpus}</td>
+          <td>${bar(cpu, `${cpu.toFixed(0)}%`)}</td>
+          <td>${bar(mem, `${n.memory_used_gb.toFixed(0)} / ${n.memory_gb} GiB`)}</td>
+          <td class="hw-state">${state}</td>
+        </tr>`;
+      }).join("")}</tbody></table></div>`;
+  const mixedWarn = eff === "host" && nodes.some(odd)
+    ? `<div class="warn-box">${warnIconSvg()}<span>${esc(nodes.filter(odd).map(n => n.node).join(", "))} ${nodes.filter(odd).length > 1 ? "have" : "has"} a different CPU. With host, a VM started on one node cannot move to a node with another CPU.</span></div>` : "";
+  const models = Array.isArray(c.models) ? c.models : [];
+  const cpuOpts = [["auto", `Auto${auto.cpu ? ` · ${auto.cpu} - ${auto.why}` : ""}`]]
+    .concat(models.map(m => [m.name, m.custom ? `${m.name} (custom)` : m.name]));
+  if (h.cpu !== "auto" && !models.some(m => m.name === h.cpu)) cpuOpts.push([h.cpu, h.cpu]);
+  const sel = (key, options, value, disabled) => `<select data-hw="${key}"${disabled ? " disabled" : ""}>${options.map(([v, l]) => `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
+  const multi = !!c.multiSocket;
+  const flagsNote = generic ? ((auto.flags || []).join(", ") || "none every node has") : (eff === "host" ? "not needed with host" : "a named model brings its own");
+  const meta = [eff || "auto", h.nested ? "nested" : "", `NUMA ${h.numa}`].filter(Boolean).join(" · ");
+  return gsCard("gs-hardware", "cpu.svg", "Hardware defaults", esc(meta), `
+    <div class="field-group">Cluster</div>
+    ${nodeCards}
+    ${mixedWarn}
+    <div class="field-group">CPU</div>
+    <div class="grid-3">
+      ${field(`<span class="field-label"><img src="${iconSrc("cpu.svg")}" alt="">CPU type${infoTip("CPU type", "What VMs see of the node's processor. host passes it through as it is - every instruction, the vendor's security flags, nested virtualization - and live-migrates only between nodes with the same CPU and microcode. A named model is a CPU generation every node must run in full; x86-64-v3 works on Intel and AMD alike but carries no nesting and no security flags. Auto: host when every node has the same CPU, else x86-64-v3 (v2-AES on nodes older than Haswell).")}</span>`, sel("cpu", cpuOpts, h.cpu))}
+      ${field(`<span class="field-label"><img src="${iconSrc("security.svg")}" alt="">Security flags${infoTip("Security flags", "Only for the generic x86-64-v2/v3/v4 types, which carry none: md-clear, pcid, spec-ctrl, ssbd on Intel; ibpb, amd-ssbd, virt-ssbd on AMD - only the ones every node has. host and named models bring their own.")}</span>`, sel("securityFlags", [["auto", `Auto · ${flagsNote}`], ["off", "Off"]], h.securityFlags, !generic))}
+    </div>
+    <div class="toggle-grid hw-toggles">
+      ${toggle('data-hw="nested"', `Nested virtualization${infoTip("Nested virtualization", "Gives Windows the processor's virtualization extensions: VBS, Credential Guard, Memory Integrity and Hotpatch need them. Measured on PVE 9.2 (Server 2025, host): VBS runs, about 3% of one core more at idle. Server 2025 in a domain turns Credential Guard on by itself (not on domain controllers): NTLMv1, Kerberos DES and unconstrained delegation stop working there. On AMD, do not live-migrate a VM while it runs VMs of its own. Needs host or a named model.")}`, h.nested)}
+    </div>
+    <div class="field-group">Memory</div>
+    <div class="grid-3">
+      ${field(`<span class="field-label"><img src="${iconSrc("ram.svg")}" alt="">NUMA${infoTip("NUMA", "Gives the VM the node's memory layout, so Windows and Linux keep a process next to its memory. Auto: on only where a node has more than one socket - with one socket the VM has one NUMA node either way. A VM gets a second socket only when its cores or memory do not fit one of the node's sockets.")}</span>`,
+        sel("numa", [["auto", `Auto · ${multi ? "on: a node has more than one socket" : "no effect: every node has 1 socket"}`], ["on", "On"], ["off", "Off"]], h.numa))}
+    </div>
+    <div class="toggle-grid hw-toggles">
+      ${toggle('data-hw="ksm"', `Share identical memory pages (KSM)${infoTip("KSM", "The node keeps one copy of memory pages that several VMs hold alike - many Windows VMs from one gold share a lot. Off for VMs that must not learn anything about each other: page sharing is a known side channel.")}`, h.ksm)}
+    </div>
+    <div class="field-group">Devices</div>
+    <div class="grid-3">
+      ${field(`<span class="field-label"><img src="${iconSrc("vnet.svg")}" alt="">Network queues${infoTip("Network queues", "One queue per vCPU (8 at most) spreads network traffic over a server's cores. Windows clients keep one.")}</span>`, sel("queues", [["auto", "Auto · servers: 1 per vCPU, max 8"], ["off", "Off"]], h.queues))}
+    </div>
+    <div class="toggle-grid hw-toggles">
+      ${toggle('data-hw="protection"', `Protect built VMs${infoTip("Protect built VMs", "PVE refuses to remove a built VM or its disks until protection is turned off on it. The studio never removes built VMs itself.")}`, h.protection)}
+    </div>`, "", true);
+}
+
 function renderGeneral() {
   const d = state.defaults;
   const c = d.cluster || {};
@@ -5179,6 +5273,8 @@ function renderGeneral() {
     <div class="blade-toolbar">
       ${bladeTitle("general")}
     </div>
+
+    ${typeof api === "function" ? hardwareDefaultsCard() : ""}
 
     ${gsCard("gs-username", "users.svg", "Local username theme", esc(themeLabel), `
       <p class="hint" style="margin-bottom:10px">Used by the Generate button on each virtual machine card.</p>
@@ -5261,7 +5357,7 @@ function renderGeneral() {
           <div class="section-body">
             <div class="toggle-grid" style="margin-top:12px">
               ${toggle(`data-ip="${esc(img.id)}" data-k="enableSecureBoot"`, "Secure Boot", p.enableSecureBoot)}
-              ${toggle(`data-ip="${esc(img.id)}" data-k="enableVtpm"`, "vTPM (Win11)", p.enableVtpm)}
+              ${toggle(`data-ip="${esc(img.id)}" data-k="enableVtpm"`, "vTPM", p.enableVtpm)}
               ${toggle(`data-ip="${esc(img.id)}" data-k="startAfterCreate"`, "Start after create", p.startAfterCreate)}
             </div>
             <div class="grid-2" style="margin-top:10px">
@@ -5729,6 +5825,32 @@ function renderServerArcSection(s) { return ""; }
    deploy - the VM comes up and its result lists the app as not installed. */
 const wgPick = { sid: null, q: "", hits: [], busy: false, timer: null };
 function wingetCapable(s) { const img = findImage(s.imageId); return !isLinuxServer(s) && img.kind !== "core"; }
+/* Optional features: what a VM can be made ready for at first boot. Hotpatch - Windows
+   Server 2025 only - turns VBS on and checks it runs after the restart; Hotpatch itself is
+   switched on for the VM in Azure. */
+function hotpatchCapable(s) { return !isLinuxServer(s) && String(s.imageId || "").startsWith("ws2025-"); }
+function renderServerOptionalSection(s) {
+  if (!hotpatchCapable(s)) return "";
+  const open = isNestedOpen(s._id + "-optional", false);
+  const on = !!s.hotpatchReady;
+  const v = typeof liveVm === "function" ? liveVm(s) : null;
+  const r = v && v.spec && v.spec.hotpatch_result;
+  const status = !on || !r ? "" : r.ready
+    ? `<div class="hw-status"><span class="pill status on">Ready</span><span>VBS running · build ${esc(r.build || "")}</span><span class="muted">checked after the first restart</span></div>`
+    : `<div class="hw-status"><span class="pill status warn">Not ready</span><span>VBS ${r.vbs === 1 ? "configured, not running" : "off"}</span><span class="muted">needs host or a named CPU model with nesting</span></div>`;
+  return `<div class="section collapsible ${open ? "" : "collapsed"}">
+    <div class="section-head" data-nested="${esc(s._id)}-optional">
+      <span class="section-chevron">${chevron()}</span><img src="${iconSrc("first-boot.svg")}" alt=""> Optional features
+      <span class="section-meta">${on ? "Hotpatch ready" : "none"}</span>
+    </div>
+    <div class="section-body">
+      <div class="toggle-grid hw-toggles">
+        ${toggle(`data-s="${esc(s._id)}" data-k="hotpatchReady"`, `Hotpatch ready${infoTip("Hotpatch ready", "Windows Server 2025 Standard and Datacenter: VBS is turned on at first boot and checked to run after the restart - the VM is then ready for Hotpatch, which is switched on for it in Azure (Azure Arc). Turns nested virtualization on for this VM; costs about 3% of one core at idle (measured on PVE 9.2).")}`, on)}
+      </div>
+      ${status}
+    </div>
+  </div>`;
+}
 function renderServerWingetSection(s) {
   if (isLinuxServer(s)) return "";
   const open = isNestedOpen(s._id + "-winget", false);
@@ -5747,17 +5869,18 @@ function renderServerWingetSection(s) {
       <td><input data-wg-over="${esc(s._id)}" data-wg-i="${i}" value="${esc(a.override || "")}" placeholder="the installer's own switches" spellcheck="false" autocomplete="off" aria-label="Override for ${esc(a.id)}"></td>
       <td class="row-actions"><button class="btn icon sm danger-text" type="button" data-wg-del="${esc(s._id)}" data-wg-i="${i}" title="Take ${esc(a.id)} off the list" aria-label="Remove ${esc(a.id)}">${trashIcon()}</button></td></tr>`).join("");
   return `<div class="section collapsible ${open ? "" : "collapsed"}">
-    ${head([on ? `${apps.length} at first boot` : "", s.wingetUpgrade ? "updates" : ""].filter(Boolean).join(" · ") || "off")}
+    ${head(on ? `${apps.length} at first boot` : "off")}
     <div class="section-body">
       <div class="warn-box">${warnIconSvg()}<span>Installed at first boot from the internet: the VM needs a way out to Microsoft's WinGet catalog and the vendors' download servers. An app that only installs per user, or whose installer asks questions, can fail - the VM still comes up, the failure is in its log.</span></div>
-      <div class="toggle-grid" style="grid-template-columns:1fr">${toggle(`data-wg-on="${esc(s._id)}"`, "Install applications from WinGet", on)}${toggle(`data-wg-up="${esc(s._id)}"`, "Update installed applications", !!s.wingetUpgrade)}</div>
+      <div class="toggle-grid" style="grid-template-columns:1fr">${toggle(`data-wg-on="${esc(s._id)}"`, "Install applications from WinGet", on)}</div>
       ${on ? `${apps.length ? `<div class="table-wrap"><table class="data wg-table"><thead><tr><th>Application</th><th>WinGet ID</th><th>Version</th><th>Override</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
       <div class="wg-add">
-        ${picking ? `<div class="wg-pick">
+        <button class="btn primary sm" type="button" data-wg-add="${esc(s._id)}" aria-expanded="${picking}"><img src="${iconSrcOnAccent("app-stack.svg")}" alt=""> Add application</button>
+        ${picking ? `<div class="wg-pick" role="dialog" aria-label="Add an application from WinGet">
           <input id="wgq-${esc(s._id)}" data-wg-q="${esc(s._id)}" value="${esc(wgPick.q)}" placeholder="Search WinGet - 7zip, Notepad++, PowerShell" spellcheck="false" autocomplete="off" aria-label="Search WinGet">
           <div class="wg-res" id="wgres-${esc(s._id)}">${wingetHits(s)}</div>
           <div class="wg-foot"><span>WinGet's catalog, machine-wide installers only</span><button class="btn sm" type="button" data-wg-close>Close</button></div>
-        </div>` : `<button class="btn primary sm" type="button" data-wg-add="${esc(s._id)}"><img src="${iconSrcOnAccent("app-stack.svg")}" alt=""> Add application</button>`}
+        </div>` : ""}
       </div>` : ""}
     </div></div>`;
 }
@@ -5778,12 +5901,13 @@ function wingetRepaintHits(sid) {
   if (s && box) box.innerHTML = wingetHits(s);
 }
 document.addEventListener("change", e => {
-  const u = e.target.closest("[data-wg-up]");
-  if (u) { const s = state.servers.find(x => x._id === u.dataset.wgUp); if (s) { s.wingetUpgrade = u.checked; render(); } return; }
   const t = e.target.closest("[data-wg-on]"); if (!t) return;
   const s = state.servers.find(x => x._id === t.dataset.wgOn); if (!s) return;
   s.wingetEnabled = t.checked; if (!Array.isArray(s.wingetApps)) s.wingetApps = [];
   render();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && wgPick.sid) { const sid = wgPick.sid; wgPick.sid = null; render(); const b = document.querySelector(`[data-wg-add="${CSS.escape(sid)}"]`); if (b) b.focus(); }
 });
 document.addEventListener("input", e => {
   const o = e.target.closest("[data-wg-over]");
@@ -5800,8 +5924,10 @@ document.addEventListener("input", e => {
 });
 document.addEventListener("click", async e => {
   const add = e.target.closest("[data-wg-add]");
+  if (add && wgPick.sid === add.dataset.wgAdd) { wgPick.sid = null; render(); return; }
   if (add) { Object.assign(wgPick, { sid: add.dataset.wgAdd, q: "", hits: [] }); render(); const f = document.getElementById("wgq-" + wgPick.sid); if (f) f.focus(); return; }
-  if (e.target.closest("[data-wg-close]")) { wgPick.sid = null; render(); return; }
+  // The picker is an overlay: Close or a click anywhere outside it puts it away.
+  if (e.target.closest("[data-wg-close]") || (wgPick.sid && !e.target.closest(".wg-pick"))) { wgPick.sid = null; render(); if (!e.target.closest("[data-wg-del]")) return; }
   const del = e.target.closest("[data-wg-del]");
   if (del) { const s = state.servers.find(x => x._id === del.dataset.wgDel); if (s) { s.wingetApps.splice(+del.dataset.wgI, 1); render(); } return; }
   const pick = e.target.closest("[data-wg-pick]"); if (!pick) return;
@@ -6167,6 +6293,8 @@ function renderServerCard(s) {
   const localOpen = isNestedOpen(s._id + "-local", true);
   const cpuOpen = isNestedOpen(s._id + "-cpu", true);
   const cpuAdvOpen = isNestedOpen(s._id + "-cpuadv", false);
+  const hw = hwOf(s);
+  loadHwCluster();
   const netOpen = isNestedOpen(s._id + "-net", true);
   const autoStartOpen = isNestedOpen(s._id + "-autostart", false);
   const disksOpen = isNestedOpen(s._id + "-disks", false);
@@ -6422,8 +6550,8 @@ function renderServerCard(s) {
       <div class="section collapsible ${cpuOpen ? "" : "collapsed"}">
         <div class="section-head" data-nested="${esc(s._id)}-cpu">
           <span class="section-chevron">${chevron()}</span>
-          <img src="${iconSrc("cpu.svg")}"> CPU / RAM
-          <span class="section-meta">${esc(s.memoryGB)} GB · ${esc(s.cpuCount)} CPU${s.nestedVirtualization ? " · nested virtualization" : ""}</span>
+          <img src="${iconSrc("cpu.svg")}"> Hardware
+          <span class="section-meta">${esc(s.memoryGB)} GB · ${esc(s.cpuCount)} CPU · ${esc(hwEffectiveCpu(hw.cpu) || "auto")}${hw.nested ? " · nested" : ""}</span>
         </div>
         <div class="section-body">
           <div class="grid-3" style="margin-top:12px">
@@ -6434,15 +6562,26 @@ function renderServerCard(s) {
             <div class="section-head" data-nested="${esc(s._id)}-cpuadv">
               <span class="section-chevron">${chevron()}</span>
               <img src="${iconSrc("nested-virt.svg")}"> Additional processor options
-              <span class="section-meta">${s.nestedVirtualization ? "Nested virtualization on" : "Defaults"}</span>
+              <span class="section-meta"${hw.own ? ' style="color:var(--accent-hover)"' : ""}>${hw.own ? "Overridden" : "Defaults"}</span>
             </div>
             <div class="section-body">
-              <div style="margin-top:12px">
-                ${toggle(`data-s="${esc(s._id)}" data-k="nestedVirtualization"`, `Nested virtualization${infoTip("Nested virtualization", NESTED_VIRT_INFO)}`,
-                  !!s.nestedVirtualization, nestedVirtRequired(s),
-                  nestedVirtRequired(s) ? `Required by ${esc(findImage(s.imageId).label)} — it runs its own hypervisor.` : "")}
+              <div class="toggle-grid hw-toggles">
+                ${toggle(`data-s="${esc(s._id)}" data-k="hwOverride"`, `Override the defaults${infoTip("Override the defaults", "Off: this VM takes VM settings → Hardware defaults, and follows them when they change. On: the values below are this VM's own.")}`, hw.own)}
               </div>
-              ${s.nestedVirtualization ? `<div style="margin-top:10px">${warnBanner(NESTED_VIRT_WARN)}</div>` : ""}
+              <div class="hw-own${hw.own ? "" : " off"}">
+                <div class="grid-2" style="margin-top:12px">
+                  ${field(`<span class="field-label"><img src="${iconSrc("cpu.svg")}" alt="">CPU type${infoTip("CPU type", "Default from VM settings → Hardware defaults; with Override, this VM's own.")}</span>`,
+                    `<select data-s="${esc(s._id)}" data-k="cpuType"${hw.own ? "" : " disabled"}>${[["", `Default · ${hwEffectiveCpu(hwDefaults().cpu) || "auto"}`]].concat(((hwCluster && hwCluster.models) || []).map(m => [m.name, m.name])).map(([v, l]) => `<option value="${esc(v)}"${(hw.own ? (s.cpuType || "") : "") === v ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`)}
+                  ${field(`<span class="field-label"><img src="${iconSrc("ram.svg")}" alt="">NUMA${infoTip("NUMA", "Default from VM settings. On a one-socket node a VM has one NUMA node either way.")}</span>`,
+                    `<select data-s="${esc(s._id)}" data-k="numa"${hw.own ? "" : " disabled"}>${[["", `Default · ${hwDefaults().numa}`], ["auto", "Auto"], ["on", "On"], ["off", "Off"]].map(([v, l]) => `<option value="${v}"${(hw.own ? (s.numa || "") : "") === v ? " selected" : ""}>${l}</option>`).join("")}</select>`)}
+                </div>
+                <div class="toggle-grid hw-toggles">
+                  ${toggle(`data-s="${esc(s._id)}" data-k="nestedVirtualization"`, `Nested virtualization${infoTip("Nested virtualization", NESTED_VIRT_INFO)}`,
+                    hw.nested, !hw.own || nestedVirtRequired(s) || (hotpatchCapable(s) && !!s.hotpatchReady),
+                    nestedVirtRequired(s) ? `Required by ${esc(findImage(s.imageId).label)} — it runs its own hypervisor.` : (hotpatchCapable(s) && s.hotpatchReady ? "Required by Hotpatch ready" : ""))}
+                  ${toggle(`data-s="${esc(s._id)}" data-k="netQueues"`, `Network queues${infoTip("Network queues", "One queue per vCPU (8 at most) for a server. Windows clients keep one.")}`, hw.queues, !hw.own)}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -6571,6 +6710,7 @@ function renderServerCard(s) {
       </div>`}
 
       ${renderServerWingetSection(s)}
+      ${renderServerOptionalSection(s)}
       ${renderServerRolesSection(s)}
       ${renderServerAppsSection(s)}
 
@@ -6610,7 +6750,7 @@ function renderServerCard(s) {
             ${imageRefusesSecureBoot(img)
               ? toggle(`data-s="${esc(s._id)}" data-k="enableSecureBoot"`, "Secure Boot", false, true, "not possible on this image")
               : toggle(`data-s="${esc(s._id)}" data-k="enableSecureBoot"`, "Secure Boot", s.enableSecureBoot)}
-            ${isLinux ? "" : toggle(`data-s="${esc(s._id)}" data-k="enableVtpm"`, "vTPM (Win11)", s.enableVtpm)}
+            ${isLinux ? "" : toggle(`data-s="${esc(s._id)}" data-k="enableVtpm"`, "vTPM", s.enableVtpm)}
             ${toggle(`data-s="${esc(s._id)}" data-k="startAfterCreate"`, "Start after create", s.startAfterCreate)}
           </div>
           ${imageRefusesSecureBoot(img) ? `<p class="hint" style="margin-top:8px">${esc(img.label)} ships no Microsoft-signed shim - its gold is baked with Secure Boot off, and so is every VM from it.</p>` : ""}
@@ -7870,7 +8010,7 @@ function validate() {
       const g = goldFor(s), m = goldManifest(g);
       if (m.evaluation) warn(`${label} builds from ${g.name}, an evaluation image — 180 days, and no KMS activation.`, `Virtual machines › ${label}`);
       if (m.generalized === false) warn(`${label} builds from ${g.name}, which is not generalized — every VM from it shares its SID and identity.`, `Virtual machines › ${label}`);
-      if (m.requiresTpm && !s.enableVtpm) info(`${label}: ${g.name} needs a TPM — the VM gets a vTPM from the gold's sidecar.`, `Virtual machines › ${label}`);
+      if (m.requiresTpm && !s.enableVtpm) info(`${label}: ${g.name} needs a TPM — the VM gets its own vTPM at deploy.`, `Virtual machines › ${label}`);
     }
     lintPath(s.vmPath, `${label} VM path`, `Virtual machines › ${label}`, `s:${s._id}:vmPath`);
     lintPath(s.vhdPath, `${label} VHD path`, `Virtual machines › ${label}`, `s:${s._id}:vhdPath`);
@@ -8317,16 +8457,6 @@ function ovWingetStrip(s) {
     : s.wingetApps.map(a => `<span>${esc(a.name || a.id)}</span>`).join("");
   return `<section class="ov-features"><span class="ov-flabel">Applications</span><span class="ov-ticks">${chips}</span>${done ? "" : '<span class="ov-muted" style="margin-left:6px">at first boot</span>'}</section>`;
 }
-/* WinGet's updates on Connect: each application old -> new (green) or not updated (red). */
-function ovWingetUpdates(s) {
-  if (!wingetCapable(s) || !s.wingetUpgrade) return "";
-  const v = liveVm(s);
-  const ups = v && v.spec && Array.isArray(v.spec.winget_upgrades) ? v.spec.winget_upgrades : null;
-  const chips = ups
-    ? (ups.filter(a => !a.skipped).length ? ups.filter(a => !a.skipped).map(a => `<span class="${a.success ? "on" : "off"}" title="${esc(a.success ? `${a.from} → ${a.to}` : (a.message || "not updated"))}">${esc(a.name || a.id)} <span class="mono">${esc(a.success ? a.to : a.from)}</span></span>`).join("") : '<span class="on">Everything current</span>')
-    : "";
-  return `<section class="ov-features"><span class="ov-flabel">Updates</span><span class="ov-ticks">${chips}</span>${ups ? "" : '<span class="ov-muted">at first boot</span>'}</section>`;
-}
 function ovTick(on, label) { return `<span class="${on ? "on" : ""}">${esc(label)}</span>`; }
 function ovVlan(v) { return (v === "" || v == null) ? ovOff("untagged") : esc(String(v)); }
 
@@ -8462,7 +8592,7 @@ function renderOverviewCard(s) {
         <dl class="ov-kv">
           <dt>vCPU</dt><dd>${Number(s.cpuCount) || 0}</dd>
           <dt>RAM</dt><dd>${Number(s.memoryGB) || 0} GB</dd>
-          <dt>Security</dt><dd><span class="ov-ticks">${ovTick(effectiveSecureBoot(s), "Secure Boot")}${ovTick(s.enableVtpm, "vTPM")}${ovTick(s.nestedVirtualization, "Nested")}</span></dd>
+          <dt>Security</dt><dd><span class="ov-ticks">${ovTick(effectiveSecureBoot(s), "Secure Boot")}${ovTick(s.enableVtpm, "vTPM")}${ovTick(hwOf(s).nested, "Nested")}</span></dd>
           <dt>Start at boot</dt><dd class="txt">${onboot ? `Yes${serverAutoStartDelay(s) ? ` · after ${serverAutoStartDelay(s)} s` : ""}` : ovOff("no")}</dd>
           <dt>After create</dt><dd class="txt">${s.startAfterCreate ? `<span class="ov-yes">Starts</span>` : ovOff("stays off")}</dd>
           <dt>Guest agent</dt><dd class="txt">QEMU guest agent</dd>
@@ -8492,7 +8622,6 @@ function renderOverviewCard(s) {
 
     <section class="ov-features"><span class="ov-flabel">${features.label}</span>${features.html}</section>
     ${ovWingetStrip(s)}
-    ${ovWingetUpdates(s)}
   </article>`;
 }
 
@@ -10078,6 +10207,12 @@ document.getElementById("main").addEventListener("change", e => {
     scheduleRender();
     return;
   }
+  if (e.target.hasAttribute("data-hw")) {
+    const k = e.target.dataset.hw;
+    state.defaults.hardware = Object.assign({}, hwDefaults(), { [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+    scheduleRender();
+    return;
+  }
   if (e.target.hasAttribute("data-pwlen")) {
     state.defaults.passwordLength = Number(e.target.value) || 32;
     // A new length applies to the whole fleet at once — every existing VM's local
@@ -10273,6 +10408,16 @@ document.getElementById("main").addEventListener("change", e => {
         return;
       }
       if (k === "nestedVirtualization") { s.nestedVirtualization = nestedVirtRequired(s) || e.target.checked; scheduleRender(); return; }
+      // Override starts from what the defaults give, never from a value left behind.
+      if (k === "hwOverride") {
+        s.hwOverride = e.target.checked;
+        if (s.hwOverride) {
+          const d = hwDefaults();
+          Object.assign(s, { cpuType: "", numa: "", nestedVirtualization: nestedVirtRequired(s) || d.nested, netQueues: d.queues !== "off" });
+        }
+        scheduleRender();
+        return;
+      }
       if (k === "djDeferred") {
         s.domainJoin = s.domainJoin || { enabled: false, accountId: "", ouPath: "", mode: null };
         s.domainJoin.mode = e.target.checked ? "deferred" : "specialize";

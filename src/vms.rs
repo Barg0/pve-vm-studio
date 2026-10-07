@@ -75,10 +75,31 @@ pub struct VmSpec {
     /// Adapters beyond the primary one - address only, no gateway or DNS.
     #[serde(default)]
     pub extra_nics: Vec<ExtraNic>,
-    /// Nested virtualization: the guest sees the CPU's virtualization extensions (CPU
-    /// type host) - for a guest that runs Hyper-V or KVM itself.
+    /// Nested virtualization: the guest sees the CPU's virtualization extensions - for
+    /// VBS, Credential Guard, Hotpatch, or a hypervisor of its own (host or a named model).
     #[serde(default)]
     pub nested: bool,
+    /// The CPU type; empty: "auto", settled against the nodes at deploy (hardware.rs).
+    #[serde(default)]
+    pub cpu_type: String,
+    /// The vendor's security flags on a generic x86-64-vX type.
+    #[serde(default = "yes")]
+    pub security_flags: bool,
+    /// "auto", "on", "off" (hardware::numa_for).
+    #[serde(default)]
+    pub numa: String,
+    /// KSM may share this VM's memory pages.
+    #[serde(default = "yes")]
+    pub ksm: bool,
+    /// One network queue per vCPU (8 at most) - servers only.
+    #[serde(default)]
+    pub queues: bool,
+    /// PVE's protection flag once built.
+    #[serde(default)]
+    pub protection: bool,
+    /// Windows Server 2025: VBS on at first boot and checked to run - ready for Hotpatch.
+    #[serde(default)]
+    pub hotpatch: bool,
     /// Seconds after the node's start before this VM starts (with onboot).
     #[serde(default)]
     pub startup_delay: u32,
@@ -133,10 +154,6 @@ pub struct VmSpec {
     /// reported, never fatal - the VM still comes up.
     #[serde(default)]
     pub winget_apps: Vec<WingetApp>,
-    /// Everything WinGet can upgrade on the fresh VM (Edge, the inbox apps, the ones just
-    /// installed), at first boot after the installs. Never fatal either.
-    #[serde(default)]
-    pub winget_upgrade: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -393,6 +410,13 @@ async fn deploy_inner(
     if let Some(v) = spec.vlan {
         net0 += &format!(",tag={v}");
     }
+    // Servers: one queue per vCPU (8 at most) spreads the traffic over the cores. A Windows
+    // client gains little from it.
+    let client = manifest["installationType"].as_str() == Some("Client") || manifest["requiresTpm"].as_bool() == Some(true);
+    let queues = if spec.queues && !client && spec.cores > 1 { spec.cores.min(8) } else { 0 };
+    if queues > 1 {
+        net0 += &format!(",queues={queues}");
+    }
     let extra_macs: Vec<String> = spec.extra_nics.iter().map(|_| new_mac()).collect();
     // Its OS without a build (it updates), then the design's own tags.
     let os_tag = crate::tags::os(&gold.os, &gold.image_id, None);
@@ -410,9 +434,31 @@ async fn deploy_inner(
     // Balloon deleted, not 0: the device stays (PVE sees the guest's real memory use) with
     // its target at full memory, so nothing is ever taken back - static memory.
     let bake: crate::settings::BakeSettings = crate::settings::load(db, "bake").await?;
-    let cpu = if spec.nested { "host".to_string() } else { bake.cpu_for(win) };
+    // The CPU: "auto" settled against the nodes (host when they all have the same CPU),
+    // its security flags on a generic type, nesting as the design says.
+    let nodes = crate::hardware::cluster(pve).await.unwrap_or_default();
+    let here = nodes.iter().find(|n| n.node == node);
+    let (mut cpu_type, why) = if spec.cpu_type.is_empty() { crate::hardware::pick_cpu(&nodes) } else { (spec.cpu_type.clone(), "the design's".to_owned()) };
+    // Windows on host stops KVM on a node that is itself a VM (PVE in Hyper-V).
+    if win && cpu_type == "host" && here.is_some_and(|n| n.virtual_node) {
+        cpu_type = bake.cpu_for(true);
+    }
+    let flags = if spec.security_flags { crate::hardware::security_flags(&nodes, &cpu_type) } else { vec![] };
+    let generic = cpu_type.starts_with("x86-64-v");
+    if spec.nested && generic {
+        log.warn(format!("Nested virtualization needs host or a named CPU model - {cpu_type} has none to give")).await;
+    }
+    let cpu = crate::hardware::cpu_value(&cpu_type, spec.nested, &flags, crate::hardware::nested_flag(pve).await);
+    let (numa, sockets) = crate::hardware::numa_for(&spec.numa, here, spec.cores, spec.memory_mb);
+    log.line(format!(
+        "CPU {cpu} ({why}){}{}",
+        if numa { format!(", NUMA with {sockets} socket(s)") } else { String::new() },
+        if queues > 1 { format!(", {queues} network queues") } else { String::new() }
+    ))
+    .await;
     let mut hw = form![
-        ("cores", spec.cores),
+        ("cores", spec.cores / sockets),
+        ("sockets", sockets),
         ("memory", spec.memory_mb),
         ("cpu", cpu),
         ("delete", "balloon"),
@@ -421,6 +467,12 @@ async fn deploy_inner(
         ("tags", tags.join(";")),
         ("description", notes),
     ];
+    if numa {
+        hw.push(("numa".into(), "1".into()));
+    }
+    if !spec.ksm {
+        hw.push(("allow-ksm".into(), "0".into()));
+    }
     for (i, (n, m)) in spec.extra_nics.iter().zip(&extra_macs).enumerate() {
         let mut v = format!("virtio={m},bridge={}", n.bridge);
         if let Some(t) = n.vlan {
@@ -453,7 +505,12 @@ async fn deploy_inner(
         ))
         .await;
     }
-    if spec.vtpm && !pve.vm_config(&node, vmid).await?.contains_key("tpmstate0") {
+    // A TPM from the gold (golds baked before 2026-10-07 kept the bake's) is never reused:
+    // swtpm creates its keys only on an empty volume, so a copied one is the gold's identity.
+    if pve.vm_config(&node, vmid).await?.contains_key("tpmstate0") {
+        pve.vm_set(&node, vmid, form![("delete", "tpmstate0"), ("force", 1)]).await?;
+    }
+    if spec.vtpm {
         let storage = if spec.storage.is_empty() { gold.storage.clone() } else { spec.storage.clone() };
         pve.vm_set_task(&node, vmid, form![("tpmstate0", format!("{storage}:1,version=v2.0"))], |_| {}).await?;
         log.run("TPM 2.0 added").await;
@@ -669,7 +726,7 @@ async fn deploy_inner(
         windows::set_boot(pve, &node, vmid, "sata0").await?;
         log.run("WinPE deploy pass: capabilities, features, app removal, the VM's answer file and GuestProvision").await;
         pr.stage(35.0, 50.0, "WinPE deploy pass");
-        let m = windows::run_pass(pve, log, &mut pr, &node, vmid, "deploy pass", 30).await?;
+        let m = windows::run_pass(pve, log, &mut pr, &node, vmid, "deploy pass", 30, &[]).await?;
         let count = |p: &str| m.iter().filter(|l| l.starts_with(p)).count();
         for l in m.iter().filter(|l| l.starts_with("PVS-CAP-FAIL") || l.starts_with("PVS-FEATURE-FAIL") || l.starts_with("PVS-APP-FAIL")) {
             log.warn(format!("{} - see the debug lines above", crate::markers::text(l))).await;
@@ -791,6 +848,15 @@ async fn deploy_inner(
         }
         if ip.is_empty() {
             log.warn("Running, but the guest agent reported no address yet").await;
+        }
+    }
+    if spec.hotpatch && win {
+        hotpatch_check(pve, db, log, vm_id, &node, vmid, &gold.image_id).await;
+    }
+    // Built: PVE refuses to remove it, or its disks, until protection is taken off.
+    if spec.protection {
+        if let Err(e) = pve.vm_set(&node, vmid, form![("protection", 1)]).await {
+            log.warn(format!("Protection not set: {e:#}")).await;
         }
     }
     sqlx::query("UPDATE vms SET status = 'ready', ip = ? WHERE id = ?").bind(&ip).bind(vm_id).execute(db).await?;
@@ -925,7 +991,7 @@ fn guest_manifest(spec: &VmSpec, mac: &str, extra_macs: &[String], join_mode: &s
         // "deferred": GuestProvision registers the join task (research §7).
         "domainJoin": spec.domain_join.as_ref().map(|d| serde_json::json!({ "enabled": true, "mode": join_mode, "domain": d.domain, "ouPath": d.ou })),
         "wingetApps": spec.winget_apps.iter().map(|a| serde_json::json!({ "id": a.id, "override": a.over })).collect::<Vec<_>>(),
-        "wingetUpgrade": spec.winget_upgrade,
+        "hotpatchReady": spec.hotpatch,
         "azureArc": spec.arc.as_ref().map(|a| serde_json::json!({
             "enabled": true, "authMode": a.auth_mode, "subscriptionId": a.subscription_id, "tenantId": a.tenant_id,
             "resourceGroup": a.resource_group, "location": a.location, "servicePrincipalAppId": a.app_id,
@@ -985,29 +1051,47 @@ async fn guest_provision_result(pve: &Pve, db: &SqlitePool, log: &JobLog, vm_id:
             let _ = sqlx::query("UPDATE vms SET spec = ? WHERE id = ?").bind(spec.to_string()).bind(vm_id).execute(db).await;
         }
     }
-    // WinGet's upgrades of everything installed: old -> new per application, a failure as a
-    // warning only - and onto the VM's record as well.
-    if let Some(ups) = st["wingetUpgrades"].as_array() {
-        let skipped = ups.iter().filter(|a| a["skipped"].as_bool() == Some(true)).count();
-        let ok = ups.iter().filter(|a| a["success"].as_bool() == Some(true)).count();
-        log.line(format!("WinGet: {ok} of {} application(s) updated{}", ups.len() - skipped, if skipped > 0 { format!(", {skipped} left to the Microsoft Store (WinGet runtime, MSIX)") } else { String::new() })).await;
-        for a in ups {
-            let (id, from, to) = (a["id"].as_str().unwrap_or("?"), a["from"].as_str().unwrap_or(""), a["to"].as_str().unwrap_or(""));
-            if a["skipped"].as_bool() == Some(true) {
-                log.debug(format!("{id} {from}: {}", a["message"].as_str().unwrap_or("skipped"))).await;
-            } else if a["success"].as_bool() == Some(true) {
-                log.ok(format!("{id} {from} -> {to}")).await;
-            } else {
-                log.warn(format!("{id} {from} was not updated: {} - C:\\ProgramData\\VmDeployLogs\\winget in the VM", a["message"].as_str().unwrap_or("failed"))).await;
+    Ok(st["restartNeeded"].as_bool() == Some(true))
+}
+
+/// Hotpatch ready: after the restart, VBS must run (Win32_DeviceGuard status 2) - what
+/// Azure's Hotpatch enrolment checks first. The answer goes onto the VM's record (the card's
+/// status line). A VM that is not ready is still built: the job warns.
+async fn hotpatch_check(pve: &Pve, db: &SqlitePool, log: &JobLog, vm_id: &str, node: &str, vmid: u32, image: &str) {
+    let ps = "$d = Get-CimInstance -Namespace root\\Microsoft\\Windows\\DeviceGuard -ClassName Win32_DeviceGuard; $o = Get-CimInstance Win32_OperatingSystem; \"$($d.VirtualizationBasedSecurityStatus)|$($d.SecurityServicesRunning -join ',')|$($o.Version).$((Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion').UBR)\"";
+    let mut answer = None;
+    // The agent is up before Windows has every service going: a few tries.
+    for _ in 0..12 {
+        if let Ok((0, out)) = pve.agent_exec(node, vmid, &["powershell", "-NoProfile", "-Command", ps]).await
+            && let Some(line) = out.lines().map(str::trim).find(|l| l.contains('|'))
+        {
+            answer = Some(line.to_owned());
+            if line.starts_with('2') {
+                break;
             }
         }
-        if let Ok(Some(row)) = get(db, vm_id).await {
-            let mut spec: serde_json::Value = serde_json::from_str(&row.spec).unwrap_or_default();
-            spec["winget_upgrades"] = serde_json::Value::Array(ups.clone());
-            let _ = sqlx::query("UPDATE vms SET spec = ? WHERE id = ?").bind(spec.to_string()).bind(vm_id).execute(db).await;
-        }
+        tokio::time::sleep(Duration::from_secs(10)).await;
     }
-    Ok(st["restartNeeded"].as_bool() == Some(true))
+    let (vbs, running, build) = match answer.as_deref().map(|a| a.split('|').collect::<Vec<_>>()) {
+        Some(p) if p.len() == 3 => (p[0].parse::<u8>().unwrap_or(0), p[1].to_owned(), p[2].trim_start_matches("10.0.").to_owned()),
+        _ => (0, String::new(), String::new()),
+    };
+    let ready = vbs == 2;
+    if ready {
+        log.ok(format!("Hotpatch ready: VBS running, build {build} - switch Hotpatch on for it in Azure")).await;
+    } else {
+        log.warn(format!(
+            "Not Hotpatch ready: VBS {} - {}",
+            match vbs { 1 => "configured, not running", 0 => "off", _ => "unknown" },
+            if image.starts_with("ws2025-") { "the CPU type needs nested virtualization (host or a named model)" } else { "Hotpatch needs Windows Server 2025" }
+        ))
+        .await;
+    }
+    if let Ok(Some(row)) = get(db, vm_id).await {
+        let mut spec: serde_json::Value = serde_json::from_str(&row.spec).unwrap_or_default();
+        spec["hotpatch_result"] = serde_json::json!({ "ready": ready, "vbs": vbs, "running": running, "build": build, "checked": chrono::Utc::now().to_rfc3339() });
+        let _ = sqlx::query("UPDATE vms SET spec = ? WHERE id = ?").bind(spec.to_string()).bind(vm_id).execute(db).await;
+    }
 }
 
 #[cfg(test)]

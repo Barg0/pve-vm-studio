@@ -178,6 +178,8 @@ pub struct Request {
     pub build: String,
     pub lang: String,
     pub editions: Vec<String>,
+    /// The run's id: its work folder media-<run>. A continued build has the interrupted one's.
+    pub run: String,
 }
 
 /// <lang>-<os>[-<editions>]-<build>.iso - enus-ws2025-dc-core-26100.33438.iso. Windows 11's
@@ -615,7 +617,7 @@ fn worker_cmd(url: &str, pin: &str, indexes: usize, chain: &[String], image: &[S
 /// What the worker does beyond the updates: Microsoft Edge and the inbox apps into each
 /// install image (a Windows 11 set carries both outside its edition ESD), and boot.wim
 /// brought to the cumulative update.
-#[derive(Default)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub(crate) struct Extras {
     /// Edge.wim, sent to the worker: /Add-Edge into each image.
     pub edge: bool,
@@ -668,6 +670,70 @@ fn worker_tail() -> String {
     let mut s = String::from(":log\r\n%C% -T X:\\Windows\\Logs\\DISM\\dism.log %U%/dism.log > nul 2>&1\r\nexit /b 0\r\n");
     s += ":fail\r\ncall :log\r\necho PVS-WORKER-FAILED > COM1\r\n";
     s
+}
+
+/// The worker's operations in the order its script runs them (worker_cmd_body), each keyed
+/// by the marker that starts it (windows::unit_key) and weighted in seconds as the workers
+/// of 2026-10-05..07 took them on a 2-core worker: a cumulative update 6-17 min, a scan
+/// 1-2, the cleanup 1-1.5, saving an image 2-5, an inbox app seconds.
+fn worker_units(indexes: usize, image: &[String], winre: &[String], ssu: Option<&str>, extra: &Extras) -> Vec<(String, f64)> {
+    let weight = |file: &str| {
+        let f = file.to_lowercase();
+        if f.ends_with(".msu") { 500.0 } else if f.contains("-ndp") { 20.0 } else { 10.0 }
+    };
+    let is_net = |u: &&String| u.to_lowercase().contains("-ndp");
+    let file = |u: &String| u.rsplit('/').next().unwrap_or(u).to_owned();
+    let mut v: Vec<(String, f64)> = vec![("COPY-IN".into(), 60.0)];
+    for i in 1..=indexes {
+        v.push((format!("INDEX {i}"), 25.0));
+        v.push((format!("HEALTH {i}-before"), 100.0));
+        for u in image.iter().filter(|u| !is_net(u)) {
+            v.push((format!("UPD {i} {}", file(u)), weight(&file(u))));
+        }
+        v.push((format!("HEALTH {i}-updated"), 120.0));
+        v.push((format!("UPD {i} cleanup"), 75.0));
+        let net: Vec<&String> = image.iter().filter(is_net).collect();
+        if !net.is_empty() {
+            v.push((format!("HEALTH {i}-cleaned"), 120.0));
+        }
+        for u in net {
+            v.push((format!("UPD {i} {}", file(u)), weight(&file(u))));
+        }
+        if extra.edge {
+            v.push((format!("EDGE {i}"), 10.0));
+        }
+        // An app's verdict starts the next one; the first starts with APPS.
+        let apps = extra.apps.get(i - 1).filter(|a| !a.is_empty());
+        if let Some(apps) = apps {
+            let items: Vec<String> = extra.frameworks.iter().map(|f| format!("fw:{}", f.rsplit('\\').next().unwrap_or(f))).chain(apps.iter().map(|a| a.id.clone())).collect();
+            v.push((format!("APPS {i} {}", apps.len()), 6.0));
+            for it in items.iter().take(items.len().saturating_sub(1)) {
+                v.push((format!("PROV {i} {it}"), 6.0));
+            }
+        }
+        v.push((format!("HEALTH {i}"), 120.0));
+        // Saving: 2-5 min, about 11 with the inbox apps in (26H2 26300.9457, 2026-10-07).
+        v.push((format!("COMMIT {i}"), if apps.is_some() { 650.0 } else { 240.0 }));
+    }
+    if !winre.is_empty() {
+        v.push(("WINRE".into(), 20.0));
+        if let Some(f) = ssu {
+            v.push((format!("UPD winre {f}"), 10.0));
+        }
+        for u in winre {
+            v.push((format!("UPD winre {u}"), 20.0));
+        }
+        // The cleanup, then saving and exporting WinRE: no marker of their own.
+        v.push(("UPD winre cleanup".into(), 60.0));
+    }
+    if !extra.boot.is_empty() {
+        for b in 1..=2 {
+            v.push((format!("BOOT {b}"), 300.0));
+        }
+    }
+    v.push(("EXPORT".into(), 30.0 * indexes as f64));
+    v.push(("COPY-OUT".into(), 70.0));
+    v
 }
 
 fn worker_cmd_body(indexes: usize, chain: &[String], image: &[String], winre: &[String], ssu: Option<&str>, extra: &Extras) -> String {
@@ -843,6 +909,8 @@ pub(crate) struct WorkerSpec<'a> {
     pub minutes: u64,
     /// For the VM's description: "media worker for Windows Server 2025 26100.33438".
     pub what: String,
+    /// Its operations in order, weighted (windows::run_pass); empty: no step percentage.
+    pub units: Vec<(String, f64)>,
 }
 
 /// Runs one worker VM: boots the WinPE with a seed disk carrying `script(url, pin)` and
@@ -918,7 +986,7 @@ pub(crate) async fn run_worker(
         }
         created.context("creating the worker VM")?;
         seed::attach(pve, &p.node, vmid, "sata2", &p.disk_storage, seed_disk, &seed_name).await.context("attaching the worker's seed disk")?;
-        windows::run_pass(pve, log, pr, &p.node, vmid, "worker", w.minutes).await
+        windows::run_pass(pve, log, pr, &p.node, vmid, "worker", w.minutes, &w.units).await
     }
     .await;
     if let Some(vmid) = vm {
@@ -931,14 +999,75 @@ pub(crate) async fn run_worker(
     result
 }
 
+/// The file in a run's work folder that says how far the run got.
+pub const CHECKPOINT: &str = "checkpoint.json";
+
+/// The stages after which a media build can be continued.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Stage {
+    /// The image is put together and the worker's share is ready.
+    Prepared,
+    /// The worker is done (or none was needed): install.wim and the Setup tree are final.
+    Serviced,
+    /// The ISO is built in the work folder; only the upload is left.
+    Iso,
+}
+
+/// What the first stage worked out, as the later ones need it.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct Prepared {
+    pub editions: Vec<String>,
+    pub applied: Vec<String>,
+    pub worker: bool,
+    pub extra: Extras,
+    pub chain: Vec<String>,
+    pub image: Vec<String>,
+    pub winre: Vec<String>,
+    pub ssu: Option<String>,
+    pub scratch_gb: u64,
+    pub edge: Option<PathBuf>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct Checkpoint {
+    pub stage: Stage,
+    pub prep: Prepared,
+    /// The ISO's size and SHA-256, once built.
+    pub iso: Option<(u64, String)>,
+}
+
+impl Checkpoint {
+    pub async fn load(dir: &Path) -> Option<Self> {
+        serde_json::from_slice(&tokio::fs::read(dir.join(CHECKPOINT)).await.ok()?).ok()
+    }
+    async fn save(&self, dir: &Path) -> Result<()> {
+        let tmp = dir.join(format!("{CHECKPOINT}.tmp"));
+        tokio::fs::write(&tmp, serde_json::to_vec(self)?).await?;
+        tokio::fs::rename(&tmp, dir.join(CHECKPOINT)).await?;
+        Ok(())
+    }
+    /// What is done, in the words of the job's steps.
+    pub fn done(&self) -> &'static str {
+        match self.stage {
+            Stage::Prepared => "the image is put together, the worker comes next",
+            Stage::Serviced => "the images are serviced, the ISO comes next",
+            Stage::Iso => "the ISO is built, the upload comes next",
+        }
+    }
+}
+
 /// Builds the ISO. Returns what the blade's history records.
 pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Client, work: &Path, p: &Placement, link: Link, req: Request) -> Result<MediaIso> {
     let prod = req.product;
     let mut pr = Progress::new(log, format!("Building {} {}", prod.name, req.build));
-    let run_id = format!("run-{}", uuid::Uuid::new_v4().simple());
+    let run_id = req.run.clone();
     let dir: PathBuf = work.join(format!("media-{run_id}"));
     // What the worker fetches and sends back, served by worker_router while it runs.
     let share = dir.join("worker");
+    // The stages a continued build skips: what the interrupted run finished, written into its
+    // work folder after each one (Jobs → Continue).
+    let mut ck: Option<Checkpoint> = Checkpoint::load(&dir).await;
 
     let result: Result<MediaIso> = async {
         // Downloads go to a cache a failed build leaves behind: the next try keeps what is
@@ -948,11 +1077,26 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         // server's there.
         let dl = work.join("uup-files").join(&req.uuid);
         tokio::fs::create_dir_all(&dl).await?;
+        let keep: bool = settings::load::<WorkerSettings>(db, "worker").await.unwrap_or_default().keep_downloads;
+        // Half a first stage is not worth anything: without a checkpoint it starts clean (the
+        // downloads it needs are still in the cache - the stage links them, it never moves them).
+        if ck.is_none() {
+            let _ = tokio::fs::remove_dir_all(&dir).await;
+        }
         tokio::fs::create_dir_all(&dir).await?;
         let base: Vec<String> = req.editions.clone();
         if base.is_empty() {
             bail!("pick at least one edition");
         }
+        let tree = dir.join("iso");
+        let install = dir.join("install.wim");
+        let install_s = install.display().to_string();
+        let target_rev = req.build.rsplit('.').next().unwrap_or_default().to_owned();
+        if let Some(c) = &ck {
+            log.line(format!("Continuing the interrupted build: {} - kept in its work folder", c.done())).await;
+        }
+
+        if ck.is_none() {
 
         // ---- the files ----
         pr.stage(0.0, 2.0, "asking the catalog");
@@ -1105,15 +1249,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         if !deferred.is_empty() {
             log.ok(format!("No export needed the {} held-back package CAB(s) - not downloaded", deferred.len())).await;
         }
-        let target_rev = req.build.rsplit('.').next().unwrap_or_default().to_owned();
         log.ok(format!("install.wim: {} image(s) at build {}.{base_rev}; the catalog's build is {}", editions_out.len(), req.build.split('.').next().unwrap_or(""), req.build)).await;
-        // Downloaded ESDs are no longer needed once the images are out of them - unless the
-        // downloads are kept for the next build.
-        let keep: bool = settings::load::<WorkerSettings>(db, "worker").await.unwrap_or_default().keep_downloads;
-        for f in files.iter().filter(|f| !is_update(&f.name) && !f.name.eq_ignore_ascii_case("edge.wim") && !keep) {
-            let _ = tokio::fs::remove_file(dl.join(&f.name)).await;
-            let _ = tokio::fs::remove_file(dl.join(&f.name).with_extension("esd")).await;
-        }
 
         // ---- Windows 11: Edge and the inbox apps, which its edition ESD no longer carries ----
         let mut extra = Extras::default();
@@ -1159,10 +1295,12 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         if behind && updates.is_empty() {
             bail!("the images are at revision {base_rev}, the build is {} - and the catalog lists no update to get there", req.build);
         }
-        let mut applied = Vec::new();
-        if behind || extra.edge || has_apps {
-            pr.stage(42.0, 90.0, "the worker applies the updates");
-            applied = updates.iter().chain(&winre_updates).map(|u| u.name.clone()).collect();
+        let worker = behind || extra.edge || has_apps;
+        let applied: Vec<String> = if worker { updates.iter().chain(&winre_updates).map(|u| u.name.clone()).collect() } else { Vec::new() };
+        // Linked, never moved, until the checkpoint below: a first stage cut off half-way
+        // finds every download still in the cache.
+        let keep_dl = true;
+        let (chain_names, image_names, winre_names, ssu_name, scratch_gb) = if worker {
             let pe: winpe::WinPe = settings::load(db, "winpe").await?;
             if pe.volid.is_empty() {
                 bail!("the worker boots the studio's WinPE - build it under Media first");
@@ -1170,7 +1308,6 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             // curl.exe from the image itself (its DLLs are all in WinPE), for the seed disk.
             run(log, "wimlib-imagex", &["extract", &install_s, "1", "/Windows/System32/curl.exe", &format!("--dest-dir={}", dir.display()), "--no-acls"]).await
                 .context("taking curl.exe out of the image for the worker")?;
-            let curl = tokio::fs::read(dir.join("curl.exe")).await?;
             // The worker's input: the image, WinRE, the updates in the order they go in.
             tokio::fs::create_dir_all(share.join("upd")).await?;
             tokio::fs::create_dir_all(share.join("logs")).await?;
@@ -1188,7 +1325,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             let single = if chain.len() <= 1 { chain.clone() } else { Vec::new() };
             for (i, u) in updates.iter().filter(|u| !in_chain(u)).chain(single).enumerate() {
                 let n = format!("{:02}-{}", i + 1, u.name);
-                take_file(&dl.join(&u.name), &share.join("upd").join(&n), keep).await?;
+                take_file(&dl.join(&u.name), &share.join("upd").join(&n), keep_dl).await?;
                 image_names.push(n);
             }
             if chain.len() > 1 && prod.kind == Kind::Client {
@@ -1202,7 +1339,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                 for (i, u) in ordered.iter().enumerate() {
                     let dir = format!("lcu{}", i + 1);
                     tokio::fs::create_dir_all(share.join("upd").join(&dir)).await?;
-                    take_file(&dl.join(&u.name), &share.join("upd").join(&dir).join(&u.name), keep).await?;
+                    take_file(&dl.join(&u.name), &share.join("upd").join(&dir).join(&u.name), keep_dl).await?;
                     // Plain image updates for the worker: fetched as named and applied one by one
                     // (chain_names is the one-call chain's upd/lcu folder).
                     image_names.push(format!("{dir}/{}", u.name));
@@ -1212,7 +1349,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             } else if chain.len() > 1 {
                 tokio::fs::create_dir_all(share.join("upd/lcu")).await?;
                 for u in &chain {
-                    take_file(&dl.join(&u.name), &share.join("upd/lcu").join(&u.name), keep).await?;
+                    take_file(&dl.join(&u.name), &share.join("upd/lcu").join(&u.name), keep_dl).await?;
                     chain_names.push(u.name.clone());
                 }
                 if let Some(t) = &target {
@@ -1225,14 +1362,14 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             let mut winre_names = Vec::new();
             for (i, u) in winre_updates.iter().enumerate() {
                 let n = format!("re{:02}-{}", i + 1, u.name);
-                take_file(&dl.join(&u.name), &share.join("upd").join(&n), keep).await?;
+                take_file(&dl.join(&u.name), &share.join("upd").join(&n), keep_dl).await?;
                 winre_names.push(n);
             }
             if !winre_names.is_empty() {
                 tokio::fs::copy(&winre, share.join("winre.wim")).await?;
             }
             if let Some(edge) = &edge_file {
-                take_file(edge, &share.join("Edge.wim"), keep).await?;
+                take_file(edge, &share.join("Edge.wim"), keep_dl).await?;
             }
             let mut apps_gb = 0.0;
             if let Some((root, want)) = &apps_root {
@@ -1240,11 +1377,6 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                     .context("packing the inbox apps for the worker")?;
                 let _ = tokio::fs::remove_dir_all(root).await;
                 apps_gb = want.iter().map(|f| f.size).sum::<u64>() as f64 / 1e9;
-                if !keep {
-                    for f in want {
-                        let _ = tokio::fs::remove_file(dl.join(&f.name)).await;
-                    }
-                }
             }
             // boot.wim to the cumulative update: the chain's .msu files, as the image gets them.
             // Off: a UUP set has no WinPE of its own - boot.wim is WinRE, and the cumulative
@@ -1281,6 +1413,64 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                     log.line("No servicing stack inside the cumulative update - WinRE gets the Safe OS update alone").await;
                 }
             }
+            (chain_names, image_names, winre_names, ssu_name, scratch_gb)
+        } else {
+            Default::default()
+        };
+        let prep = Prepared {
+            editions: editions_out.clone(),
+            applied: applied.clone(),
+            worker,
+            extra,
+            chain: chain_names,
+            image: image_names,
+            winre: winre_names,
+            ssu: ssu_name,
+            scratch_gb,
+            edge: edge_file.clone(),
+        };
+        let c = Checkpoint { stage: Stage::Prepared, prep, iso: None };
+        c.save(&dir).await?;
+        ck = Some(c);
+        // The downloads the images are made of are done with now - unless they are kept for
+        // the next build. The updates stay until the worker has them in (the share links them).
+        if !keep {
+            let mut gone: Vec<String> = files.iter().filter(|f| !f.name.eq_ignore_ascii_case("edge.wim")).map(|f| f.name.clone()).collect();
+            if let Some((_, want)) = &apps_root {
+                gone.extend(want.iter().map(|f| f.name.clone()));
+            }
+            for n in gone {
+                let _ = tokio::fs::remove_file(dl.join(&n)).await;
+                let _ = tokio::fs::remove_file(dl.join(&n).with_extension("esd")).await;
+            }
+        }
+        }
+
+        // ---- the worker: the cumulative update, which only DISM can apply ----
+        let c = ck.clone().expect("a checkpoint after the first stage");
+        let Prepared { editions: editions_out, applied, worker, extra, chain: chain_names, image: image_names, winre: winre_names, ssu: ssu_name, scratch_gb, edge: edge_file } = c.prep.clone();
+        let has_apps = extra.apps.iter().any(|a| !a.is_empty());
+        if c.stage == Stage::Prepared && worker {
+            pr.stage(42.0, 90.0, "the worker applies the updates");
+            let pe: winpe::WinPe = settings::load(db, "winpe").await?;
+            if pe.volid.is_empty() {
+                bail!("the worker boots the studio's WinPE - build it under Media first");
+            }
+            let curl = tokio::fs::read(dir.join("curl.exe")).await.context("reading curl.exe for the worker")?;
+            // What an earlier worker of this run sent back is not this one's answer.
+            for f in ["serviced.wim", "winre-serviced.wim", "boot-serviced.wim"] {
+                let _ = tokio::fs::remove_file(share.join(f)).await;
+            }
+            if let Ok(mut rd) = tokio::fs::read_dir(&share).await {
+                while let Ok(Some(e)) = rd.next_entry().await {
+                    let n = e.file_name().to_string_lossy().into_owned();
+                    if (n.starts_with("packages-") || n.starts_with("health-")) && n.ends_with(".txt") {
+                        let _ = tokio::fs::remove_file(e.path()).await;
+                    }
+                }
+            }
+            let _ = tokio::fs::remove_dir_all(share.join("logs")).await;
+            tokio::fs::create_dir_all(share.join("logs")).await?;
             let mut what = vec![format!("{} update(s)", applied.len())];
             if extra.edge {
                 what.push("Microsoft Edge".into());
@@ -1300,6 +1490,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                 scratch_gb,
                 minutes,
                 what: format!("media worker for {} {}", prod.name, req.build),
+                units: worker_units(base.len(), &image_names, &winre_names, ssu_name.as_deref(), &extra),
             };
             let (n_base, chain_n, image_n, winre_n, ssu_n) = (base.len(), chain_names.clone(), image_names.clone(), winre_names.clone(), ssu_name.clone());
             let m = run_worker(pve, db, log, &mut pr, work, p, &link, spec, |url, pin| {
@@ -1514,11 +1705,25 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             // The worker's share (a copy of every update while downloads are kept, apps.wim,
             // boot.wim, Edge.wim, WinRE) is done with: its room goes to the ISO.
             let _ = tokio::fs::remove_dir_all(&share).await;
-        } else {
+            // The updates the share linked: in now.
+            if !keep {
+                for n in &applied {
+                    let _ = tokio::fs::remove_file(dl.join(n)).await;
+                }
+            }
+        } else if c.stage == Stage::Prepared {
             log.ok(format!("The images are at {} already - no worker needed", req.build)).await;
+        }
+        let mut c = c;
+        if c.stage == Stage::Prepared {
+            c.stage = Stage::Serviced;
+            c.save(&dir).await?;
         }
 
         // ---- the ISO ----
+        let name = iso_name(prod, &req.build, &req.editions, &req.lang);
+        let iso = dir.join(&name);
+        if c.stage == Stage::Serviced {
         pr.stage(90.0, 93.0, "building the ISO");
         // The tree and the ISO beside it: about twice the tree's size, checked before
         // genisoimage writes half an ISO into a full disk.
@@ -1528,8 +1733,6 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             bail!("the studio has {:.1} GB free in {}; the ISO needs about {:.1} GB - clear the kept downloads (Studio settings → Debug tools)", free as f64 / 1e9, work.display(), tree_bytes as f64 * 1.1 / 1e9);
         }
         move_file(&install, &tree.join("sources/install.wim")).await?;
-        let name = iso_name(prod, &req.build, &req.editions, &req.lang);
-        let iso = dir.join(&name);
         let label: String = format!("{}_{}", prod.short.to_uppercase().replace('-', "_"), req.build.replace('.', "_")).chars().take(32).collect();
         log.run(format!("Building the ISO: {name}")).await;
         let tree_s = tree.display().to_string();
@@ -1545,6 +1748,11 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         let sum = run(log, "sha256sum", &[&iso_s]).await?;
         let sha256 = sum.split_whitespace().next().unwrap_or_default().to_owned();
         log.ok(format!("{name}: {:.2} GB, SHA-256 {sha256}", size as f64 / 1e9)).await;
+        c.stage = Stage::Iso;
+        c.iso = Some((size, sha256));
+        c.save(&dir).await?;
+        }
+        let (size, sha256) = c.iso.clone().unwrap_or_default();
 
         pr.stage(93.0, 100.0, "uploading to PVE");
         let volid = format!("{}:iso/{name}", p.iso_storage);
@@ -1569,7 +1777,11 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
     }
     .await;
 
-    let _ = tokio::fs::remove_dir_all(&dir).await;
+    // A failed run past its first stage keeps its folder for Continue (the work folder's
+    // cleanup takes it after six idle hours); a finished one, or one with nothing kept, goes.
+    if result.is_ok() || !tokio::fs::try_exists(dir.join(CHECKPOINT)).await.unwrap_or(false) {
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
     let iso = result?;
     let mut list: Vec<MediaIso> = settings::load(db, "media_isos").await.unwrap_or_default();
     list.retain(|m| m.volid != iso.volid);
@@ -1849,6 +2061,48 @@ mod tests {
         assert_eq!(reverse_delta_only(&log(r, 2, 1)), None, "a manifest or metadata corruption is damage");
         assert_eq!(reverse_delta_only(&log("", 0, 0)), None);
         assert_eq!(reverse_delta_only(""), None);
+    }
+
+    #[test]
+    fn worker_units_follow_the_script() {
+        let image = vec!["01-Windows11.0-KB5121794-x64.cab".to_owned(), "02-Windows11.0-KB5126052-x64-NDP481.cab".to_owned(), "lcu1/Windows11.0-KB5043080-x64.msu".to_owned(), "lcu2/Windows11.0-KB5129195-x64.msu".to_owned()];
+        let winre = vec!["re01-Windows11.0-KB5124015-x64.cab".to_owned()];
+        let app = |id: &str| crate::apps::App { id: id.into(), main: format!("{id}.msixbundle"), stub: false };
+        let extra = Extras {
+            edge: true,
+            frameworks: vec!["MSIXFramework\\Microsoft.VCLibs.x64.14.00.appx".into()],
+            apps: vec![vec![app("Microsoft.BingNews_8wekyb3d8bbwe"), app("Microsoft.WindowsCalculator_8wekyb3d8bbwe")]],
+            boot: vec![],
+        };
+        let ssu = Some("SSU-26100.9441-x64.cab");
+        let cmd = worker_cmd_body(1, &[], &image, &winre, ssu, &extra);
+        let units = worker_units(1, &image, &winre, ssu, &extra);
+        // Every unit's marker is in the script (the image's number is %1 there), in that order.
+        let mut last = 0;
+        for (key, w) in &units {
+            assert!(*w > 0.0);
+            if let Some(rest) = key.strip_prefix("PROV 1 ") {
+                assert!(cmd.contains(&format!("PVS-PROV-OK 1 {rest}")), "{key}");
+                continue;
+            }
+            let (k, args) = key.split_once(' ').unwrap_or((key, ""));
+            let args = match args.strip_prefix('1') { Some(r) if k != "APPS" => format!("%1{r}"), _ => args.to_owned() };
+            let echo = if args.is_empty() { format!("echo PVS-{k} ") } else { format!("echo PVS-{k} {args} ") };
+            let at = cmd.find(&echo).unwrap_or_else(|| panic!("{echo} not in the script"));
+            // :service and :winre are subroutines after the main flow: order within each.
+            // :apps<n> and :winre are subroutines written after :service; the flow of :service
+            // itself (and the main flow before it) is checked in order.
+            let sub = key.starts_with("UPD winre") || key == "WINRE" || key.starts_with("APPS") || key == "EXPORT" || key == "COPY-OUT";
+            if !sub {
+                assert!(at >= last, "{key} out of order");
+                last = at;
+            }
+        }
+        let total: f64 = units.iter().map(|(_, w)| w).sum();
+        assert!(total > 1000.0, "two cumulative updates weigh most: {total}");
+        assert_eq!(crate::windows::unit_key("PVS-PROV-FAIL 1 Microsoft.BingNews_8wekyb3d8bbwe 0x80070057").as_deref(), Some("PROV 1 Microsoft.BingNews_8wekyb3d8bbwe"));
+        assert_eq!(crate::windows::unit_key("PVS-UPD-OK 1 cleanup"), None);
+        assert_eq!(crate::windows::unit_key("PVS-HEALTH 1-before").as_deref(), Some("HEALTH 1-before"));
     }
 
     #[test]

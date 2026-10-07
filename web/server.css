@@ -177,7 +177,10 @@ table.data tr.selected td { background: var(--accent-soft); }
 
 
 .meter { display: flex; align-items: center; gap: 8px; min-width: 140px; }
-.meter-track { flex: 1; height: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+/* The track is the bar's full height, filled or not: an outline on the card read as a hairline
+   beside a solid fill. 8px: whole device pixels at 100/125/150/200 % - 6px is 7.5 at 125 %,
+   and rounds to 7 or 8 by where the bar lands (measured 2026-10-07). */
+.meter-track { flex: 1; height: 8px; box-sizing: border-box; background: color-mix(in srgb, var(--fg) 12%, transparent); border: 0; border-radius: var(--radius); overflow: hidden; }
 .meter-fill { height: 100%; background: var(--accent); }
 .meter-fill.warn { background: var(--warn); }
 .meter-fill.danger { background: var(--danger); }
@@ -386,7 +389,7 @@ button.gold-flag { font-family: inherit; cursor: pointer; background: none; }
 .dash-mini > :last-child { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dash-mini.wide { grid-template-columns: minmax(0, 1fr) 15ch; }
 .dash-mini em { font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .4px; color: var(--fg-muted); }
-.dash-mini .meter-track { display: block; height: 6px; }
+.dash-mini .meter-track { display: block; height: 8px; }
 .dash-mini .meter-fill { display: block; }
 .dash-idle { margin: 0; font-size: 12.5px; color: var(--fg-muted); }
 .dash-note { font-size: 12px; color: var(--fg-muted); padding-top: 4px; }

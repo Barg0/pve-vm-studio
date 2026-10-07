@@ -35,6 +35,11 @@ impl Progress {
         self.set(self.from + (self.to - self.from) * f, detail);
     }
 
+    /// A new detail line, the bar where it is (a sub-step's own percentage, say).
+    pub fn note(&mut self, detail: impl Into<String>) {
+        self.set(self.pct, detail);
+    }
+
     fn set(&mut self, pct: f64, detail: impl Into<String>) {
         if pct > self.pct {
             self.pct = pct;

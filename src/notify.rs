@@ -262,6 +262,7 @@ fn took_tile(row: &JobRow) -> mail::Tile {
 async fn designs_using(app: &AppState, gold: &crate::golds::GoldRow) -> Vec<Row> {
     let golds = crate::golds::list(&app.db).await.unwrap_or_default();
     let built = crate::vms::list(&app.db).await.unwrap_or_default();
+    let (_, vm_glyph) = machine_glyphs(&serde_json::from_str(&gold.manifest).unwrap_or_default());
     let mut out = Vec::new();
     for l in crate::labs::list(&app.db).await.unwrap_or_default() {
         let Ok(Some(full)) = crate::labs::get(&app.db, &l.id).await else { continue };
@@ -280,7 +281,7 @@ async fn designs_using(app: &AppState, gold: &crate::golds::GoldRow) -> Vec<Row>
                 _ => (Tone::Neutral, "Not built".to_owned()),
             };
             let ip = rec.and_then(|v| v.ip.clone()).filter(|i| !i.is_empty()).unwrap_or_else(|| str_of("ipAddress").to_owned());
-            out.push(Row { icon: "vm", name, right: ip, state: Some(state), ..Default::default() });
+            out.push(Row { icon: vm_glyph, name, right: ip, state: Some(state), ..Default::default() });
         }
     }
     out
@@ -308,6 +309,18 @@ fn bake_option_label(k: &str) -> &str {
     }
 }
 
+/// A gold's glyph and a VM's cube in the studio's machine colours (serverGlyphBand): Linux
+/// yellow, a Windows client blue, a Windows Server green - from the gold's manifest.
+fn machine_glyphs(m: &serde_json::Value) -> (&'static str, &'static str) {
+    if m["osFamily"].as_str() == Some("linux") {
+        ("gold-image-linux", "vm-linux")
+    } else if m["installationType"].as_str().is_some_and(|t| t.starts_with("Server")) || m["imageId"].as_str().is_some_and(|i| i.starts_with("ws")) {
+        ("gold-image-work", "vm-work")
+    } else {
+        ("gold-image-host", "vm-host")
+    }
+}
+
 /// Called by the job runner when a job ends.
 pub async fn job_ended(app: AppState, id: String) {
     let Ok(Some(row)) = app.jobs.get(&id).await else { return };
@@ -323,9 +336,10 @@ pub async fn job_ended(app: AppState, id: String) {
             let g = crate::golds::get(&app.db, gold).await.ok().flatten();
             let m: serde_json::Value = g.as_ref().map(|g| serde_json::from_str(&g.manifest).unwrap_or_default()).unwrap_or_default();
             let display = m["displayName"].as_str().or_else(|| m["name"].as_str()).unwrap_or(&row.title).to_owned();
+            let (gold_glyph, vm_glyph) = machine_glyphs(&m);
             let mut r = Report::new(
                 format!("{}: {display}", if ok { "Gold baked" } else { "Bake failed" }),
-                "gold-image",
+                gold_glyph,
                 if ok { "Gold baked" } else { "Bake failed" },
                 if ok { "READY" } else { "FAILED" },
                 if ok { Tone::Success } else { Tone::Danger },
@@ -339,7 +353,7 @@ pub async fn job_ended(app: AppState, id: String) {
                 }
                 let build = m["build"].as_str().or_else(|| m["distroVersion"].as_str()).unwrap_or("").trim_start_matches("10.0.").to_owned();
                 r.tiles = vec![
-                    tile("gold-image", "Gold", m["id"].as_str().unwrap_or(&g.name), g.vmid.map(|v| format!("template {v}")).unwrap_or_default(), true),
+                    tile(gold_glyph, "Gold", m["id"].as_str().unwrap_or(&g.name), g.vmid.map(|v| format!("template {v}")).unwrap_or_default(), true),
                     tile("update", "Build", build, m["language"].as_str().unwrap_or(""), true),
                     tile("disk", "Disk", m["diskSizeGB"].as_u64().map(|d| format!("{d} GB")).unwrap_or_default(), g.storage.clone(), false),
                     took_tile(&row),
@@ -365,7 +379,7 @@ pub async fn job_ended(app: AppState, id: String) {
                 r.sections.push(baked);
                 let used = designs_using(&app, g).await;
                 if !used.is_empty() {
-                    r.sections.push(Section { title: "Used by".into(), icon: "vm", rows: used, ..Default::default() });
+                    r.sections.push(Section { title: "Used by".into(), icon: vm_glyph, rows: used, ..Default::default() });
                 }
             }
             if !ok {
@@ -373,7 +387,7 @@ pub async fn job_ended(app: AppState, id: String) {
                 r.log_tail = app.jobs.log_tail(&row.id, 4).await;
             }
             r.buttons = if ok {
-                vec![button("Open the gold", "#/golds", "gold-image", true), button("Log", "#/jobs", "log", false)]
+                vec![button("Open the gold", "#/golds", gold_glyph, true), button("Log", "#/jobs", "log", false)]
             } else {
                 vec![button("Open the log", "#/jobs", "log", true), button("Golds", "#/golds", "gold-image", false)]
             };
@@ -389,11 +403,12 @@ pub async fn job_ended(app: AppState, id: String) {
             let g = crate::golds::get(&app.db, &spec.gold).await.ok().flatten();
             let gm: serde_json::Value = g.as_ref().map(|g| serde_json::from_str(&g.manifest).unwrap_or_default()).unwrap_or_default();
             let gold_name = gm["id"].as_str().map(str::to_owned).or_else(|| g.as_ref().map(|g| g.name.clone())).unwrap_or_default();
+            let (gold_glyph, vm_glyph) = machine_glyphs(&gm);
             let steps = job_steps(&app, &row, ok).await;
             let failed_at = steps.iter().find(|s| s.state == StepState::Failed).map(|s| s.name.clone());
             let mut r = Report::new(
                 format!("{}: {name}", if ok { "VM provisioned" } else { "Deploy failed" }),
-                "vm",
+                vm_glyph,
                 if ok { format!("{name} is ready") } else { format!("{name} was not built") },
                 &if ok { "PROVISIONED".to_owned() } else { failed_at.map_or("FAILED".to_owned(), |f| format!("Failed at {f}")) },
                 if ok { Tone::Success } else { Tone::Danger },
@@ -407,7 +422,7 @@ pub async fn job_ended(app: AppState, id: String) {
                 r.tiles = vec![
                     tile("static-ip", "Address", if ip.is_empty() { "DHCP".to_owned() } else { ip }, format!("{}{nic} · {}", if spec.prefix > 0 { format!("/{} · ", spec.prefix) } else { String::new() }, spec.bridge), true),
                     tile("servers", "Node", v.node.clone(), v.vmid.map(|i| format!("VMID {i}")).unwrap_or_default(), true),
-                    tile("gold-image", "Gold", gold_name.clone(), gm["build"].as_str().unwrap_or("").trim_start_matches("10.0.").to_owned(), true),
+                    tile(gold_glyph, "Gold", gold_name.clone(), gm["build"].as_str().unwrap_or("").trim_start_matches("10.0.").to_owned(), true),
                     took_tile(&row),
                 ];
             }
@@ -440,16 +455,6 @@ pub async fn job_ended(app: AppState, id: String) {
                             .why(if failed.is_empty() { String::new() } else { format!("not installed: {}", failed.join(", ")) }),
                     );
                 }
-                if let Some(ups) = raw["winget_upgrades"].as_array() {
-                    let tried: Vec<&serde_json::Value> = ups.iter().filter(|a| a["skipped"].as_bool() != Some(true)).collect();
-                    let ok = tried.iter().filter(|a| a["success"].as_bool() == Some(true)).count();
-                    let failed: Vec<&str> = tried.iter().filter(|a| a["success"].as_bool() != Some(true)).filter_map(|a| a["id"].as_str()).collect();
-                    cfg.facts.push(
-                        fact("Updates", if tried.is_empty() { "everything current".to_owned() } else { format!("{ok} of {} updated by WinGet", tried.len()) })
-                            .icon("log")
-                            .why(if failed.is_empty() { String::new() } else { format!("not updated: {}", failed.join(", ")) }),
-                    );
-                }
                 if !spec.pool.is_empty() || !spec.tags.is_empty() {
                     cfg.facts.push(fact("Pool · tags", [spec.pool.clone(), spec.tags.join(", ")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")).icon("servers"));
                 }
@@ -459,9 +464,9 @@ pub async fn job_ended(app: AppState, id: String) {
                 r.log_tail = app.jobs.log_tail(&row.id, 4).await;
             }
             r.buttons = if ok {
-                vec![button("Open the VM", "#/access", "vm", true), button("Log", "#/jobs", "log", false)]
+                vec![button("Open the VM", "#/access", vm_glyph, true), button("Log", "#/jobs", "log", false)]
             } else {
-                vec![button("Open the log", "#/jobs", "log", true), button("Deploy", "#/deploy", "vm", false)]
+                vec![button("Open the log", "#/jobs", "log", true), button("Deploy", "#/deploy", vm_glyph, false)]
             };
             r.link = Some("#/vms".into());
             r.job = Some(row.id.clone());

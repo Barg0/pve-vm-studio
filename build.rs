@@ -41,6 +41,11 @@ const MAIL_ICONS: &[(&str, Option<&str>)] = &[
     ("first-boot.svg", None),
 ];
 
+/// Glyphs drawn once more in each of these bands, keyed "vm-linux", "gold-image-host": the
+/// studio's machine colours (serverGlyphBand) - Linux yellow, client blue, server green.
+const MAIL_BANDED: &[&str] = &["gold-image.svg", "vm.svg"];
+const MACHINE_BANDS: &[&str] = &["linux", "host", "work"];
+
 /// One theme from studio.js: "proxmox_dark", "Proxmox Dark", dark?, its colours by key
 /// (bg, accent, ... and the bands studio, host, work, ident, deploy, linux).
 struct Theme {
@@ -142,9 +147,14 @@ fn render_icons() {
         table += &format!("    (\"{}\", \"{}\", {}, &[{c}]),\n", t.id, t.name, t.dark);
     }
     table += "];\n/// (theme id, icon key, PNG).\npub static ICONS: &[(&str, &str, &[u8])] = &[\n";
+    let mut drawn: Vec<(&str, Option<&str>, Option<&str>)> = MAIL_ICONS.iter().map(|(n, ink)| (*n, *ink, None)).collect();
+    for name in MAIL_BANDED {
+        drawn.extend(MACHINE_BANDS.iter().map(|b| (*name, None, Some(*b))));
+    }
     for t in &themes {
-        for (name, ink) in MAIL_ICONS {
+        for (name, ink, over) in &drawn {
             let (b, markup) = glyph(&js, name).unwrap_or_else(|| panic!("{name} is not in web/studio.js"));
+            let b = over.map_or(b, str::to_owned);
             let hue = ink.map(|k| t.get(k).to_owned()).unwrap_or_else(|| t.band(&b).to_owned());
             // seamFor() on the page: towards the page colour in a dark theme, towards ink in a light one.
             let seam = if ink.is_some() || b == "accent" { hue.clone() } else { mix(&hue, if t.dark { t.get("bg") } else { "#14141a" }, 0.45) };
@@ -154,7 +164,10 @@ fn render_icons() {
             let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).unwrap_or_else(|e| panic!("{name}: {e}"));
             let mut px = resvg::tiny_skia::Pixmap::new(64, 64).unwrap();
             resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(64.0 / 18.0, 64.0 / 18.0), &mut px.as_mut());
-            let key = name.trim_end_matches(".svg");
+            let key = match over {
+                Some(band) => format!("{}-{band}", name.trim_end_matches(".svg")),
+                None => name.trim_end_matches(".svg").to_owned(),
+            };
             let file = format!("mail-{}-{key}.png", t.id);
             std::fs::write(out_dir.join(&file), px.encode_png().unwrap()).unwrap();
             table += &format!("    (\"{}\", \"{key}\", include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{file}\"))),\n", t.id);
@@ -164,6 +177,11 @@ fn render_icons() {
     for (name, _) in MAIL_ICONS {
         let (b, _) = glyph(&js, name).unwrap();
         table += &format!("    (\"{}\", \"{b}\"),\n", name.trim_end_matches(".svg"));
+    }
+    for name in MAIL_BANDED {
+        for b in MACHINE_BANDS {
+            table += &format!("    (\"{}-{b}\", \"{b}\"),\n", name.trim_end_matches(".svg"));
+        }
     }
     table += "];\n";
     std::fs::write(out_dir.join("mail_icons.rs"), table).unwrap();

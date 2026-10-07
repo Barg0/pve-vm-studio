@@ -350,7 +350,7 @@ function renderServerBlade(id, main) {
     main.innerHTML = bladeHead(id) + `<p class="hint">Loading…</p>`;
   }
   main.dataset.serverBlade = id;
-  const fn = { dashboard: bladeDashboard, winmedia: bladeWinMedia, golds: bladeGolds, media: bladeMedia, studio: bladeStudio, deploy: bladeDeploy, jobs: bladeJobs }[id];
+  const fn = { dashboard: bladeDashboard, winmedia: bladeWinMedia, golds: bladeGolds, media: bladeMedia, imagesettings: bladeImageSettings, studio: bladeStudio, deploy: bladeDeploy, jobs: bladeJobs }[id];
   Promise.resolve(fn(main, stale)).catch(e => {
     if (e.message !== "signed out" && !stale()) main.innerHTML = bladeHead(id) + warnBanner(esc(e.message));
   });
@@ -566,7 +566,7 @@ const vioNewer = (a, b) => { const x = vioNum(a), y = vioNum(b); for (let i = 0;
    and media build boots, so an old one is worth a look. */
 function peHint(w) {
   const n = w.winpe_newest, st = w.winpe_state;
-  const auto = "With Keep WinPE current on (Media → Windows updates), the studio rebuilds it in the next maintenance window.";
+  const auto = "With Keep WinPE current on (Image settings → Windows updates), the studio rebuilds it in the next maintenance window.";
   const from = (PE_PRODUCTS.find(p => p[0] === (w.settings || {}).winpe_from) || PE_PRODUCTS[0])[1];
   if (st === "outdated" && n) return `<span class="pill status warn" title="${esc(from)} ${esc(n.build)} is out - WinPE is distilled from its WinRE. ${esc(auto)}">${esc(cap(n.build))} available</span>`;
   if (st === "virtio" && w.virtio_now) return `<span class="pill status warn" title="Its vioscsi driver is from virtio-win ${esc((w.winpe || {}).vioscsi || "none")}, the release in use is ${esc(w.virtio_now)}. ${esc(auto)}">virtio-win ${esc(w.virtio_now)} not in it</span>`;
@@ -941,7 +941,7 @@ function goldDetailHtml(g) {
 /* One card per kind of gold, collapsible like every other card: who it is, its build, the
    facts that tell it apart, what it is used by, and its actions; the sidecar opens under it. */
 /* Where this bake runs: node and network as chips at the foot of the bake form. A click opens a
-   small picker in place; what is picked holds for this bake only - Media's "Where bakes run"
+   small picker in place; what is picked holds for this bake only - Image settings' "Build environment"
    keeps the defaults (the chip shows them until something else is picked). */
 function bakePlaceChips(r, s) {
   const node = bakeForm.node || r.node || "";
@@ -987,7 +987,7 @@ function wireBakePlace(main) {
   const done = $id("bpDone"); if (done) done.addEventListener("click", () => { if (ad) net(); goldsUi.placeOpen = false; again(); });
 }
 
-/* Keep current on a Windows gold's card: it follows its ISO's product (Media → Windows updates). */
+/* Keep current on a Windows gold's card: it follows its ISO's product (Image settings → Windows updates). */
 function keepCurrentToggle(g) {
   const k = goldsUi.au && goldsUi.au.golds && goldsUi.au.golds[g.id];
   if (!k || g.os !== "windows" || g.status !== "ready") return "";
@@ -1799,6 +1799,7 @@ async function bladeJobs(main, stale) {
           <section class="card job-detail">
             <header class="job-head">
               <div class="job-title"><div class="job-title-row"><span id="jobStatus"></span><h3 id="jobTitle"></h3></div><div class="job-meta" id="jobMeta"></div></div>
+              <button class="btn sm primary" type="button" id="jobContinue" hidden><img src="${iconSrc("update.svg")}" alt=""> Continue</button>
               <button class="btn sm" type="button" id="jobRetry" hidden><img src="${iconSrc("update.svg")}" alt=""> Retry</button>
               <button class="btn sm" type="button" id="jobAbort" hidden title="Stop this job - it ends at its next safe point and cleans up its VMs"><img src="${iconSrcDanger("stop.svg")}" alt=""> Cancel</button>
               <button class="btn icon sm ghost" type="button" id="jobDelete" title="Delete from the history" aria-label="Delete from the history">${trashIcon()}</button>
@@ -1840,6 +1841,11 @@ async function bladeJobs(main, stale) {
         if (j.kind === "deploy") { state.blade = "deploy"; render(); return; }
         if (j.kind === "certificate") { state.blade = "studio"; render(); return; }
         try { const { id } = await api("POST", `/jobs/${encodeURIComponent(j.id)}/retry`); jobSelected = id; renderServerBlade("jobs", main); toast("Started again"); }
+        catch (e) { toast(e.message, true); }
+      });
+      $id("jobContinue").addEventListener("click", async () => {
+        const j = jobsCache.find(x => x.id === jobSelected); if (!j) return;
+        try { const { id } = await api("POST", `/jobs/${encodeURIComponent(j.id)}/continue`); jobSelected = id; renderServerBlade("jobs", main); toast("Continuing"); }
         catch (e) { toast(e.message, true); }
       });
       $id("jobAbort").addEventListener("click", async () => {
@@ -1926,11 +1932,31 @@ async function bladeJobs(main, stale) {
         const a = $id("jobAbort");
         if (a) a.hidden = job.status !== "running";
         r.title = { bake: "Open the bake form with this bake's ISO and image", "windows-bake": "Open the bake form with this bake's ISO and image", deploy: "Open Deploy", certificate: "Open Studio settings" }[job.kind] || "Start this job again with the same settings";
+        // Continue: a media build that left something behind - a finished stage or downloads.
+        const c = $id("jobContinue");
+        if (c) {
+          const show = k => {
+            c.hidden = !k;
+            if (k) { c.title = `Pick up where it stopped: ${k.label}`; r.title = "Start over - the downloads in the cache are still used"; }
+          };
+          const key = `${job.id}:${job.status}`;
+          if (r.hidden || job.kind !== "media") show(null);
+          else if (jobResume.key === key) show(jobResume.k);
+          else {
+            show(null);
+            api("GET", `/jobs/${encodeURIComponent(job.id)}/continue`).then(k => {
+              jobResume = { key, k };
+              if (jobSelected === job.id) show(k);
+            }).catch(() => {});
+          }
+        }
       }
     }
   }
   jobsPoll = setTimeout(() => { if (!stale()) bladeJobs(main, stale).catch(() => {}); }, jobs.some(j => j.status === "running") ? 2000 : 15000);
 }
+/* The selected job's Continue answer, asked once per job and status. */
+let jobResume = { key: "", k: null };
 function jobFilterHtml(jobs) {
   return JOB_FILTERS.map(([k, label]) => {
     const n = k === "all" ? jobs.length : jobs.filter(j => j.status === k).length;
@@ -2338,7 +2364,7 @@ function autoUpdateCard(au) {
 }
 
 function wireAutoUpdate(main) {
-  const again = () => renderServerBlade("media", main);
+  const again = () => renderServerBlade("imagesettings", main);
   const on = (id, fn) => { const el = $id(id); if (el) el.addEventListener("click", fn); };
   on("auSave", async () => {
     try { await api("PUT", "/auto-update", { keep_golds: parseInt($id("auKeep").value, 10) || 2, include_previews: $id("auPreviews").checked, keep_winpe_current: $id("auWinpe").checked, keep_virtio_current: $id("auVirtio").checked }); toast("Saved"); again(); }
@@ -2458,29 +2484,7 @@ async function bladeMedia(main, stale) {
       <div class="grid-2">${field(fieldLabel("update.svg", "Release baked into Windows golds"), `<select id="vioSel">${opts(vioChoices, win.settings.virtio)}</select>
         <span class="hint">Drivers and QEMU guest agent. "stable" follows the virtio-win project's stable channel; a pinned release stays put.</span>`)}</div>
       ${actions(act("vioFetch", "download.svg", "Fetch into PVE now"), act("vioSave", "save.svg", "Save", true))}`, "", false, vioBadge())}
-    ${au ? autoUpdateCard(au) : ""}
-    ${gsCard("gd-where", "settings.svg", "Where bakes run", `${esc(r.node || "")} · ${esc(r.disk_storage || "")} · ${esc(r.bridge || "")}`, `
-      <div class="grid-3">
-        ${field(fieldLabel("servers.svg", "Node"), `<select id="bsNode">${opts(inv.nodes.filter(n => n.status === "online").map(n => [n.node, n.node]), s.node, auto(r.node))}</select>`)}
-        ${field(fieldLabel("disk.svg", "Gold disks (images)"), `<select id="bsDisk">${opts(stor("images"), s.disk_storage, auto(r.disk_storage))}</select>`)}
-        ${field(fieldLabel("storage.svg", "Cloud image cache (import)"), `<select id="bsImport">${opts(stor("import"), s.import_storage, auto(r.import_storage))}</select>`)}
-        ${field(fieldLabel("iso-media.svg", "ISOs: WinPE, virtio-win, media (iso)"), `<select id="bsIso">${opts(stor("iso"), s.iso_storage, auto(r.iso_storage))}</select>`)}
-        ${field(fieldLabel("cpu.svg", "CPU type (Linux)"), `<input id="bsCpu" value="${esc(s.cpu)}">`)}
-        ${field(fieldLabel("cpu.svg", "CPU type (Windows)"), `<input id="bsCpuWin" value="${esc(s.cpu_windows)}">`)}
-        ${field(fieldLabel("ram.svg", "Memory (MiB)"), `<input id="bsMem" type="number" min="1024" step="512" value="${s.memory_mb}">`)}
-        ${field(fieldLabel("cpu.svg", "Cores"), `<input id="bsCores" type="number" min="1" value="${s.cores}">`)}
-      </div>
-      <div class="field-group">Bake network</div>
-      <div class="grid-3">
-        ${field(fieldLabel("vnet.svg", "Network"), `<select id="bsBridge">${opts(bridges, s.bridge, auto(r.bridge))}</select>`)}
-        ${field(fieldLabel("vlan.svg", "VLAN tag"), `<input id="bsVlan" type="number" min="1" max="4094" placeholder="none" value="${s.vlan ?? ""}">`)}
-        ${field(`<span class="field-label"><img src="${iconSrc("static-ip.svg")}" alt="">Linux addresses${infoTip("Linux bake addresses", "For a bake network without DHCP: one address (10.10.0.60/24) or a range (10.10.0.60-69/24). Each Linux bake takes the first address no running bake holds, so a range of 4 lets 4 bakes run side by side. Reserve them for the bakes. Empty: DHCP. Windows bakes stay offline and need none.")}</span>`,
-          `<input id="bsLinAddr" placeholder="DHCP - or 10.10.0.60-69/24" value="${esc(s.linux_address || "")}">`)}
-        ${field(fieldLabel("vnet.svg", "Gateway"), `<input id="bsLinGw" placeholder="10.10.0.1" value="${esc(s.linux_gateway || "")}">`)}
-        ${field(fieldLabel("dns.svg", "DNS"), `<input id="bsLinDns" placeholder="10.10.0.1" value="${esc((s.linux_dns || []).join(", "))}">`)}
-      </div>
-      <div class="tip-box"><img src="${iconSrc("help.svg")}" alt=""><div>The Linux bake VM needs internet access on its network - by DHCP, or by the addresses above. "Auto" prefers shared storage, so one gold serves every node.</div></div>
-      ${actions(bake.problem ? `<span class="hint err gs-actions-note">${esc(bake.problem)}</span>` : "", act("bsSave", "save.svg", "Save", true))}`, "", false)}`;
+`;
 
   const on = (id, ev, fn) => { const el = $id(id); if (el) el.addEventListener(ev, fn); };
   on("fodSave", "click", async () => {
@@ -2527,19 +2531,56 @@ async function bladeMedia(main, stale) {
     try { await api("PUT", "/settings/windows", { ...win.settings, virtio: $id("vioSel").value }); const { id } = await api("POST", "/virtio/fetch"); openJob(id); }
     catch (e) { toast(e.message, true); }
   });
-  wireAutoUpdate(main);
+}
+
+/* -- Image settings: how and where images are built, and how Windows golds stay current -- */
+async function bladeImageSettings(main, stale) {
+  const [bake, c, au] = await Promise.all([api("GET", "/settings/bake"), refreshInventory(), api("GET", "/auto-update").catch(() => null)]);
+  if (stale()) return;
+  const inv = c.inventory;
+  const s = bake.settings, r = bake.resolved || {};
+  const node = s.node || r.node;
+  const stor = content => inv.storages.filter(x => x.node === node && (x.content || "").split(",").includes(content))
+    .map(x => [x.storage, `${x.storage} (${x.plugintype}${x.shared === 1 ? ", shared" : ""})`]);
+  const bridges = (inv.nodes.find(n => n.node === node)?.bridges || []).map(b => [b.iface, b.iface]).concat(inv.vnets.map(v => [v.vnet, v.vnet + " (SDN)"]));
+  const auto = v => v ? `Auto (${v})` : "Auto";
+  main.innerHTML = bladeHead("imagesettings") + `
+    ${gsCard("gd-where", "settings.svg", "Build environment", `${esc(r.node || "")} · ${esc(r.disk_storage || "")} · ${esc(r.bridge || "")}`, `
+      <div class="grid-3">
+        ${field(fieldLabel("servers.svg", "Node"), `<select id="bsNode">${opts(inv.nodes.filter(n => n.status === "online").map(n => [n.node, n.node]), s.node, auto(r.node))}</select>`)}
+        ${field(fieldLabel("disk.svg", "Gold disks (images)"), `<select id="bsDisk">${opts(stor("images"), s.disk_storage, auto(r.disk_storage))}</select>`)}
+        ${field(fieldLabel("storage.svg", "Cloud image cache (import)"), `<select id="bsImport">${opts(stor("import"), s.import_storage, auto(r.import_storage))}</select>`)}
+        ${field(fieldLabel("iso-media.svg", "ISOs: WinPE, virtio-win, media (iso)"), `<select id="bsIso">${opts(stor("iso"), s.iso_storage, auto(r.iso_storage))}</select>`)}
+        ${field(fieldLabel("ram.svg", "Memory (MiB)"), `<input id="bsMem" type="number" min="1024" step="512" value="${s.memory_mb}">`)}
+        ${field(fieldLabel("cpu.svg", "Cores"), `<input id="bsCores" type="number" min="1" value="${s.cores}">`)}
+      </div>
+      <div class="toggle-grid" style="grid-template-columns:1fr">${toggle('id="bsHost"', `Bake and worker VMs on the node's own CPU${infoTip("CPU type host", "Bake, WinPE and media worker VMs never migrate, so they get the node's CPU as it is (host) - every instruction it has. Windows ones without nested virtualization (-nested-virt): Setup decides nothing about VBS from a CPU the clones may not have. On a node that is itself a VM, and on PVE before 9.1, they get x86-64-v3.")}`, s.bake_host !== false)}</div>
+      <div class="field-group">Network</div>
+      <div class="grid-3">
+        ${field(fieldLabel("vnet.svg", "Network"), `<select id="bsBridge">${opts(bridges, s.bridge, auto(r.bridge))}</select>`)}
+        ${field(fieldLabel("vlan.svg", "VLAN tag"), `<input id="bsVlan" type="number" min="1" max="4094" placeholder="none" value="${s.vlan ?? ""}">`)}
+        ${field(`<span class="field-label"><img src="${iconSrc("static-ip.svg")}" alt="">Linux addresses${infoTip("Linux bake addresses", "For a bake network without DHCP: one address (10.10.0.60/24) or a range (10.10.0.60-69/24). Each Linux bake takes the first address no running bake holds, so a range of 4 lets 4 bakes run side by side. Reserve them for the bakes. Empty: DHCP. Windows bakes stay offline and need none.")}</span>`,
+          `<input id="bsLinAddr" placeholder="DHCP - or 10.10.0.60-69/24" value="${esc(s.linux_address || "")}">`)}
+        ${field(fieldLabel("vnet.svg", "Gateway"), `<input id="bsLinGw" placeholder="10.10.0.1" value="${esc(s.linux_gateway || "")}">`)}
+        ${field(fieldLabel("dns.svg", "DNS"), `<input id="bsLinDns" placeholder="10.10.0.1" value="${esc((s.linux_dns || []).join(", "))}">`)}
+      </div>
+      <div class="tip-box"><img src="${iconSrc("help.svg")}" alt=""><div>The Linux bake VM needs internet access on its network - by DHCP, or by the addresses above. "Auto" prefers shared storage, so one gold serves every node.</div></div>
+      ${actions(bake.problem ? `<span class="hint err gs-actions-note">${esc(bake.problem)}</span>` : "", act("bsSave", "save.svg", "Save", true))}`, "", false)}
+    ${au ? autoUpdateCard(au) : ""}`;
+  const on = (id, ev, fn) => { const el = $id(id); if (el) el.addEventListener(ev, fn); };
   on("bsSave", "click", async () => {
     const vlan = parseInt($id("bsVlan").value, 10);
     try {
       await api("PUT", "/settings/bake", { node: $id("bsNode").value, disk_storage: $id("bsDisk").value, import_storage: $id("bsImport").value,
         iso_storage: $id("bsIso").value, bridge: $id("bsBridge").value, vlan: Number.isFinite(vlan) ? vlan : null,
-        cpu: $id("bsCpu").value.trim(), cpu_windows: $id("bsCpuWin").value.trim(), memory_mb: parseInt($id("bsMem").value, 10) || 4096,
+        cpu: s.cpu, cpu_windows: s.cpu_windows, bake_host: $id("bsHost").checked, memory_mb: parseInt($id("bsMem").value, 10) || 4096,
         cores: parseInt($id("bsCores").value, 10) || 2, timeout_min: s.timeout_min,
         linux_address: $id("bsLinAddr").value.trim(), linux_gateway: $id("bsLinGw").value.trim(),
         linux_dns: $id("bsLinDns").value.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean) });
-      toast("Saved"); renderServerBlade("media", main);
+      toast("Saved"); renderServerBlade("imagesettings", main);
     } catch (e) { toast(e.message, true); }
   });
+  wireAutoUpdate(main);
 }
 
 /* -- Studio settings: the studio's own name and certificate -- */
