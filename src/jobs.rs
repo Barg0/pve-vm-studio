@@ -193,6 +193,9 @@ pub struct Jobs {
     on_end: Arc<std::sync::OnceLock<EndHook>>,
     /// The jobs the last stop cut off: (id, title).
     pub interrupted: Arc<Vec<(String, String)>>,
+    /// One job at a time per lane (the ISO builds share the work volume): the lane's lock and
+    /// the title of the job holding it.
+    lanes: Arc<std::sync::Mutex<HashMap<String, (Arc<Mutex<()>>, String)>>>,
 }
 
 impl Jobs {
@@ -216,7 +219,7 @@ impl Jobs {
         .bind(now())
         .execute(&db)
         .await?;
-        Ok(Self { db, dir, running: Default::default(), on_end: Default::default(), interrupted: Arc::new(cut) })
+        Ok(Self { db, dir, running: Default::default(), on_end: Default::default(), interrupted: Arc::new(cut), lanes: Default::default() })
     }
 
     /// Set once, at start.
@@ -237,18 +240,67 @@ impl Jobs {
         F: FnOnce(JobLog) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<()>> + Send + 'static,
     {
+        self.spawn_in(None, kind, title, created_by, params, body).await
+    }
+
+    /// Like spawn, but one job of `lane` runs at a time: a later one is queued and starts
+    /// when the one before it ends, in the order they were asked for.
+    pub async fn spawn_in_lane<F, Fut>(
+        &self,
+        lane: &str,
+        kind: &str,
+        title: &str,
+        created_by: &str,
+        params: serde_json::Value,
+        body: F,
+    ) -> Result<String>
+    where
+        F: FnOnce(JobLog) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<()>> + Send + 'static,
+    {
+        self.spawn_in(Some(lane), kind, title, created_by, params, body).await
+    }
+
+    async fn spawn_in<F, Fut>(
+        &self,
+        lane: Option<&str>,
+        kind: &str,
+        title: &str,
+        created_by: &str,
+        params: serde_json::Value,
+        body: F,
+    ) -> Result<String>
+    where
+        F: FnOnce(JobLog) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<()>> + Send + 'static,
+    {
         let id = uuid::Uuid::new_v4().to_string();
+        // The lane's lock, taken right here when it is free - so two asked for at once
+        // cannot both find it free - or waited for in the job's task.
+        let lane = lane.map(|l| {
+            let mut lanes = self.lanes.lock().unwrap();
+            let (lock, holder) = lanes.entry(l.to_owned()).or_insert_with(|| (Arc::new(Mutex::new(())), String::new()));
+            match lock.clone().try_lock_owned() {
+                Ok(g) => {
+                    *holder = title.to_owned();
+                    (l.to_owned(), lock.clone(), Some(g), String::new())
+                }
+                Err(_) => (l.to_owned(), lock.clone(), None, holder.clone()),
+            }
+        });
+        let queued = lane.as_ref().is_some_and(|l| l.2.is_none());
         sqlx::query(
             "INSERT INTO jobs (id, kind, title, status, created_by, params, created_at, started_at) \
-             VALUES (?, ?, ?, 'running', ?, ?, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(kind)
         .bind(title)
+        .bind(if queued { "queued" } else { "running" })
         .bind(created_by)
         .bind(params.to_string())
         .bind(now())
-        .bind(now())
+        .bind(if queued { None } else { Some(now()) })
         .execute(&self.db)
         .await?;
 
@@ -270,8 +322,51 @@ impl Jobs {
         tokio::spawn(async move {
             let log = JobLog { live: live.clone() };
             log.tag(Tag::Start, &job_title).await;
+            // Queued: wait for the lane, cancellable while waiting. The guard lives until the
+            // job ends.
+            let mut _lane_guard = None;
+            let mut cancelled = None;
+            if let Some((name, lock, guard, before)) = lane {
+                match guard {
+                    Some(g) => _lane_guard = Some(g),
+                    None => {
+                        log.tag(Tag::Info, format!("Queued - starts when {} has finished", if before.is_empty() { "the job before it" } else { before.as_str() })).await;
+                        log.progress("Queued", None, if before.is_empty() { String::new() } else { format!("after {before}") });
+                        // One wait for the lock the whole time - tokio's lock is first come,
+                        // first served - with a look at Cancel every two seconds beside it.
+                        let wait = lock.lock_owned();
+                        tokio::pin!(wait);
+                        let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+                        loop {
+                            tokio::select! {
+                                g = &mut wait => {
+                                    _lane_guard = Some(g);
+                                    break;
+                                }
+                                _ = tick.tick() => {
+                                    if let Err(e) = log.check_abort() {
+                                        cancelled = Some(e);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if cancelled.is_none() {
+                            if let Some(l) = this.lanes.lock().unwrap().get_mut(&name) {
+                                l.1 = job_title.clone();
+                            }
+                            let _ = sqlx::query("UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?").bind(now()).bind(&job_id).execute(&this.db).await;
+                            log.progress_done();
+                            log.run("Starting - the work volume is free").await;
+                        }
+                    }
+                }
+            }
             // A panic in the body must still end the job, so run it as its own task.
-            let outcome = tokio::spawn(body(log.clone())).await;
+            let outcome = match cancelled {
+                Some(e) => Ok(Err(e)),
+                None => tokio::spawn(body(log.clone())).await,
+            };
             let (status, error) = match outcome {
                 Ok(Ok(())) => ("succeeded", None),
                 Ok(Err(e)) => ("failed", Some(format!("{e:#}"))),

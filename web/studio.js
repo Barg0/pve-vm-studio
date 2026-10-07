@@ -844,7 +844,7 @@ const IMAGE_CATALOG = [
        older media has no conversion path to it. Supported on Azure and Azure Local;
        on plain Hyper-V it is a lab image. */
     id: "ws2025-datacenter-az-desktop",
-    label: "Windows Server 2025 Datacenter: Azure Edition Desktop",
+    label: "Windows Server 2025 Datacenter Desktop: Azure Edition",
     icon: "os-server-panes.svg",
     kind: "desktop",
     edition: "Datacenter: Azure Edition",
@@ -853,7 +853,7 @@ const IMAGE_CATALOG = [
   },
   {
     id: "ws2025-datacenter-az-core",
-    label: "Windows Server 2025 Datacenter: Azure Edition Core",
+    label: "Windows Server 2025 Datacenter Core: Azure Edition",
     icon: "os-server-panes.svg",
     kind: "core",
     edition: "Datacenter: Azure Edition",
@@ -3256,6 +3256,7 @@ function applyVmTemplate(server, templateId) {
   if (t.name) server.name = nextFreeServerName(t.name, server);
   applyImageProfile(server, preferGoldImage(templateImageId(t, state.templateRelease, state.templateEdition)));
   server.goldLanguage = "";
+  server.goldRelease = "";
   server.goldId = "";
   server.imageSource = "catalog";
   server.imageHint = "";
@@ -4996,7 +4997,7 @@ function navBadge(id) {
   if (id === "domainjoin" && state.domainJoinAccounts.length) return `<span class="nav-badge">${state.domainJoinAccounts.length}</span>`;
   if (id === "azurearc" && state.azureArcPrincipals.length) return `<span class="nav-badge">${state.azureArcPrincipals.length}</span>`;
   if (id === "licenses" && (state.windowsLicenses || []).length) {
-    const bad = state.windowsLicenses.filter(w => !w.imageId || !productKeyOk(w.productKey)).length;
+    const bad = state.windowsLicenses.filter(w => !w.edition || !productKeyOk(w.productKey)).length;
     return bad ? `<span class="nav-badge err" title="${bad} licence(s) without an image or a valid key">${state.windowsLicenses.length}</span>`
       : `<span class="nav-badge ok">${state.windowsLicenses.length}</span>`;
   }
@@ -6331,7 +6332,7 @@ function renderServerCard(s) {
           <div class="card-title"><span data-name-title="${esc(s._id)}">${esc(hyperVName)}</span>${titleBadges(`${djBadge}${arcBadge}${clusterBadge}<span class="pill role ${pillClass}">${esc(img.kind)}</span>${built
             ? `<span class="pill status ok" title="VM ${esc(built.vmid)} on ${esc(built.node)}">Built</span>`
             : clash ? `<span class="pill status warn" title="${esc(clash.what)} ${esc(clash.vmid)} on ${esc(clash.node)} has this name">Name in use</span>` : ""}`)}</div>
-          <div class="card-meta"><span data-name-guest="${esc(s._id)}">${hyperVName !== shortName ? "guest " + esc(shortName) + " · " : ""}</span>${esc(displayImageLabel)} · ${esc(s.memoryGB)} GB / ${esc(s.cpuCount)} CPU · ${esc(s.switchName || "no switch")}${s.vlanId != null ? " · VLAN " + esc(s.vlanId) : ""}${disks.length ? " · " + disks.length + " data disk(s)" : ""}<span data-name-folder="${esc(s._id)}">${folderName !== hyperVName ? " · folder " + esc(folderName) + "\\" : ""}</span></div>
+          <div class="card-meta"><span data-name-guest="${esc(s._id)}">${hyperVName !== shortName ? "guest " + esc(shortName) + " · " : ""}</span>${esc(displayImageLabel)}${goldRelease(goldFor(s)) ? " " + esc(goldRelease(goldFor(s))) : ""} · ${esc(s.memoryGB)} GB / ${esc(s.cpuCount)} CPU · ${esc(s.switchName || "no switch")}${s.vlanId != null ? " · VLAN " + esc(s.vlanId) : ""}${disks.length ? " · " + disks.length + " data disk(s)" : ""}<span data-name-folder="${esc(s._id)}">${folderName !== hyperVName ? " · folder " + esc(folderName) + "\\" : ""}</span></div>
         </div>
       </div>
       <div class="card-actions">
@@ -6422,48 +6423,7 @@ function renderServerCard(s) {
                   <span class="netbios-count ${over ? "over" : ""}" data-netbios-count="1">${nameLen} / ${NETBIOS_MAX}</span>
                 </div>`;
               })())}
-              ${field("Gold", (() => {
-                const pickerOpen = state.imagePickerOpen === s._id;
-                const current = goldFor(s);
-                const groups = goldPickerGroups();
-                const isSel = e => !isCustomImage && (e.pin ? s.goldId === e.pin
-                  : !s.goldId && e.img.id === s.imageId && (!e.multi || goldLang(e.gold).toLowerCase() === String(s.goldLanguage || goldLang(current)).toLowerCase()));
-                return `<div class="picker ${pickerOpen ? "open" : ""}">
-                <button type="button" class="picker-btn" data-image-picker-toggle="${esc(s._id)}" aria-expanded="${pickerOpen ? "true" : "false"}">
-                  <img src="${displayImageIconSrc}" alt="">
-                  <span class="picker-label">${esc(displayImageLabel)}${s.goldLanguage ? ` · ${esc(s.goldLanguage)}` : ""}</span>
-                  ${s.goldId ? `<span class="pill status warn" title="Pinned to gold ${esc(s.goldId)} - rebakes are not picked up">Pinned</span>` : ""}
-                  ${goldsLoaded() && !current ? `<span class="pill status off">No gold</span>` : ""}
-                  <span class="picker-chevron">${chevron()}</span>
-                </button>
-                ${pickerOpen ? `<div class="picker-list" role="listbox">
-                  ${goldsLoaded() && !current ? `
-                    <div class="opt-group" role="presentation">Current - no gold</div>
-                    <button type="button" role="option" aria-selected="true" class="selected" data-image-picker-toggle="${esc(s._id)}">
-                      <img src="${displayImageIconSrc}" alt="">
-                      <span class="opt-body"><span class="opt-label">${esc(displayImageLabel)}${s.goldLanguage ? ` · ${esc(s.goldLanguage)}` : ""}</span>
-                        <span class="opt-meta">${isCustomImage ? "a Hyper-V custom VHDX - Proxmox VE builds from golds only" : "no ready gold - bake one, or pick a gold below"}</span></span>
-                      <span class="pill status off">No gold</span>
-                    </button>` : ""}
-                  ${!goldsLoaded() ? `<div class="opt-empty hint">Reading the golds…</div>`
-                    : !groups.length ? `<div class="opt-empty hint">No gold is ready yet. A VM builds from a gold - bake one first.</div>`
-                    : groups.map(rel => `
-                    <div class="opt-group" role="presentation">${esc(rel.label)}</div>
-                    ${rel.groups.map(g => `
-                      ${g.label ? `<div class="opt-sub" role="presentation">${esc(g.label)}</div>` : ""}
-                      ${g.entries.map(e => `
-                    <button type="button" role="option" aria-selected="${isSel(e) ? "true" : "false"}" class="${isSel(e) ? "selected" : ""} ${g.label ? "indented" : ""}${e.pin ? " opt-pin" : ""}" data-image-pick="${esc(s._id)}" data-image-id="${esc(e.img.id)}" data-gold-lang="${e.multi && !e.pin ? esc(e.lang) : ""}" data-gold-pin="${esc(e.pin)}">
-                      ${e.pin ? `<span class="opt-pin-id mono">${esc(goldShortId(e.gold))}</span>` : `<img src="${imageIconSrc(e.img)}" alt="">`}
-                      <span class="opt-body">
-                        <span class="opt-label">${e.pin ? esc(goldManifest(e.gold).label || "pin this gold") : esc(e.img.label) + `<span class="opt-tag">newest${e.multi ? " " + esc(e.lang || "image default") : ""}</span>`}</span>
-                        <span class="opt-meta">${esc(goldMetaLine(e.gold))}${e.pin ? "" : " · " + esc(goldShortId(e.gold))}</span>
-                      </span>
-                    </button>`).join("")}`).join("")}`).join("")}
-                  <button type="button" class="opt-footer" data-goto="golds"><img src="${iconSrc("gold-image.svg")}" alt=""> Bake another gold…</button>
-                </div>` : ""}
-              </div>
-              <span class="hint">${current ? `${esc(current.name)} · ${esc(goldMetaLine(current))}${s.goldId ? " · pinned" : " · follows rebakes"}` : goldsLoaded() ? (s.goldId ? `Pinned gold ${esc(s.goldId)} is gone - pick another` : "Bake a gold for this image under Golds") : esc(img.id)}</span>`;
-              })())}
+              ${field("Gold", goldPickerField(s, img, isCustomImage, displayImageLabel, displayImageIconSrc))}
               ${isCustomImage
                 ? field("Custom image hint", `<input data-s="${esc(s._id)}" data-k="imageHint" value="${esc(s.imageHint||"")}" placeholder="only for custom gold names" class="${inv(`s:${s._id}:imageHint`)}"${invAria(`s:${s._id}:imageHint`)}>
                   <span class="hint">Partial or full gold filename — used instead of catalog imageId matching</span>`)
@@ -6813,16 +6773,32 @@ function compareGolds(a, b) {
   }
   return String(b.created_at).localeCompare(String(a.created_at));
 }
-function goldsOfImage(imageId, lang) {
-  const l = String(lang || "").toLowerCase();
-  return readyGolds().filter(g => g.image_id === imageId && (!l || goldLang(g).toLowerCase() === l)).sort(compareGolds);
+/* Windows 11 releases by base build (src/golds.rs CLIENT_RELEASES): 26300 is 26H2. Server
+   builds have no such name - 26100 is Windows Server 2025 there. */
+const CLIENT_RELEASES = [[26300, "26H2"], [26200, "25H2"], [26100, "24H2"], [22631, "23H2"], [22621, "22H2"], [22000, "21H2"]];
+function goldRelease(g) {
+  if (!g || !String(g.image_id || "").startsWith("w11")) return "";
+  // build_version comes without Windows' 10.0 (golds.rs); a manifest's build may carry it.
+  const v = g.build_version || String(goldManifest(g).build || "").replace(/^10\.0\./, "").split(".").map(Number);
+  const major = v[0];
+  const hit = CLIENT_RELEASES.find(([b]) => b === major);
+  return hit ? hit[1] : "";
 }
-function goldOf(imageId, lang) { return goldsOfImage(imageId, lang)[0] || null; }
-/* A pinned gold id wins (Build-Vms' -GoldId), then the language, then the newest. */
+/* The releases an image has ready golds of, newest first. */
+function goldReleases(imageId) {
+  return CLIENT_RELEASES.map(([, r]) => r).filter(r => readyGolds().some(g => g.image_id === imageId && goldRelease(g) === r));
+}
+function goldsOfImage(imageId, lang, release) {
+  const l = String(lang || "").toLowerCase();
+  return readyGolds().filter(g => g.image_id === imageId && (!l || goldLang(g).toLowerCase() === l) && (!release || goldRelease(g) === release)).sort(compareGolds);
+}
+function goldOf(imageId, lang, release) { return goldsOfImage(imageId, lang, release)[0] || null; }
+/* A pinned gold id wins (Build-Vms' -GoldId), then the language and the release, then the
+   newest build. */
 function goldFor(s) {
   if (!s) return null;
   if (s.goldId) return readyGolds().find(g => g.id === s.goldId) || null;
-  return goldOf(s.imageId, s.goldLanguage);
+  return goldOf(s.imageId, s.goldLanguage, s.goldRelease || "");
 }
 function goldLanguages(imageId) {
   return [...new Set(readyGolds().filter(g => g.image_id === imageId).map(goldLang))].sort();
@@ -6831,10 +6807,15 @@ function goldManifest(g) { try { return JSON.parse(g.manifest || "{}"); } catch 
 /* The short id Build-Vms shows: the sidecar's id (pve-<id>), or the template name for a
    gold from before schema 2. */
 function goldShortId(g) { const m = goldManifest(g); return m.id || g.id.slice(0, 8); }
-function goldBuildLabel(g) {
+/* The build alone: 26300.9457 (the gold card draws it big). */
+function goldBuildNumber(g) {
   const m = goldManifest(g);
-  const b = String(g.build_full || m.build || m.distroVersion || "");
-  return b ? b.replace(/^10\.0\./, "") : "";
+  return String(g.build_full || m.build || m.distroVersion || "").replace(/^10\.0\./, "");
+}
+/* The build with its Windows 11 release in front: "26H2 · 26300.9457". */
+function goldBuildLabel(g) {
+  const b = goldBuildNumber(g), rel = goldRelease(g);
+  return b ? (rel ? rel + " · " : "") + b : "";
 }
 function goldAge(iso) {
   if (!iso) return "";
@@ -6844,26 +6825,80 @@ function goldAge(iso) {
 /* "de-de · 26100.4061 · 64 GB · 3 days old" - Build-Vms' picker columns in one line. */
 function goldMetaLine(g) {
   const m = goldManifest(g);
-  return [goldLang(g) || "image default", goldBuildLabel(g) || (m.kernel ? "kernel " + m.kernel : ""),
+  // The build alone: the release stands beside the image's name wherever this line goes.
+  return [goldLang(g) || "image default", goldBuildNumber(g) || (m.kernel ? "kernel " + m.kernel : ""),
     m.diskSizeGB ? m.diskSizeGB + " GB" : "", goldAge(g.created_at)].filter(Boolean).join(" · ");
 }
 /* The picker's entries: one per image and language that has a ready gold, in the
    catalog's release / edition order. */
+/* The VM card's Gold field: the picker button, its list (an image's golds by release and
+   edition, Latest rows, release rows, pins) and the hint under it. On its own so every state
+   can be drawn exactly as the card draws it (Jobs-free preview, 2026-10-07). */
+function goldPickerField(s, img, isCustomImage, displayImageLabel, displayImageIconSrc) {
+                const pickerOpen = state.imagePickerOpen === s._id;
+                const current = goldFor(s);
+                const groups = goldPickerGroups();
+                const isSel = e => !isCustomImage && (e.pin ? s.goldId === e.pin
+                  : !s.goldId && e.img.id === s.imageId && (s.goldRelease || "") === (e.release || "") && (!e.multi || goldLang(e.gold).toLowerCase() === String(s.goldLanguage || goldLang(current)).toLowerCase()));
+                return `<div class="picker ${pickerOpen ? "open" : ""}">
+                <button type="button" class="picker-btn" data-image-picker-toggle="${esc(s._id)}" aria-expanded="${pickerOpen ? "true" : "false"}">
+                  <img src="${displayImageIconSrc}" alt="">
+                  <span class="picker-label">${esc(displayImageLabel)}${goldRelease(current) ? ` ${esc(goldRelease(current))}` : ""}${s.goldLanguage ? ` · ${esc(s.goldLanguage)}` : ""}</span>
+                  ${s.goldId ? `<span class="pill status warn" title="Pinned to gold ${esc(s.goldId)} - rebakes are not picked up">Pinned</span>` : ""}
+                  ${goldsLoaded() && !current ? `<span class="pill status off">No gold</span>` : ""}
+                  <span class="picker-chevron">${chevron()}</span>
+                </button>
+                ${pickerOpen ? `<div class="picker-list" role="listbox">
+                  ${goldsLoaded() && !current ? `
+                    <div class="opt-group" role="presentation">Current - no gold</div>
+                    <button type="button" role="option" aria-selected="true" class="selected" data-image-picker-toggle="${esc(s._id)}">
+                      <img src="${displayImageIconSrc}" alt="">
+                      <span class="opt-body"><span class="opt-label">${esc(displayImageLabel)}${s.goldLanguage ? ` · ${esc(s.goldLanguage)}` : ""}</span>
+                        <span class="opt-meta">${isCustomImage ? "a Hyper-V custom VHDX - Proxmox VE builds from golds only" : "no ready gold - bake one, or pick a gold below"}</span></span>
+                      <span class="pill status off">No gold</span>
+                    </button>` : ""}
+                  ${!goldsLoaded() ? `<div class="opt-empty hint">Reading the golds…</div>`
+                    : !groups.length ? `<div class="opt-empty hint">No gold is ready yet. A VM builds from a gold - bake one first.</div>`
+                    : groups.map(rel => `
+                    <div class="opt-group" role="presentation">${esc(rel.label)}</div>
+                    ${rel.groups.map(g => `
+                      ${g.label ? `<div class="opt-sub" role="presentation">${esc(g.label)}</div>` : ""}
+                      ${g.entries.map(e => `
+                    <button type="button" role="option" aria-selected="${isSel(e) ? "true" : "false"}" class="${isSel(e) ? "selected" : ""} ${g.label ? "indented" : ""}${e.pin ? " opt-pin" : ""}" data-image-pick="${esc(s._id)}" data-image-id="${esc(e.img.id)}" data-gold-lang="${e.multi && !e.pin ? esc(e.lang) : ""}" data-gold-release="${esc(e.release || "")}" data-gold-pin="${esc(e.pin)}">
+                      ${e.pin ? `<span class="opt-pin-id mono">${esc(goldShortId(e.gold))}</span>` : `<img src="${imageIconSrc(e.img)}" alt="">`}
+                      <span class="opt-body">
+                        <span class="opt-label">${e.pin ? esc(goldManifest(e.gold).label || "pin this gold") : esc(e.img.label) + (goldRelease(e.gold) ? " " + esc(goldRelease(e.gold)) : "") + `<span class="opt-tag">latest${e.multi ? " " + esc(e.lang || "image default") : ""}</span>`}</span>
+                        <span class="opt-meta">${esc(goldMetaLine(e.gold))}${e.pin ? "" : " · " + esc(goldShortId(e.gold))}</span>
+                      </span>
+                    </button>`).join("")}`).join("")}`).join("")}
+                  <button type="button" class="opt-footer" data-goto="golds"><img src="${iconSrc("gold-image.svg")}" alt=""> Bake another gold…</button>
+                </div>` : ""}
+              </div>
+              <span class="hint">${current ? `${esc(current.name)} · ${esc(goldMetaLine(current))}${s.goldId ? " · pinned" : s.goldRelease ? ` · follows ${esc(s.goldRelease)} rebakes` : " · follows rebakes"}` : goldsLoaded() ? (s.goldId ? `Pinned gold ${esc(s.goldId)} is gone - pick another` : "Bake a gold for this image under Golds") : esc(img.id)}</span>`;
+}
+
 function goldPickerGroups() {
+  /* An image's rows in one release (or all of them, release ""): "latest" rows follow
+     rebakes; with more than one gold, every gold is listed too, to pin - Build-Vms' picker
+     steps through all of them. A release below the image's newest keeps the VM on it. */
+  const rows = (img, release) => {
+    const langs = goldLanguages(img.id);
+    const all = goldsOfImage(img.id, "", release);
+    const stay = release && release !== goldReleases(img.id)[0] ? release : "";
+    const follow = langs.map(lang => ({ img, lang, multi: langs.length > 1, release: stay, gold: goldOf(img.id, langs.length > 1 ? lang : "", release), pin: "" }))
+      .filter(e => e.gold);
+    const pins = all.length > 1 ? all.map(gold => ({ img, lang: goldLang(gold), multi: langs.length > 1, gold, pin: gold.id })) : [];
+    return follow.concat(pins);
+  };
   return imagePickerGroups().map(rel => ({
     label: rel.label,
-    groups: rel.groups.map(g => ({
-      label: g.label,
-      entries: g.images.flatMap(img => {
-        const langs = goldLanguages(img.id);
-        const all = goldsOfImage(img.id);
-        /* "Newest" rows follow rebakes; with more than one gold, every gold is listed too,
-           to pin - Build-Vms' picker steps through all of them. */
-        const follow = langs.map(lang => ({ img, lang, multi: langs.length > 1, gold: goldOf(img.id, langs.length > 1 ? lang : ""), pin: "" }));
-        const pins = all.length > 1 ? all.map(gold => ({ img, lang: goldLang(gold), multi: langs.length > 1, gold, pin: gold.id })) : [];
-        return follow.concat(pins);
-      })
-    })).filter(g => g.entries.length)
+    /* Windows 11: a subgroup per release (26H2, 25H2), newest first, like Datacenter and
+       Standard for Windows Server. */
+    groups: rel.groups.flatMap(g => {
+      const releases = CLIENT_RELEASES.map(([, r]) => r).filter(r => g.images.some(img => goldReleases(img.id).includes(r)));
+      if (!releases.length) return [{ label: g.label, entries: g.images.flatMap(img => rows(img, "")) }];
+      return releases.map(r => ({ label: g.label ? `${g.label} · ${r}` : r, entries: g.images.flatMap(img => goldReleases(img.id).includes(r) ? rows(img, r) : []) }));
+    }).filter(g => g.entries.length)
   })).filter(rel => rel.groups.length);
 }
 
@@ -6971,26 +7006,55 @@ function renderDomainJoinBlade() {
     </div>`;
 }
 
-/* Windows licenses: one product key per Windows gold image. Every VM built from that image's
-   gold gets it at first boot (SetupComplete: slmgr /ipk, then /ato) instead of the gold's KMS
-   client key. Bound to the image, not a gold id - a rebake keeps the key. */
+/* Windows licenses: one product key per edition. Every VM built from one of that edition's
+   golds - Core and Desktop alike - gets it at first boot (SetupComplete: slmgr /ipk, then
+   /ato) instead of the gold's KMS client key. Bound to the edition, not a gold id - a rebake
+   keeps the key. */
 function createWindowsLicense(partial) {
-  return ensureCatalogStableId(Object.assign({ _id: uid("wl"), id: "", imageId: "", productKey: "" }, partial || {}, { _id: uid("wl") }), "wl");
+  const w = Object.assign({ _id: uid("wl"), id: "", edition: "", productKey: "" }, partial || {}, { _id: uid("wl") });
+  // A licence named one image (imageId), then several (imageIds): their edition now.
+  const old = w.imageId || (Array.isArray(w.imageIds) && w.imageIds[0]) || "";
+  if (!w.edition && old) w.edition = licenseEditionOf(old);
+  delete w.imageId; delete w.imageIds;
+  return ensureCatalogStableId(w, "wl");
 }
+/* The edition an image belongs to: its id without Core or Desktop - ws2025-datacenter,
+   ws2025-datacenter-az, w11-enterprise. */
+function licenseEditionOf(imageId) { return normalizeImageId(imageId).replace(/-(core|desktop)$/, ""); }
+function licenseImages(edition) { return IMAGE_CATALOG.filter(img => licenseEditionOf(img.id) === edition); }
+function licenseTitle(edition) {
+  const img = licenseImages(edition)[0];
+  return img ? img.label.replace(/\s+(Desktop|Core)(?=:|$)/, "") : edition;
+}
+function licenseFits(w, server) { return !!w.edition && licenseEditionOf((server && server.imageId) || "") === w.edition; }
 /* The VMs a licence is attached to - picked like Domain Join's, one licence per VM. */
 function serversForLicense(w) {
   return state.servers.filter(s => s.windowsLicense && s.windowsLicense.licenseId === w.id);
 }
 function detachLicense(s) { s.windowsLicense = { licenseId: "" }; }
 function productKeyOk(k) { return /^[A-Za-z0-9]{5}(-[A-Za-z0-9]{5}){4}$/.test(String(k || "").trim()); }
-/* One choice per Windows image that has a ready gold: its newest gold names it. */
-function windowsGoldChoices() {
-  const ids = [...new Set(readyGolds().map(g => g.image_id))].filter(id => { const img = findImage(id); return img && img.id === id && !isLinuxImage(img); });
-  return ids.map(id => {
-    const g = goldOf(id);
-    return { imageId: id, label: `${findImage(id).label} · ${goldMetaLine(g)}` };
-  }).sort((a, b) => a.label.localeCompare(b.label));
+/* One row per Windows edition with a ready gold (plus the licence's own, if its golds are
+   gone), grouped like the VM card's image picker. */
+function licenseEditionGroups(w) {
+  const golds = readyGolds().filter(g => { const img = findImage(g.image_id); return img.id === g.image_id && !isLinuxImage(img); });
+  const editions = [...new Set(golds.map(g => licenseEditionOf(g.image_id)).concat(w.edition ? [w.edition] : []))];
+  const groups = [];
+  editions.map(ed => {
+    const mine = golds.filter(g => licenseEditionOf(g.image_id) === ed);
+    const imgs = licenseImages(ed);
+    return { edition: ed, img: imgs[0] || findImage(ed), golds: mine,
+      kinds: [...new Set(mine.map(g => findImage(g.image_id).kind))].sort((a, b) => ["core", "desktop", "client"].indexOf(a) - ["core", "desktop", "client"].indexOf(b)) };
+  // Servers first, newest release on top, like the VM card's image picker.
+  }).sort((a, b) => (a.img.kind === "client") - (b.img.kind === "client") || String(imageReleaseLabel(b.img)).localeCompare(String(imageReleaseLabel(a.img))) || licenseTitle(a.edition).localeCompare(licenseTitle(b.edition))).forEach(row => {
+    const rel = imageReleaseLabel(row.img), label = /^\d{4}$/.test(rel) ? "Windows Server " + rel : rel;
+    let grp = groups.find(x => x.label === label);
+    if (!grp) groups.push(grp = { label, rows: [] });
+    grp.rows.push(row);
+  });
+  return groups;
 }
+const KIND_PILL = { core: "Core", desktop: "Desktop", client: "Client" };
+function kindPills(kinds) { return kinds.map(k => `<span class="pill role ${k}">${KIND_PILL[k] || esc(k)}</span>`).join(""); }
 function renderLicensesBlade() {
   const list = state.windowsLicenses || [];
   const addBtn = `<button class="btn primary" type="button" id="addWindowsLicense"><img src="${iconSrcOnAccent("key.svg")}"> Add licence</button>`;
@@ -7002,7 +7066,7 @@ function renderLicensesBlade() {
     <div class="card-stack">
       ${list.map(w => {
         const open = state.expanded[w._id] !== false;
-        const img = w.imageId ? findImage(w.imageId) : null;
+        const img = w.edition ? (licenseImages(w.edition)[0] || null) : null;
         const vms = serversForLicense(w);
         const keyUnlocked = !!state.nameEdit[`wlkey:${w._id}`];
         // Hidden like a password; editing shows it - nobody types into a row of dots.
@@ -7015,7 +7079,7 @@ function renderLicensesBlade() {
               <span class="card-chevron">${chevron()}</span>
               <div class="card-icon"><img src="${img ? imageIconSrc(img) : iconSrc("key.svg")}"></div>
               <div>
-                <div class="card-title">${img ? esc(img.label) : "Pick a gold"}</div>
+                <div class="card-title">${w.edition ? esc(licenseTitle(w.edition)) : "Pick an edition"}</div>
                 <div class="card-meta">${w.productKey ? (productKeyOk(w.productKey) ? "key set" : "key not valid") : "no key"} · ${vms.length} VM(s) attached</div>
               </div>
             </div>
@@ -7025,14 +7089,27 @@ function renderLicensesBlade() {
           </div>
           <div class="card-body">
             <div class="grid-2">
-              ${field(`<span class="field-label">Gold ${infoTip("Gold", "The Windows golds baked under Golds. The key belongs to the gold's image (edition and experience), so a rebake of it - a newer build, another language - keeps the key.")}</span>`, (() => {
-                const golds = windowsGoldChoices();
-                const known = golds.some(c => c.imageId === w.imageId);
-                return `<select data-wl="${esc(w._id)}" data-wk="imageId" class="${w.imageId ? "" : "is-invalid"}"${golds.length || w.imageId ? "" : " disabled"}>
-                <option value="">${golds.length ? "Pick a gold" : "No Windows gold yet - bake one under Golds"}</option>
-                ${golds.map(c => `<option value="${esc(c.imageId)}"${c.imageId === w.imageId ? " selected" : ""}>${esc(c.label)}</option>`).join("")}
-                ${w.imageId && !known ? `<option value="${esc(w.imageId)}" selected>${esc(findImage(w.imageId).label)} - no gold baked now</option>` : ""}
-              </select>`;
+              ${field(`<span class="field-label">Edition ${infoTip("Edition", "A key activates one edition, so it goes to every gold of it - Core and Desktop - and keeps going after a rebake: a newer build, another language.")}</span>`, (() => {
+                const groups = licenseEditionGroups(w), open = state.imagePickerOpen === "wl:" + w._id;
+                const cur = groups.flatMap(g => g.rows).find(r => r.edition === w.edition);
+                return `<div class="picker ${open ? "open" : ""}">
+                <button type="button" class="picker-btn${w.edition ? "" : " is-invalid"}" data-image-picker-toggle="wl:${esc(w._id)}" aria-expanded="${open ? "true" : "false"}"${groups.length ? "" : " disabled"}>
+                  <img src="${cur ? imageIconSrc(cur.img) : iconSrc("key.svg")}" alt="">
+                  <span class="picker-label">${w.edition ? esc(licenseTitle(w.edition)) : groups.length ? "Pick an edition" : "No Windows gold yet - bake one under Golds"}</span>
+                  ${cur && cur.golds.length ? kindPills(cur.kinds) : w.edition ? `<span class="pill status off">No gold</span>` : ""}
+                  <span class="picker-chevron">${chevron()}</span>
+                </button>
+                ${open ? `<div class="picker-list" role="listbox">${groups.map(g => `
+                  <div class="opt-group" role="presentation">${esc(g.label)}</div>
+                  ${g.rows.map(row => `<button type="button" role="option" aria-selected="${row.edition === w.edition}" class="${row.edition === w.edition ? "selected" : ""}" data-wl-edition="${esc(w._id)}" data-edition="${esc(row.edition)}">
+                    <img src="${imageIconSrc(row.img)}" alt="">
+                    <span class="opt-body"><span class="opt-label">${esc(licenseTitle(row.edition))}</span>
+                      <span class="opt-meta">${row.golds.length ? `${row.golds.length} gold${row.golds.length === 1 ? "" : "s"} · ${esc(goldBuildNumber(row.golds.slice().sort(compareGolds)[0]))}` : "no gold baked now"}</span></span>
+                    ${row.golds.length ? kindPills(row.kinds) : `<span class="pill status off">No gold</span>`}
+                  </button>`).join("")}`).join("")}
+                  <button type="button" class="opt-footer" data-goto="golds"><img src="${iconSrc("gold-image.svg")}" alt=""> Bake another gold…</button>
+                </div>` : ""}
+              </div>`;
               })())}
               ${field(`<span class="field-label">Product key ${infoTip("Product key", "Installed over the gold's KMS client key on every VM built from this image, then activated online at first boot (slmgr /ipk, then /ato). A failed activation is logged in C:\\Windows\\Temp\\pvs-firstboot.log and does not hold the VM up. MAK, retail or a KMS host key - the key must match the image's edition.")}</span>`,
                 `<div class="edit-field">
@@ -7044,14 +7121,14 @@ function renderLicensesBlade() {
               </div>`)}
             </div>
             <div class="section-head" style="margin:14px 0 6px">Attach virtual machines</div>
-            <button type="button" class="btn field" data-open-wl-picker="${esc(w._id)}"${w.imageId ? "" : " disabled title=\"Pick the gold first\""}>
+            <button type="button" class="btn field" data-open-wl-picker="${esc(w._id)}"${w.edition ? "" : " disabled title=\"Pick the edition first\""}>
               <img src="${iconSrc("vm.svg")}"> Choose virtual machines…
             </button>
             ${vms.length ? `
             <div class="cl-grid attach" style="margin-top:10px">
               <div class="cl-grid-head"><div>Virtual machine</div><div>Gold</div><div></div><div></div></div>
               ${vms.map(s => {
-                const fits = normalizeImageId(s.imageId) === w.imageId;
+                const fits = licenseFits(w, s);
                 return `<div class="cl-row">${vmGridCell(s)}
                 <div>${fits ? `<span class="hint">${esc(findImage(s.imageId).label)}</span>` : `<span class="pill status warn" title="Builds from ${esc(findImage(s.imageId).label)} - this key is not used">Other gold</span>`}</div><div></div>
                 <div class="cl-detach"><button class="btn icon danger-text" type="button" title="Detach ${esc(serverDisplayName(s))}" aria-label="Detach ${esc(serverDisplayName(s))}" data-wl-detach="${esc(s._id)}">${trashIcon()}</button></div>
@@ -9193,6 +9270,17 @@ document.getElementById("main").addEventListener("click", e => {
     }, 30);
     return;
   }
+  const wlEdition = e.target.closest("[data-wl-edition]");
+  if (wlEdition) {
+    const w = (state.windowsLicenses || []).find(x => x._id === wlEdition.getAttribute("data-wl-edition"));
+    if (w) {
+      w.edition = wlEdition.getAttribute("data-edition");
+      serversForLicense(w).filter(s => !licenseFits(w, s)).forEach(detachLicense);
+    }
+    state.imagePickerOpen = null;
+    render();
+    return;
+  }
   const imagePickerToggle = e.target.closest("[data-image-picker-toggle]");
   if (imagePickerToggle) {
     e.preventDefault();
@@ -9269,6 +9357,8 @@ document.getElementById("main").addEventListener("click", e => {
       /* A language only when the image has golds in more than one - otherwise the VM
          follows whatever its image's newest gold speaks. */
       s.goldLanguage = imagePick.getAttribute("data-gold-lang") || "";
+      /* A release row keeps the VM on that release (26H2 beside 25H2); newest lets go. */
+      s.goldRelease = imagePick.getAttribute("data-gold-release") || "";
       /* A pinned row pins that gold (Build-Vms' -GoldId); a newest row lets go of a pin. */
       s.goldId = imagePick.getAttribute("data-gold-pin") || "";
       state.imagePickerOpen = null;
@@ -9881,11 +9971,6 @@ document.getElementById("main").addEventListener("input", e => {
   if (wlId) {
     const w = (state.windowsLicenses || []).find(x => x._id === wlId);
     const wk = e.target.getAttribute("data-wk");
-    if (w && wk === "imageId") {
-      w.imageId = e.target.value;
-      serversForLicense(w).filter(s => normalizeImageId(s.imageId) !== w.imageId).forEach(detachLicense);
-      render();
-    }
     if (w && wk === "productKey") {
       const v = e.target.value.toUpperCase();
       w.productKey = v;
@@ -10191,6 +10276,9 @@ document.getElementById("main").addEventListener("input", e => {
     liveValidateIp(e.target, ip => reservedAddressProblem(ip, base.address, base.prefixLength));
     return;
   }
+  // A checkbox the lines above do not name is the change handler's: its value is "on"
+  // whether ticked or not - a Hotpatch toggle saved "on" here and the build read it as off.
+  if (e.target.type === "checkbox") return;
   s[k] = e.target.value;
 });
 
@@ -10466,6 +10554,8 @@ document.getElementById("main").addEventListener("change", e => {
       else if (k === "prefixLength") s.prefixLength = Number(e.target.value) || 24;
       else if (k === "switchName" || k === "experience") s[k] = e.target.value;
       else if (e.target.tagName === "SELECT") s[k] = e.target.value;
+      // Any other toggle (Hotpatch ready, network queues): ticked or not, never its value.
+      else if (e.target.type === "checkbox") { s[k] = e.target.checked; scheduleRender(); }
     }
   }
   const isKey = e.target.getAttribute("data-is");
@@ -10857,7 +10947,7 @@ function openMemberPicker(mode, targetId) {
     const w = (state.windowsLicenses || []).find(x => x._id === targetId);
     if (!w) return;
     selected = serversForLicense(w).map(s => s.name);
-    title = "Windows licence · " + (w.imageId ? findImage(w.imageId).label : "no gold");
+    title = "Windows licence · " + (w.edition ? licenseTitle(w.edition) : "no edition");
   } else if (mode === "cluster") {
     const c = clusterSettings();
     selected = serversForCluster().map(s => s.name);
@@ -10933,8 +11023,8 @@ function memberPickerVeto(ctx, server) {
   }
   if (ctx.mode === "license") {
     const w = (state.windowsLicenses || []).find(x => x._id === ctx.targetId);
-    if (!w || !w.imageId) return "Pick the licence's gold first";
-    return normalizeImageId(server && server.imageId) === w.imageId ? "" : "Builds from " + (img.label || "another image") + " - not this licence's gold";
+    if (!w || !w.edition) return "Pick the licence's edition first";
+    return licenseFits(w, server) ? "" : "Builds from " + (img.label || "another image") + " - not this licence's edition";
   }
   if (ctx.mode !== "azureArc") return "";
   if (imageRefusesAzureArc(img)) return img.noAzureArcReason || ("Azure Arc has no agent for " + (img.label || "this distribution"));

@@ -1181,6 +1181,28 @@ pub(crate) async fn run_pass(
     }
 }
 
+/// A Windows Server image's name as the studio writes it, from its image id:
+/// ws2025-datacenter-desktop is "Windows Server 2025 Datacenter Desktop" (a gold's
+/// displayName is DISM's "Windows Server 2025 ServerDatacenter").
+pub fn server_label(image_id: &str) -> Option<String> {
+    let rest = image_id.strip_prefix("ws")?;
+    let (year, rest) = rest.split_once('-')?;
+    let (edition, kind) = rest.rsplit_once('-')?;
+    // Azure Edition after the experience: "Datacenter Core: Azure Edition".
+    let (edition, suffix) = match edition {
+        "datacenter" => ("Datacenter", ""),
+        "standard" => ("Standard", ""),
+        "datacenter-az" => ("Datacenter", ": Azure Edition"),
+        _ => return None,
+    };
+    let kind = match kind {
+        "core" => "Core",
+        "desktop" => "Desktop",
+        _ => return None,
+    };
+    Some(format!("Windows Server {year} {edition} {kind}{suffix}"))
+}
+
 /// The bake's passes as plans for run_pass, weighted in seconds as a Windows 11 bake took
 /// them on pve-01 (2026-10-06, 5d0fd95c): pass 1 is the image (100 s, DISM's percentage) and
 /// little else; audit mode waits for Windows' own boot (2 min, nothing to measure), then the
@@ -1852,6 +1874,14 @@ pub fn check_name(name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn server_labels() {
+        assert_eq!(server_label("ws2025-datacenter-desktop").as_deref(), Some("Windows Server 2025 Datacenter Desktop"));
+        assert_eq!(server_label("ws2025-datacenter-az-core").as_deref(), Some("Windows Server 2025 Datacenter Core: Azure Edition"));
+        assert_eq!(server_label("ws2022-standard-core").as_deref(), Some("Windows Server 2022 Standard Core"));
+        assert_eq!(server_label("w11-enterprise"), None);
+    }
 
     #[test]
     fn pass_plans_follow_the_scripts() {

@@ -121,7 +121,9 @@ pub fn language(g: &GoldRow) -> String {
 /// version - "rolling" - below every real one, leaving the bake date to decide.
 pub fn build_version(g: &GoldRow) -> Vec<u64> {
     let m = manifest_of(g);
-    let text = m["build"].as_str().or_else(|| m["distroVersion"].as_str()).unwrap_or("").trim().to_owned();
+    // Windows writes 10.0.26300.9457; without the 10.0 every build compares as it reads.
+    let raw = m["build"].as_str().or_else(|| m["distroVersion"].as_str()).unwrap_or("").trim();
+    let text = raw.strip_prefix("10.0.").filter(|r| r.contains('.')).unwrap_or(raw).to_owned();
     let parts: Option<Vec<u64>> = text.split('.').map(|p| p.parse().ok()).collect();
     match parts {
         Some(mut v) if !text.is_empty() => {
@@ -137,13 +139,29 @@ pub fn build_version(g: &GoldRow) -> Vec<u64> {
 /// The gold a designed VM builds from (Build-Vms' Select-GoldByInstruction): a pinned
 /// gold id first, then the design's language, then the newest - highest build, then the
 /// latest bake.
-pub fn resolve<'a>(golds: &'a [GoldRow], image: &str, lang: &str, pin: &str) -> Option<&'a GoldRow> {
+/// Windows client releases by base build: 26300 is 26H2. Server builds have no such name
+/// (26100 is Windows Server 2025 there), so only Windows 11 golds get one.
+pub const CLIENT_RELEASES: &[(u64, &str)] = &[(26300, "26H2"), (26200, "25H2"), (26100, "24H2"), (22631, "23H2"), (22621, "22H2"), (22000, "21H2")];
+
+/// A Windows 11 gold's release (25H2, 26H2), from its build.
+pub fn release(g: &GoldRow) -> Option<&'static str> {
+    if !g.image_id.starts_with("w11") {
+        return None;
+    }
+    let major = build_version(g).first().copied()?;
+    CLIENT_RELEASES.iter().find(|(b, _)| *b == major).map(|(_, r)| *r)
+}
+
+/// The gold a VM builds from: a pinned one, else the newest build of its image - in its
+/// language and its release (25H2, 26H2) when the design names them.
+pub fn resolve<'a>(golds: &'a [GoldRow], image: &str, lang: &str, pin: &str, rel: &str) -> Option<&'a GoldRow> {
     if !pin.is_empty() {
         return golds.iter().find(|g| g.status == "ready" && g.id == pin);
     }
     golds
         .iter()
         .filter(|g| g.status == "ready" && g.image_id == image && (lang.is_empty() || language(g).eq_ignore_ascii_case(lang)))
+        .filter(|g| rel.is_empty() || release(g).is_some_and(|r| r.eq_ignore_ascii_case(rel)))
         .max_by(|a, b| build_version(a).cmp(&build_version(b)).then_with(|| a.created_at.cmp(&b.created_at)))
 }
 
@@ -957,6 +975,26 @@ pub async fn remove(pve: &Pve, db: &SqlitePool, gold: &GoldRow, log: &JobLog) ->
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn release_picks() {
+        let g = |id: &str, build: &str| GoldRow {
+            id: id.into(), image_id: "w11-enterprise".into(), os: "windows".into(), name: id.into(), node: "pve-01".into(), vmid: None,
+            storage: "local-lvm".into(), status: "ready".into(), options: "{}".into(),
+            manifest: format!(r#"{{"build":"{build}"}}"#), job_id: None, created_at: "2026-10-07".into(),
+        };
+        let golds = vec![g("a25", "10.0.26200.9550"), g("b26", "10.0.26300.9457"), g("c25", "26200.9601")];
+        assert_eq!(release(&golds[0]), Some("25H2"));
+        assert_eq!(release(&golds[1]), Some("26H2"));
+        assert_eq!(resolve(&golds, "w11-enterprise", "", "", "").map(|g| g.id.as_str()), Some("b26"));
+        assert_eq!(resolve(&golds, "w11-enterprise", "", "", "25H2").map(|g| g.id.as_str()), Some("c25"));
+        assert!(resolve(&golds, "w11-enterprise", "", "", "24H2").is_none());
+        let mut server = g("s", "10.0.26100.33438");
+        server.image_id = "ws2025-datacenter-core".into();
+        assert_eq!(release(&server), None);
+    }
+
     use super::checksum_from_listing;
 
     #[test]

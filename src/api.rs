@@ -323,14 +323,14 @@ async fn delete_jobs(State(app): State<AppState>, user: User, Json(q): Json<JobI
 /// A job of this kind is running already with params[key] == value (two builds of the same
 /// thing would download into the same cache at the same time).
 async fn already_running(app: &AppState, kind: &str, key: &str, value: &str) -> ApiResult<()> {
-    let rows: Vec<(String, String)> = sqlx::query_as("SELECT title, params FROM jobs WHERE status = 'running' AND kind = ?")
+    let rows: Vec<(String, String)> = sqlx::query_as("SELECT title, params FROM jobs WHERE status IN ('queued', 'running') AND kind = ?")
         .bind(kind)
         .fetch_all(&app.db)
         .await?;
     for (title, params) in rows {
         let p: serde_json::Value = serde_json::from_str(&params).unwrap_or_default();
         if p[key].as_str().is_some_and(|v| v.eq_ignore_ascii_case(value)) {
-            return Err(ApiError::new(StatusCode::CONFLICT, format!("{title} is running already - wait for it, or abort it")));
+            return Err(ApiError::new(StatusCode::CONFLICT, format!("{title} is running or queued already - wait for it, or abort it")));
         }
     }
     Ok(())
@@ -718,7 +718,7 @@ async fn list_golds(State(app): State<AppState>, _user: User) -> ApiResult<impl 
         let state: serde_json::Value = serde_json::from_str(&full.state).unwrap_or_default();
         for s in state["servers"].as_array().into_iter().flatten() {
             let str_of = |k: &str| s[k].as_str().unwrap_or("");
-            if let Some(g) = golds::resolve(&rows, str_of("imageId"), str_of("goldLanguage"), str_of("goldId")) {
+            if let Some(g) = golds::resolve(&rows, str_of("imageId"), str_of("goldLanguage"), str_of("goldId"), str_of("goldRelease")) {
                 picked.entry(g.id.clone()).or_default().push(format!("{}: {}", full.name, str_of("name")));
             }
         }
@@ -1941,7 +1941,9 @@ pub async fn spawn_media_build(app: &AppState, by: &str, q: MediaBuild, extra: s
     params["run"] = json!(run);
     let job = app
         .jobs
-        .spawn("media", &title, by, params, move |log| async move {
+        // One ISO build at a time: each needs about three times its download (some 26 GB)
+        // on the work volume while it runs, and two side by side share one link and one disk.
+        .spawn_in_lane("media", "media", &title, by, params, move |log| async move {
             let pl = bake.resolve(&pve).await?;
             let req = media::Request { product: p, uuid: q.uuid, build: q.build, lang: q.lang, editions: q.editions, run };
             media::build(&pve, &db, &log, &web, &work, &pl, link, req).await.map(|_| ())
@@ -2184,8 +2186,14 @@ fn arc_for(s: &serde_json::Value, state: &serde_json::Value) -> Option<crate::gu
     })
 }
 
-/// The Windows licenses blade: the key of the licence the VM is attached to, when that
-/// licence's gold is the VM's image; "" otherwise (the gold's KMS client key stays).
+/// The edition a Windows image belongs to - its id without Core or Desktop:
+/// ws2025-datacenter-core → ws2025-datacenter, ws2025-datacenter-az-desktop → ws2025-datacenter-az.
+fn license_edition(image: &str) -> &str {
+    image.strip_suffix("-core").or_else(|| image.strip_suffix("-desktop")).unwrap_or(image)
+}
+
+/// The Windows licenses blade: the key of the licence the VM is attached to, when the VM's
+/// image is of that licence's edition; "" otherwise (the gold's KMS client key stays).
 fn license_for(s: &serde_json::Value, state: &serde_json::Value) -> String {
     let image = s["imageId"].as_str().unwrap_or("");
     let lid = s["windowsLicense"]["licenseId"].as_str().unwrap_or("");
@@ -2194,7 +2202,14 @@ fn license_for(s: &serde_json::Value, state: &serde_json::Value) -> String {
     }
     state["windowsLicenses"]
         .as_array()
-        .and_then(|l| l.iter().find(|x| x["id"].as_str() == Some(lid) && x["imageId"].as_str() == Some(image)))
+        .and_then(|l| {
+            l.iter().find(|x| {
+                // A key serves an edition - Core and Desktop alike; one image (imageId) before.
+                x["id"].as_str() == Some(lid)
+                    && (x["imageId"].as_str() == Some(image)
+                        || x["edition"].as_str().is_some_and(|e| !e.is_empty() && license_edition(image) == e))
+            })
+        })
         .and_then(|x| x["productKey"].as_str())
         .map(|k| k.trim().to_uppercase())
         .filter(|k| crate::windows::product_key_ok(k))
@@ -2213,7 +2228,10 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
     let own = s["hwOverride"].as_bool() == Some(true);
     let pick = |k: &str, d: &str| if own { s[k].as_str().filter(|v| !v.is_empty()).unwrap_or(d).to_owned() } else { d.to_owned() };
     let cpu_type = pick("cpuType", &hw.cpu);
-    let hotpatch = s["hotpatchReady"].as_bool() == Some(true) && str_of("imageId").starts_with("ws2025-");
+    // A toggle the card saved as "on" (its checkbox value, before 2026-10-07) is on, as the
+    // card showed it.
+    let on = |v: &serde_json::Value| v.as_bool().or_else(|| v.as_str().map(|x| x == "on" || x == "true"));
+    let hotpatch = on(&s["hotpatchReady"]) == Some(true) && str_of("imageId").starts_with("ws2025-");
     VmSpec {
         name: str_of("name").to_lowercase(),
         card: str_of("_id"),
@@ -2276,7 +2294,7 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
         security_flags: hw.security_flags != "off",
         numa: pick("numa", &hw.numa),
         ksm: hw.ksm,
-        queues: if own { s["netQueues"].as_bool().unwrap_or(hw.queues != "off") } else { hw.queues != "off" },
+        queues: if own { on(&s["netQueues"]).unwrap_or(hw.queues != "off") } else { hw.queues != "off" },
         protection: hw.protection,
         startup_delay: s["automaticStartDelay"].as_u64().unwrap_or(0) as u32,
         vtpm: s["enableVtpm"].as_bool().unwrap_or(false),
@@ -2375,8 +2393,9 @@ async fn deploy_lab(State(app): State<AppState>, user: User, Path(id): Path<Stri
         let image = s["imageId"].as_str().unwrap_or("");
         let lang = s["goldLanguage"].as_str().unwrap_or("");
         let pin = s["goldId"].as_str().unwrap_or("");
-        let Some(gold) = golds::resolve(&golds, image, lang, pin) else {
-            let what = if !pin.is_empty() { format!("pinned gold {pin}") } else if lang.is_empty() { image.to_owned() } else { format!("{image} ({lang})") };
+        let rel = s["goldRelease"].as_str().unwrap_or("");
+        let Some(gold) = golds::resolve(&golds, image, lang, pin, rel) else {
+            let what = if !pin.is_empty() { format!("pinned gold {pin}") } else { [image, rel, lang].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" ") };
             problems.push(format!("{name}: no ready gold for {what} - bake one under Golds"));
             continue;
         };

@@ -303,9 +303,9 @@ step_vlan() {
 
 step_size() {
     menu_one "Size" 1 \
-        "Small|1 core, 1 GiB, 32 GiB work volume - Linux golds only" \
-        "Standard|2 cores, 2 GiB, 64 GiB work volume - Windows golds and media" \
-        "Large|4 cores, 4 GiB, 128 GiB work volume - several Windows media builds" || return 1
+        "Small|1 core, 1 GiB, 32 GiB work volume" \
+        "Standard|2 cores, 2 GiB, 64 GiB work volume  ${C_OK}recommended${C_RESET}" \
+        "Large|4 cores, 4 GiB, 128 GiB work volume" || return 1
     # The studio itself fits in 8 GiB; what bakes and media builds need while they run goes
     # on the work volume - thin, out of backups, emptied by the studio between jobs.
     case $PICK in

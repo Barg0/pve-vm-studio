@@ -60,12 +60,22 @@ pub async fn upstream(web: &reqwest::Client) -> Upstream {
     static CACHE: tokio::sync::Mutex<Option<(std::time::Instant, Upstream)>> = tokio::sync::Mutex::const_new(None);
     let mut c = CACHE.lock().await;
     if let Some((at, u)) = c.as_ref() {
-        if at.elapsed() < std::time::Duration::from_secs(3600) && !u.releases.is_empty() {
+        // A complete answer holds an hour; one with a lookup missing is asked again after a
+        // minute - a slow fedorapeople once left "stable" unknown, and Windows not ready,
+        // for the whole hour.
+        let complete = !u.releases.is_empty() && u.stable.is_some() && u.latest.is_some();
+        if at.elapsed() < std::time::Duration::from_secs(if complete { 3600 } else { 60 }) {
             return u.clone();
         }
     }
     let (releases, stable, latest) = tokio::join!(releases(web), resolve("stable"), resolve("latest"));
-    let u = Upstream { releases: releases.unwrap_or_default(), stable: stable.ok(), latest: latest.ok() };
+    // A lookup that fails keeps what the last one found.
+    let last = c.as_ref().map(|(_, u)| u.clone()).unwrap_or_default();
+    let u = Upstream {
+        releases: releases.ok().filter(|r| !r.is_empty()).unwrap_or(last.releases),
+        stable: stable.ok().or(last.stable),
+        latest: latest.ok().or(last.latest),
+    };
     *c = Some((std::time::Instant::now(), u.clone()));
     u
 }
@@ -104,7 +114,7 @@ async fn resolve_any(wanted: &str) -> Result<String> {
         return Ok(wanted.to_owned());
     }
     let url = format!("{BASE}/{wanted}-virtio/virtio-win.iso");
-    let no_redirect = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).build()?;
+    let no_redirect = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(std::time::Duration::from_secs(20)).build()?;
     let resp = no_redirect.head(&url).send().await?;
     let loc = resp
         .headers()

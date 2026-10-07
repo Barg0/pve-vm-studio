@@ -269,7 +269,7 @@ async fn designs_using(app: &AppState, gold: &crate::golds::GoldRow) -> Vec<Row>
         let state: serde_json::Value = serde_json::from_str(&full.state).unwrap_or_default();
         for s in state["servers"].as_array().into_iter().flatten() {
             let str_of = |k: &str| s[k].as_str().unwrap_or("");
-            if crate::golds::resolve(&golds, str_of("imageId"), str_of("goldLanguage"), str_of("goldId")).is_none_or(|g| g.id != gold.id) {
+            if crate::golds::resolve(&golds, str_of("imageId"), str_of("goldLanguage"), str_of("goldId"), str_of("goldRelease")).is_none_or(|g| g.id != gold.id) {
                 continue;
             }
             let name = str_of("name").to_lowercase();
@@ -335,7 +335,12 @@ pub async fn job_ended(app: AppState, id: String) {
             let gold = params["gold"].as_str().unwrap_or_default();
             let g = crate::golds::get(&app.db, gold).await.ok().flatten();
             let m: serde_json::Value = g.as_ref().map(|g| serde_json::from_str(&g.manifest).unwrap_or_default()).unwrap_or_default();
-            let display = m["displayName"].as_str().or_else(|| m["name"].as_str()).unwrap_or(&row.title).to_owned();
+            let mut display = g.as_ref().and_then(|g| crate::windows::server_label(&g.image_id))
+                .unwrap_or_else(|| m["displayName"].as_str().or_else(|| m["name"].as_str()).unwrap_or(&row.title).to_owned());
+            // "Windows 11 Enterprise 26H2": the release, where Windows 11 has one.
+            if let Some(r) = g.as_ref().and_then(crate::golds::release).filter(|r| !display.contains(r)) {
+                display = format!("{display} {r}");
+            }
             let (gold_glyph, vm_glyph) = machine_glyphs(&m);
             let mut r = Report::new(
                 format!("{}: {display}", if ok { "Gold baked" } else { "Bake failed" }),
@@ -413,7 +418,11 @@ pub async fn job_ended(app: AppState, id: String) {
                 &if ok { "PROVISIONED".to_owned() } else { failed_at.map_or("FAILED".to_owned(), |f| format!("Failed at {f}")) },
                 if ok { Tone::Success } else { Tone::Danger },
             );
-            let image = gm["displayName"].as_str().or_else(|| gm["name"].as_str()).unwrap_or("").to_owned();
+            let mut image = g.as_ref().and_then(|g| crate::windows::server_label(&g.image_id))
+                .unwrap_or_else(|| gm["displayName"].as_str().or_else(|| gm["name"].as_str()).unwrap_or("").to_owned());
+            if let Some(r) = g.as_ref().and_then(crate::golds::release).filter(|r| !image.is_empty() && !image.contains(r)) {
+                image = format!("{image} {r}");
+            }
             r.subtitle = [image, if gold_name.is_empty() { String::new() } else { format!("from gold {gold_name}") }].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
             r.pills = vec![("Started by".into(), row.created_by.clone())];
             if let Some(v) = &v {

@@ -346,7 +346,11 @@ async fn deploy_inner(
     } else {
         Some(catalog::linux(&gold.image_id).ok_or_else(|| anyhow!("{} is not a known gold image", gold.image_id))?)
     };
-    let image_name = img.map(|i| i.name.to_owned()).unwrap_or_else(|| manifest["name"].as_str().unwrap_or("Windows").to_owned());
+    // Windows golds name themselves in displayName ("Windows 11 Enterprise"); "Windows" alone
+    // was the fallback the notes showed.
+    let image_name = img.map(|i| i.name.to_owned())
+        .or_else(|| windows::server_label(&gold.image_id))
+        .unwrap_or_else(|| manifest["displayName"].as_str().or_else(|| manifest["name"].as_str()).unwrap_or("Windows").to_owned());
     // The gold's own size (its sidecar), else the catalog's: a clone never shrinks.
     let gold_disk_gb = manifest["diskSizeGB"].as_u64().map(|g| g as u32).or(img.map(|i| i.disk_gb)).unwrap_or(64);
     let template = gold.vmid.ok_or_else(|| anyhow!("gold {} has no template", gold.name))? as u32;
@@ -433,8 +437,7 @@ async fn deploy_inner(
         }
     }
     crate::tags::paint(pve, &[os_tag]).await;
-    // No user and no address: the notes are readable by anyone who sees the VM.
-    let notes = format!("## {}\n\nBuilt by PVE VM Studio from gold `{}` ({}).\n", spec.name, gold.name, image_name);
+    let notes = vm_notes(&spec, &gold, &image_name);
     // CPU type from the bake settings, so a gold baked under older defaults follows them too.
     // Balloon deleted, not 0: the device stays (PVE sees the guest's real memory use) with
     // its target at full memory, so nothing is ever taken back - static memory.
@@ -790,7 +793,7 @@ async fn deploy_inner(
         }
         if guest_provision_result(pve, db, log, vm_id, &node, vmid).await? {
             pr.stage(90.0, 93.0, "restarting");
-            log.run("Restarting - a role asked for it").await;
+            log.run(format!("Restarting - {} asked for it", restart_reason(&spec))).await;
             pve.run_task(
                 &format!("/nodes/{}/qemu/{vmid}/status/shutdown", crate::pve::enc(&node)),
                 form![("timeout", "300"), ("forceStop", "1")],
@@ -1058,6 +1061,38 @@ async fn guest_provision_result(pve: &Pve, db: &SqlitePool, log: &JobLog, vm_id:
         }
     }
     Ok(st["restartNeeded"].as_bool() == Some(true))
+}
+
+/// Who asks for the restart after GuestProvision: roles and features, Hotpatch (VBS is only
+/// switched on by a boot), or both.
+fn restart_reason(spec: &VmSpec) -> &'static str {
+    let roles = !spec.windows_features.is_empty() || !spec.rsat.is_empty() || spec.app_compat || !spec.client_features.is_empty();
+    match (roles, spec.hotpatch) {
+        (true, true) => "the roles and Hotpatch (VBS)",
+        (false, true) => "Hotpatch (VBS)",
+        _ => "a role",
+    }
+}
+
+/// The VM's notes in PVE: its birth certificate - only what cannot change afterwards: the
+/// image it started as, the gold it was cloned from, its domain. A release (in-place upgrade),
+/// a build (every update), roles, applications, hardware, network, pool: all of them change,
+/// and PVE shows what is live in its own summary. No user, no address, no secret: anyone who
+/// sees the VM can read the notes.
+fn vm_notes(spec: &VmSpec, gold: &crate::golds::GoldRow, image: &str) -> String {
+    let baked = gold.created_at.get(..10).unwrap_or(&gold.created_at);
+    let mut rows: Vec<(&str, String)> = vec![("Image", image.to_owned()), ("Gold", format!("`{}` · baked {baked}", gold.name))];
+    if let Some(d) = &spec.domain_join {
+        rows.push(("Domain", d.domain.clone()));
+    }
+    let table: String = rows.iter().map(|(k, v)| format!("| {k} | {} |\n", v.replace('|', "\\|"))).collect();
+    format!(
+        "## {}\n\nBuilt by PVE VM Studio {} ({}) · {}\n\n| | |\n|---|---|\n{table}\nAs built - what can change since is in Proxmox VE's own summary.\n",
+        spec.name,
+        env!("CARGO_PKG_VERSION"),
+        env!("STUDIO_COMMIT"),
+        chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
+    )
 }
 
 /// Hotpatch ready: after the restart, VBS must run (Win32_DeviceGuard status 2) - what

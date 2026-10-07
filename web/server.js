@@ -862,7 +862,9 @@ function goldTiles(golds, catalog) {
     const current = list.find(g => g.status === "ready") || null;
     const head = current || list.slice().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
     const m = goldManifest(head);
-    const name = m.displayName || (head.os === "windows" ? (m.name || findImage(head.image_id).label) : (catalog.linux.find(i => i.id === head.image_id)?.name || m.name || head.image_id));
+    const img = findImage(head.image_id);
+    const name = head.os === "windows" && img.id === head.image_id ? img.label
+      : m.displayName || (head.os === "windows" ? (m.name || img.label) : (catalog.linux.find(i => i.id === head.image_id)?.name || m.name || head.image_id));
     return { key, list, current, head, name, os: head.os,
       newer: current ? list.filter(g => g.status !== "ready" && g.created_at > current.created_at) : [],
       older: current ? list.filter(g => g !== current && !(g.status !== "ready" && g.created_at > current.created_at)) : list.filter(g => g !== head) };
@@ -1002,12 +1004,15 @@ function goldRowHtml(t) {
   const after = t.newer.filter(x => x.status === "baking" || x.status === "failed")[0];
   const oldOpen = isNestedOpen("gold-old-" + t.key, false);
   const known = img && img.id === g.image_id;
-  const full = m.editionUpgrade ? (m.displayName || t.name) : known ? img.label : t.name;
+  // The studio's own name, "Windows Server 2025 Datacenter Core" - not DISM's "ServerDatacenterCore".
+  const full = known ? img.label : m.editionUpgrade ? (m.displayName || t.name) : t.name;
   const win = g.os === "windows";
   const exp = win ? (m.installationType === "Server Core" ? "Server Core" : m.installationType === "Server" ? "Desktop Experience" : "") : (m.name || "").replace(/^[^(]*\(?|\)$/g, "");
-  const title = win && exp ? full.replace(/\s+(Desktop|Core)$/, "") : full;
-  const sub = [m.editionUpgrade ? "virtual edition from " + (m.sourceEdition || "") : exp].filter(Boolean).join(" · ");
-  const build = goldBuildLabel(g);
+  // "Windows 11 Enterprise 26H2": the release beside the name, the build big on the right.
+  const rel = goldRelease(g);
+  const title = full + (rel && !full.includes(rel) ? " " + rel : "");
+  const sub = [m.editionUpgrade ? "virtual edition from " + (m.sourceEdition || "") : /\s(Desktop|Core)(:|$)/.test(full) ? "" : exp].filter(Boolean).join(" · ");
+  const build = goldBuildNumber(g);
   const facts = win
     ? [["Language", goldLang(g) || m.imageLanguage], ["Disk", m.diskSizeGB ? m.diskSizeGB + " GB" : ""]]
     : [["Language", (m.region || {}).language], ["Kernel", m.kernel ? m.kernel.replace(/-generic$/, "") : ""], ["Updates", (m.updatesApplied ?? m.updates) ? "applied" : ""]];
@@ -1361,6 +1366,13 @@ function winPolicies(info) {
   return info.features.filter(f => !f.scope || f.scope === kind || (f.scope === "desktop" && img.installation_type !== "Server Core"));
 }
 
+/* An ISO index (or a virtual edition) by the studio's name - "Windows Server 2025 Datacenter
+   Core" - not DISM's "Windows Server 2025 ServerDatacenterCore". */
+function wiEditionName(imageId, fallback) {
+  const img = findImage(imageId);
+  return img && img.id === imageId ? img.label : fallback;
+}
+
 let winDiskStorage = "", winDiskStorages = [];
 async function fillWinBake(catalog, stale) {
   const body = $id("winBakeBody");
@@ -1409,12 +1421,12 @@ async function fillWinBake(catalog, stale) {
   $id("wiImages").innerHTML = `<div class="table-wrap"><table class="data">
       <thead><tr><th></th><th>Edition</th><th>Type</th><th>Build</th><th>Language</th><th>Size</th><th>Gold id</th></tr></thead>
       <tbody>${info.images.map(i => `<tr class="clickable ${i.index === winForm.index && !winForm.edition ? "selected" : ""}" data-wi="${i.index}" data-wi-edition="">
-        <td class="mono">${i.index}</td><td>${esc(i.name)}</td>
+        <td class="mono">${i.index}</td><td>${esc(wiEditionName(i.image_id, i.name))}</td>
         <td><span class="pill role ${i.installation_type === "Server Core" ? "core" : i.installation_type === "Client" ? "client" : "desktop"}">${esc(i.installation_type === "Server Core" ? "Core" : i.installation_type === "Client" ? "Client" : "Desktop")}</span></td>
         <td class="mono">${esc(String(i.version || i.build).replace(/^10\.0\./, ""))}</td><td class="mono">${esc(i.language)}</td><td class="mono">${i.size_gb} GiB</td><td class="mono">${esc(i.image_id)}</td></tr>${(i.virtual || []).map(v => `
         <tr class="clickable wi-virtual ${i.index === winForm.index && winForm.edition === v.key ? "selected" : ""}" data-wi="${i.index}" data-wi-edition="${esc(v.key)}"
           title="Applied from index ${i.index}, changed to the virtual edition after sysprep (DISM /Set-Edition)">
-          <td></td><td><span class="wi-arrow">↳</span> ${esc(v.label)}</td>
+          <td></td><td><span class="wi-arrow">↳</span> ${esc(wiEditionName(v.image_id, v.label))}</td>
           <td><span class="wi-types"><span class="pill role ${i.installation_type === "Server Core" ? "core" : i.installation_type === "Client" ? "client" : "desktop"}">${esc(i.installation_type === "Server Core" ? "Core" : i.installation_type === "Client" ? "Client" : "Desktop")}</span><span class="pill role virtual">Virtual</span></span></td><td class="mono">${esc(String(i.version || i.build).replace(/^10\.0\./, ""))}</td><td class="mono">${esc(i.language)}</td><td class="mono">${i.size_gb} GiB</td>
           <td class="mono">${esc(v.image_id)}</td></tr>`).join("")}`).join("")}</tbody></table></div>
     <div class="field-group">Disk</div>
