@@ -1186,6 +1186,12 @@
   .btn.bell img { width: 18px; height: 18px; }
   .bell-count { position: absolute; top: 2px; right: 1px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box;
     border-radius: var(--radius-lg); background: var(--danger); color: var(--danger-fg); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
+  /* The badge's colour is the worst new event's (server.js bellLoad). */
+  .bell-count.ok { background: var(--success); color: var(--bg); }
+  .bell-count.warn { background: var(--warn); color: var(--bg); }
+  .bell-count.accent { background: var(--accent); color: var(--accent-fg); }
+  .notify-history { max-height: 520px; padding: 0; }
+  .bell-f { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 6px 14px; border-top: 1px solid var(--divider); font-size: 12px; color: var(--fg-muted); }
   .bell-pop { position: absolute; top: calc(100% + 8px); right: 0; z-index: 120; width: 400px; max-width: 94vw;
     background: var(--bg-elevated); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); }
   .bell-pop[hidden] { display: none; }

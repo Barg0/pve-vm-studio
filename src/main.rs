@@ -185,6 +185,9 @@ async fn main() -> Result<()> {
         config: Arc::new(config),
     };
 
+    // ISO builds at a time, as Image settings has it.
+    let worker: media::WorkerSettings = settings::load(&state.db, "worker").await.unwrap_or_default();
+    state.jobs.set_lane_limit("media", worker.parallel as usize);
     tokio::spawn(pve_nodes_loop(state.clone()));
     tokio::spawn(reconcile_after_restart(state.clone()));
     tokio::spawn(warm_caches(state.clone()));

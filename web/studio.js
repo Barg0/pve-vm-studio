@@ -1586,13 +1586,22 @@ const APP_COMPAT_FOD_ITEM = {
   info: "Adds ServerCore.AppCompatibility to this Core VM — mmc.exe, Event Viewer, Performance Monitor, Resource Monitor, Device Manager, Disk Management, Failover Cluster Manager, File Explorer and PowerShell ISE. Installed with Add-WindowsCapability, offline from the Windows Server Languages and Optional Features ISO or online in the guest at first boot."
 };
 
+/* Capability names that changed: a design saved with the old one asks for the new one. */
+const RSAT_RENAMED = { "Rsat.PrintAndDocumentServices.Tools~~~~0.0.1.0": "Print.Management.Console~~~~0.0.1.0" };
+function migrateRsat(list) {
+  return [...new Set((Array.isArray(list) ? list : []).map(id => RSAT_RENAMED[id] || id))];
+}
+
 /** Client RSAT capabilities (Add-WindowsCapability). */
 const RSAT_CATALOG = [
   { id: "Rsat.ActiveDirectory.DS-LDS.Tools~~~~0.0.1.0", label: "AD DS and AD LDS Tools", icon: "identity.svg", paw: true, info: "Adds Windows capability Rsat.ActiveDirectory.DS-LDS.Tools — ADUC, AD PowerShell module, and related admin tools." },
   { id: "Rsat.CertificateServices.Tools~~~~0.0.1.0", label: "AD Certificate Services Tools", icon: "certificate.svg", paw: true, info: "Adds Rsat.CertificateServices.Tools — certutil UI / CA management snap-ins." },
   { id: "Rsat.GroupPolicy.Management.Tools~~~~0.0.1.0", label: "Group Policy Management Tools", icon: "gpo.svg", paw: true, info: "Adds Rsat.GroupPolicy.Management.Tools — GPMC on the client." },
   { id: "Rsat.FileServices.Tools~~~~0.0.1.0", label: "File Services Tools", icon: "files.svg", info: "Adds Rsat.FileServices.Tools — DFS Management and related file-service consoles." },
-  { id: "Rsat.PrintAndDocumentServices.Tools~~~~0.0.1.0", label: "Print Services Tools", icon: "print.svg", info: "Adds Rsat.PrintAndDocumentServices.Tools — Print Management." },
+  /* Windows 11 24H2 and later have no Rsat.PrintAndDocumentServices.Tools - DISM answers
+     "capability name not recognized" (error 87). Print Management is its own capability
+     there, inbox on Pro and Enterprise. */
+  { id: "Print.Management.Console~~~~0.0.1.0", label: "Print Management", icon: "print.svg", info: "Adds Print.Management.Console — the Print Management console (printmanagement.msc). Already in Windows 11 Pro and Enterprise unless removed." },
   { id: "Rsat.FailoverCluster.Management.Tools~~~~0.0.1.0", label: "Failover Clustering Tools", icon: "virtual-clusters.svg", info: "Adds Rsat.FailoverCluster.Management.Tools — Failover Cluster Manager." },
   { id: "Rsat.DHCP.Tools~~~~0.0.1.0", label: "DHCP Server Tools", icon: "dhcp.svg", paw: true, info: "Adds Rsat.DHCP.Tools — DHCP console and PowerShell." },
   { id: "Rsat.Dns.Tools~~~~0.0.1.0", label: "DNS Server Tools", icon: "dns.svg", paw: true, info: "Adds Rsat.Dns.Tools — DNS Manager and DNS PowerShell." },
@@ -4306,7 +4315,7 @@ function applyConfigDocument(parsed, opts) {
     // The toggle itself is studio-only — a config that carries paths arrives with it on.
     s.customPaths = !!(s.vmPath.trim() || s.vhdPath.trim());
     if (!String(s.localUserName || "").trim()) s.localUserName = generateLocalUsername(state.usernameTheme);
-    s.rsatCapabilities = Array.isArray(s.rsatCapabilities) ? s.rsatCapabilities : [];
+    s.rsatCapabilities = migrateRsat(s.rsatCapabilities);
     s.clientFeatures = Array.isArray(s.clientFeatures) ? s.clientFeatures : [];
     s.integrationServices = Object.assign(defaultIntegrationServices(), s.integrationServices || {});
     normalizeServerNicsAndPower(s);
@@ -4398,7 +4407,7 @@ function decodeState(text) {
     n.builtInAdminOnly = !!n.builtInAdminOnly;
     n.appCompatFod = !!n.appCompatFod;
     if (!String(n.localUserName || "").trim()) n.localUserName = generateLocalUsername(state.usernameTheme);
-    n.rsatCapabilities = Array.isArray(n.rsatCapabilities) ? n.rsatCapabilities : [];
+    n.rsatCapabilities = migrateRsat(n.rsatCapabilities);
     n.clientFeatures = Array.isArray(n.clientFeatures) ? n.clientFeatures : [];
     n.integrationServices = Object.assign(defaultIntegrationServices(), n.integrationServices || {});
     normalizeServerNicsAndPower(n);
@@ -7684,12 +7693,6 @@ function validate() {
   const d = state.defaults || {};
   const switches = (d.availableSwitches || []).filter(Boolean);
 
-  /* Path syntax, everywhere a host path can be typed. Blank is never flagged here -
-     each field documents what blank means for it. */
-  const lintPath = (value, label, where, field) => {
-    const problem = hostPathProblem(value);
-    if (problem) err(`${label}: ${problem}`, where, field);
-  };
 
   /* --- Host paths and global defaults --- */
   if (!switches.length) {
@@ -7706,83 +7709,11 @@ function validate() {
     } else if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i.test(fixed)) {
       err(`Fixed FQDN "${fixed}" is not a DNS name — labels are letters, digits and hyphens, separated by dots.`, "VM settings › Naming", "d:namingFqdn");
     } else if (fixed.indexOf(".") === -1) {
-      warn(`Fixed FQDN "${fixed}" is a single label — Hyper-V names and folders get "${fixed}" appended with no dotted suffix.`, "VM settings › Naming");
+      warn(`Fixed FQDN "${fixed}" is a single label — a DNS domain has at least one dot (corp.example).`, "VM settings › Naming");
     }
   }
-  if (storagePlacementActive()) {
-    const spWhere = "Failover Cluster › Storage placement";
-    const spRows = storagePlacement().volumes;
-    if (!spRows.length) {
-      err("Automatic storage placement is on but there are no volumes — add one or turn it off.", spWhere, "d:spVol0");
-    }
-    /* Judged per field, per row: every volume carries its own VM path and its own VHD
-       path, so filling one box never clears another one's border. */
-    const spSeen = new Map();
-    spRows.forEach((v, i) => {
-      const vm = String(v.vmPath || "").trim();
-      const vhd = String(v.vhdPath || "").trim();
-      if (!vm) {
-        err(`Placement volume ${i + 1} has no VM path — every volume needs its own.`, spWhere, `d:spVol${i}`);
-      }
-      if (!vhd) {
-        err(`Placement volume ${i + 1} has no VHD path — every volume needs its own.`, spWhere, `d:spVolVhd${i}`);
-      }
-      if (vm) {
-        const key = vm.toLowerCase().replace(/[\\/]+$/, "");
-        if (spSeen.has(key)) {
-          err(`Placement volumes ${spSeen.get(key) + 1} and ${i + 1} point at the same VM path — placement cannot spread across one location twice.`, spWhere, `d:spVol${i}`);
-        } else {
-          spSeen.set(key, i);
-        }
-      }
-    });
-    if (spRows.length === 1) {
-      warn("Automatic storage placement has only one volume — placement has nothing to choose between.", spWhere);
-    }
-    if (!(state.defaults.cluster && state.defaults.cluster.enabled)) {
-      warn("Automatic storage placement is on but the failover cluster toggle is off — the volume catalog is hidden until the cluster blade is enabled, yet it still applies to the build.", spWhere);
-    }
-  }
-
-  /* --- Failover cluster (host side) --- */
-  const cluster = d.cluster || {};
-  const clusterMembers = serversForCluster();
-  if (cluster.enabled) {
-    // Blank name is valid — Build-Vms.ps1 then calls Add-ClusterVirtualMachineRole without -Cluster,
-    // which targets the cluster the host itself belongs to. A bad name is not.
-    const nameIssue = clusterNameProblem(cluster.name);
-    if (nameIssue) {
-      err(nameIssue, "Failover Cluster › Host cluster", "d:clusterName");
-    }
-    if (!clusterMembers.length) {
-      warn("Cluster is on but no VM is attached — nothing is added to the cluster.", "Failover Cluster › Clustered virtual machines");
-    }
-    clusterMembers.forEach(s => {
-      const label = serverDisplayName(s);
-      if (String(s.vmPath || "").trim() || String(s.vhdPath || "").trim()) {
-        warn(`${label} is clustered but overrides the VM/VHD path — that path has to be cluster-accessible (CSV) on every node.`, `Failover Cluster › ${label}`);
-      }
-      if (s.useDifferencingDisk) {
-        warn(`${label} is clustered and uses a differencing disk — the gold parent VHDX must sit on cluster storage too, or the VM cannot fail over.`, `Failover Cluster › ${label}`);
-      }
-    });
-    // A VM sharing a VHD Set with a clustered peer but left out of the cluster fails over into nothing.
-    state.vhdSets.forEach(v => {
-      const members = (v.attachTo || [])
-        .map(n => state.servers.find(s => String(s.name || "").toLowerCase() === String(n).toLowerCase()))
-        .filter(Boolean);
-      const inCluster = members.filter(s => s.cluster && s.cluster.enabled);
-      if (inCluster.length && inCluster.length !== members.length) {
-        const missing = members.filter(s => !(s.cluster && s.cluster.enabled)).map(serverDisplayName).join(", ");
-        warn(`VHD Set '${v.name || "unnamed"}' is shared by clustered and non-clustered VMs — ${missing} stays standalone.`, "Failover Cluster › Clustered virtual machines");
-      }
-    });
-  } else {
-    const stale = serversMarkedForCluster();
-    if (stale.length) {
-      warn(`${stale.length} VM(s) are still marked as clustered while the cluster toggle is off — the selection is ignored on export.`, "Failover Cluster › Host cluster");
-    }
-  }
+  /* Hyper-V's host failover cluster, storage placement, VHD Sets and custom VM/VHD paths
+     have no counterpart on Proxmox VE (HA and storage are PVE's own) - nothing to check. */
 
   /* --- Guest clustering (the Failover-Clustering feature inside the VMs) --- */
   const guestNodes = state.servers.filter(s => (s.windowsFeatures || []).indexOf("Failover-Clustering") !== -1);
@@ -7861,31 +7792,22 @@ function validate() {
       if (!String(p.servicePrincipalAppId || "").trim()) err(`Arc principal ${label} uses a service principal but has no application ID.`, "Azure Arc", `arc:${p._id}:servicePrincipalAppId`);
       if (!String(p.servicePrincipalSecret || "").trim()) err(`Arc principal ${label} uses a service principal but has no secret.`, "Azure Arc", `arc:${p._id}:servicePrincipalSecret`);
     }
-    /* Host context means "sign in with the host's own Az PowerShell session and call
-       Connect-AzConnectedMachine over PowerShell Direct" — a Windows mechanism with no
-       Linux counterpart. Build-Vms.ps1 warns and skips such a VM rather than onboarding
-       it half way, so say it here where it can still be changed. */
-    if (p.authMode === "hostContext") {
-      const linux = serversForArcPrincipal(p.id || p._id).filter(isLinuxServer);
-      if (linux.length) {
-        warn(`Arc principal ${label} uses host context, which only works for Windows — ${linux.map(s => s.name).join(", ")} will be skipped. Switch it to a service principal to onboard them.`, "Azure Arc");
-      }
-    }
     /* Attached, and never going to arrive. Microsoft ships no Connected Machine agent
        for these distributions - the installer refuses them by name - so the tick is
        the one thing here that looks like it worked and did not. */
     const unsupported = serversForArcPrincipal(p.id || p._id)
       .filter(x => imageRefusesAzureArc(findImage(x.imageId)));
     if (unsupported.length) {
-      warn(`Arc principal ${label} is attached to ${unsupported.map(x => x.name).join(", ")}, which Azure Arc does not support — those VMs are exported without an Arc block and will not onboard.`, "Azure Arc");
+      warn(`Arc principal ${label} is attached to ${unsupported.map(x => x.name).join(", ")}, which Azure Arc does not support — those VMs build without Arc and will not onboard.`, "Azure Arc");
     }
   });
 
   /* --- Virtual machines --- */
-  /* PVE VM Studio: two things that worked differently on Hyper-V. */
+  /* Host context signed in on the host and onboarded over PowerShell Direct - there is no
+     such channel into a Proxmox VE guest. */
   (state.azureArcPrincipals || []).forEach(p => {
     if (p.authMode === "hostContext") {
-      warn(`Arc principal ${p.id || ""} uses host context — that was PowerShell Direct from the Hyper-V host. On Proxmox VE only service principals onboard; VMs attached to it skip Arc.`, "Azure Arc");
+      warn(`Arc principal ${p.id || ""} uses host context, which needs a channel from the host into the guest that Proxmox VE does not have — switch it to a service principal; VMs attached to it skip Arc until then.`, "Azure Arc");
     }
   });
   if (state.servers.some(s => !isLinuxServer(s) && effectiveDomainJoinAccount(s))) {
@@ -7909,7 +7831,7 @@ function validate() {
       if (!/^[a-z0-9][a-z0-9-]*$/.test(name) || name.endsWith("-")) {
         err(`VM name "${name}" contains characters Windows will not accept — use letters, digits and hyphens.`, `Virtual machines › ${label}`, `s:${s._id}:name`);
       }
-      if (nameSeen.has(name)) err(`Duplicate VM name "${name}" — VM and disk file names would collide.`, `Virtual machines › ${label}`, `s:${s._id}:name`);
+      if (nameSeen.has(name)) err(`Duplicate VM name "${name}" — two VMs would get the same computer name.`, `Virtual machines › ${label}`, `s:${s._id}:name`);
       const clash = typeof vmNameClash === "function" ? vmNameClash(s) : null;
       if (clash) err(`Name "${name}" is already in use — ${clash.what} ${clash.vmid} on ${clash.node} has it. Pick another computer name.`, `Virtual machines › ${label}`, `s:${s._id}:name`);
       nameSeen.set(name, true);
@@ -7964,8 +7886,8 @@ function validate() {
       warn(`${label} joins a domain but has no DNS server — domain join needs a DNS server that resolves the domain.`, `Virtual machines › ${label}`);
     }
 
-    /* Extra network adapters. Names have to be unique inside the VM — Hyper-V rejects a
-       second adapter with a name that is already taken. */
+    /* Extra network adapters. Names have to be unique inside the VM — GuestProvision names
+       the adapters, and Windows refuses a second adapter with a name already taken. */
     const nicNames = new Map([[effectiveNicName(s, 0).toLowerCase(), "the primary adapter"]]);
     (s.nics || []).forEach((nic, i) => {
       const nicLabel = effectiveNicName(s, i + 1);
@@ -8024,36 +7946,30 @@ function validate() {
       }
     }
 
+    // .NET 3.5 comes from the gold's own source ISO (sources\sxs) - nothing to set.
     const features = (s.windowsFeatures || []).filter(Boolean);
-    if (features.indexOf("NET-Framework-Core") !== -1 && !String(d.sxsSourcePath || "").trim()) {
-      warn(`${label} installs .NET Framework 3.5 but no SxS source path is set — the payload is not in the image.`, "VM settings › Paths");
-    }
     if (features.length && img.kind === "client") {
       warn(`${label} is a client image — server roles and features are ignored.`, `Virtual machines › ${label}`);
     }
     if (features.length && img.noServerRoles) {
-      info(`${label} runs ${img.label}, which has a fixed role set — the selected roles and features are not exported.`, `Virtual machines › ${label}`);
+      info(`${label} runs ${img.label}, which has a fixed role set — the selected roles and features are not installed.`, `Virtual machines › ${label}`);
     }
-    if (s.appCompatFod) {
-      info(`${label} installs the Server Core App Compatibility FOD — Build-Vms.ps1 asks for the Windows Server Languages and Optional Features ISO, or the guest installs it online at first boot.`, `Virtual machines › ${label}`);
-    }
-    if ((s.rsatCapabilities || []).length) {
-      // Same standing as the App Compat FOD note above it: the ISO saves the download,
-      // its absence costs time at first boot and nothing else.
-      info(`${label} installs ${(s.rsatCapabilities || []).length} RSAT capability(ies) — Build-Vms.ps1 asks for the Windows 11 Languages and Optional Features ISO. Without it each one is a separate Windows Update download at first boot.`, `Virtual machines › ${label}`);
-    }
-    if ((s.clientFeatures || []).length) {
-      // Deliberately not the FOD note above: this payload is in the image, so there is no
-      // ISO to ask for and nothing to download - the only cost is a longer first boot
-      // while the staged feature finishes installing.
-      info(`${label} enables ${(s.clientFeatures || []).length} Windows feature(s) offline from the image itself — no Features on Demand ISO needed.`, `Virtual machines › ${label}`);
+    /* Capabilities (RSAT, the App Compat FOD) come from the Features on Demand ISO under
+       Media; without one for this Windows they come from Windows Update at first boot,
+       which needs the VM online. Windows features are in the image - nothing to say. */
+    const caps = (img.kind === "client" ? (s.rsatCapabilities || []).length : 0) + (s.appCompatFod ? 1 : 0);
+    if (caps && typeof dashFod !== "undefined" && dashFod && dashFod.settings) {
+      const slot = img.kind === "client" ? ["client", "Windows 11"] : /^ws2022/.test(String(s.imageId || "")) ? ["server2022", "Windows Server 2022"] : ["server", "Windows Server 2025"];
+      if (!dashFod.settings[slot[0]]) {
+        warn(`${label} installs ${caps} capability(ies) from Windows Update at first boot — there is no Features on Demand ISO for ${slot[1]} under Media, so the VM needs internet access then.`, `Virtual machines › ${label}`);
+      }
     }
     if (isAdDomainController(s)) {
       info(`${label} installs AD DS binaries only — promote it in the guest afterwards with Install-ADDSForest.`, `Virtual machines › ${label}`);
     }
-    // Guest clustering, not the host cluster — a guest cluster node with no shared disk.
-    if (features.indexOf("Failover-Clustering") !== -1 && !(s.vhdSetIds || []).length && !state.vhdSets.some(v => (v.attachTo || []).some(n => String(n).toLowerCase() === name))) {
-      info(`${label} installs Failover Clustering but has no shared storage — add a VHD Set if the guest cluster needs one.`, `Virtual machines › ${label}`);
+    // A guest cluster node: Proxmox VE has no shared VHD Set, so shared storage is the guests' own.
+    if (features.indexOf("Failover-Clustering") !== -1) {
+      info(`${label} installs Failover Clustering — Proxmox VE has no shared virtual disk for guests, so a guest cluster's shared storage comes from inside the guests (iSCSI, Storage Spaces Direct).`, `Virtual machines › ${label}`);
     }
 
     (s.additionalDisks || []).forEach((disk, i) => {
@@ -8072,10 +7988,6 @@ function validate() {
       }
     });
 
-    /* Per-VM paths and renamed disk files */
-    if (serverUsesCustomPaths(s) && !String(s.vmPath || "").trim() && !String(s.vhdPath || "").trim()) {
-      info(`${label} has custom paths switched on but both fields are empty — it falls back to the VM settings paths.`, `Virtual machines › ${label}`);
-    }
     if (s.imageSource === "custom") {
       err(`${label} uses a custom Hyper-V image — Proxmox VE builds from golds only. Pick a gold on its card.`, `Virtual machines › ${label}`);
     } else if (goldsLoaded() && !goldFor(s)) {
@@ -8090,66 +8002,14 @@ function validate() {
       if (m.generalized === false) warn(`${label} builds from ${g.name}, which is not generalized — every VM from it shares its SID and identity.`, `Virtual machines › ${label}`);
       if (m.requiresTpm && !s.enableVtpm) info(`${label}: ${g.name} needs a TPM — the VM gets its own vTPM at deploy.`, `Virtual machines › ${label}`);
     }
-    lintPath(s.vmPath, `${label} VM path`, `Virtual machines › ${label}`, `s:${s._id}:vmPath`);
-    lintPath(s.vhdPath, `${label} VHD path`, `Virtual machines › ${label}`, `s:${s._id}:vhdPath`);
-    [s.vmPath, s.vhdPath].forEach((p, idx) => {
-      const raw = String(p || "").trim();
-      if (serverUsesCustomPaths(s) && raw && /\.vhdx?$/i.test(raw)) {
-        err(`${label} ${idx ? "VHD" : "VM"} path points at a file — it has to be a folder.`, `Virtual machines › ${label}`, `s:${s._id}:${idx ? "vhdPath" : "vmPath"}`);
-      }
-    });
-    const diskFiles = new Map();
-    const osFile = effectiveOsDiskFileName(s).toLowerCase();
-    diskFiles.set(osFile, "OS disk");
-    (s.additionalDisks || []).forEach((disk, i) => {
-      const f = effectiveDataDiskFileName(s, disk, i).toLowerCase();
-      if (diskFiles.has(f)) {
-        err(`${label} would write two disks to the same file "${f}" (${diskFiles.get(f)} and data disk ${dataDiskTag(s, i, disk)}).`, `Virtual machines › ${label}`);
-      }
-      diskFiles.set(f, `data disk ${dataDiskTag(s, i, disk)}`);
-    });
   });
 
-  /* --- VHD Sets --- */
-  const vhdSetFiles = new Map();
-  (state.vhdSets || []).forEach((v, idx) => {
-    const attach = (v.attachTo || []).map(n => String(n).toLowerCase()).filter(Boolean);
-    const label = effectiveVhdSetFileName(v, vhdSetAutoFileName(v, idx));
-    const fileKey = label.toLowerCase();
-    if (vhdSetFiles.has(fileKey) && !String(v.path || "").trim()) {
-      err(`Two VHD Sets would be written to the same file "${label}".`, "VHD Sets", `vs:${v._id}:name`);
-    }
-    vhdSetFiles.set(fileKey, true);
-    lintPath(v.path, `VHD Set ${label} custom path`, "VHD Sets", `vs:${v._id}:path`);
-    if (!attach.length) {
-      warn(`VHD Set ${label} is not attached to any VM — it will not be built.`, "VHD Sets");
-    } else if (attach.length < 2) {
-      warn(`VHD Set ${label} is attached to a single VM — a VHD Set is meant for shared storage.`, "VHD Sets");
-    }
-    attach.forEach(n => {
-      if (!nameSeen.has(n)) err(`VHD Set ${label} is attached to "${n}", which is not a defined VM.`, "VHD Sets", `vs:${v._id}:attachTo`);
-    });
-    if (!(Number(v.sizeGB) > 0)) err(`VHD Set ${label} has no size.`, "VHD Sets", `vs:${v._id}:sizeGB`);
-  });
 
   return issues;
 }
 
 /* ---------------------------[ Review rendering ]--------------------------- */
 
-function reviewGeneralRows() {
-  const d = state.defaults;
-  const nm = namingDefaults();
-  return kvGrid(
-    kvRow("Node", d.pveNode || "Auto — the gold's node") +
-    kvRow("Storage for full copies", d.pveStorage || "Auto — the gold's storage") +
-    kvRow("Bridges and VNets", (d.availableSwitches || []).filter(Boolean).join(", ") || "none in the cluster") +
-    kvRow("Username theme", (USERNAME_THEMES[state.usernameTheme] || {}).label || state.usernameTheme) +
-    kvRow("Password length", passwordLength() + " characters") +
-    kvRow("VM name includes FQDN", yesNo(nm.vmNameIncludeFqdn)) +
-    kvRow("Fixed FQDN", namingFqdnOverride() || "Off — each VM uses its own Domain Join domain")
-  );
-}
 
 function reviewClusterRows() {
   const c = state.defaults.cluster || {};
@@ -8181,8 +8041,8 @@ function reviewClusterRows() {
 }
 
 /* Review and validate lives on the Deploy blade now (server.js): the preflight card is
-   every finding, the summary cards the design at a glance. Both read the design only - the
-   cluster side (golds, names, storages) is checked by Deploy itself. */
+   every finding. It reads the design only - the cluster side (golds, names, storages) is
+   checked by Deploy itself. */
 function reviewIssueListHtml(issues) {
   return issues.length
     ? `<div class="issue-list">${issues.map(i => `
@@ -8200,55 +8060,6 @@ function reviewPreflightCard() {
   return gsCard("rev-issues", "search.svg", "Preflight", meta, reviewIssueListHtml(issues), "", errors > 0);
 }
 
-function reviewSummaryCards() {
-  const cfg = buildConfig();
-  return `
-    ${gsCard("rev-files", "storage.svg", "Placement", "Where each VM goes on the cluster", `
-      <div class="table-wrap"><table class="data"><thead><tr><th>VM</th><th>Image</th><th>Disk</th><th>Node</th><th>Storage</th></tr></thead><tbody>
-      ${state.servers.map(s => `<tr><td><b>${esc(s.name || "(no name)")}</b></td><td>${esc(findImage(s.imageId).label)}</td>
-        <td>${s.useDifferencingDisk === true ? "Linked clone" : "Full copy"}</td>
-        <td class="mono">${esc(s.pveNode || state.defaults.pveNode || "the gold's")}</td>
-        <td class="mono">${esc(s.useDifferencingDisk === true ? "the gold's" : (s.pveStorage || state.defaults.pveStorage || "the gold's"))}</td></tr>`).join("")}
-      </tbody></table></div>
-    `, "", false)}
-
-    ${gsCard("rev-general", "settings.svg", "VM settings", "Placement, naming, accounts", reviewGeneralRows(), "", false)}
-
-    ${gsCard("rev-networks", "vnet.svg", "Networks", `${state.networks.length} defined`,
-      state.networks.length
-        ? state.networks.map(n => kvGrid(
-            kvRow("Network", `${networkName(n)} · ${networkCidr(n)}`) +
-            kvRow("Bridge", n.switchName) +
-            kvRow("VLAN", (n.vlanId === "" || n.vlanId == null) ? "Untagged" : String(n.vlanId)) +
-            kvRow("Gateway", n.gateway) +
-            kvRow("DNS servers", (n.dnsServers || []).filter(x => String(x || "").trim()).join(", ")) +
-            kvRow("Attached VMs", serversForNetwork(n.id).map(serverDisplayName).join(", "))
-          )).join("")
-        : `<p class="hint">No networks defined — VMs carry their own IP settings.</p>`, "", false)}
-
-    ${gsCard("rev-identity", "identity.svg", "Domain Join", `${state.domainJoinAccounts.length} account(s)`,
-      state.domainJoinAccounts.length
-        ? state.domainJoinAccounts.map(a => kvGrid(
-            kvRow("Domain", a.domain) +
-            kvRow("Join user", a.joinUser) +
-            kvRow("Password", a.joinPassword ? "Set" : "") +
-            kvRow("Used by", (domainJoinAllVmsAccount() ? "Every VM in this config" : serversForDomainJoinAccount(a.id).map(serverDisplayName).join(", ")))
-          )).join("")
-        : `<p class="hint">No Domain Join accounts — every VM stays in a workgroup.</p>`, "", false)}
-
-    ${gsCard("rev-arc", "arc.svg", "Azure Arc", `${state.azureArcPrincipals.length} principal(s)`,
-      state.azureArcPrincipals.length
-        ? state.azureArcPrincipals.map(p => kvGrid(
-            kvRow("Subscription", p.subscriptionId) +
-            kvRow("Tenant", p.tenantId) +
-            kvRow("Resource group", p.resourceGroup) +
-            kvRow("Region", azureRegionLabel(p.location)) +
-            kvRow("Authentication", p.authMode === "hostContext" ? "Host context (az login on the host)" : "Service principal") +
-            (p.authMode === "hostContext" ? "" : kvRow("Application ID", p.servicePrincipalAppId) + kvRow("Secret", p.servicePrincipalSecret ? "Set" : "")) +
-            kvRow("Used by", (azureArcAllVmsPrincipal() ? "Every VM in this config" : serversForArcPrincipal(p.id).map(serverDisplayName).join(", ")))
-          )).join("")
-        : `<p class="hint">No Arc principals — nothing gets onboarded to Azure Arc.</p>`, "", false)}`;
-}
 
 /* ---------------------------[ Blade: Passwords ]---------------------------
    Only the local account passwords this studio generates itself. Domain Join and Arc

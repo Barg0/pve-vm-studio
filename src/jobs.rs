@@ -193,9 +193,22 @@ pub struct Jobs {
     on_end: Arc<std::sync::OnceLock<EndHook>>,
     /// The jobs the last stop cut off: (id, title).
     pub interrupted: Arc<Vec<(String, String)>>,
-    /// One job at a time per lane (the ISO builds share the work volume): the lane's lock and
-    /// the title of the job holding it.
-    lanes: Arc<std::sync::Mutex<HashMap<String, (Arc<Mutex<()>>, String)>>>,
+    /// A set number of jobs at a time per lane (the ISO builds share the work volume).
+    lanes: Arc<std::sync::Mutex<HashMap<String, Lane>>>,
+}
+
+/// A lane: its slots (tokio's semaphore - first come, first served), how many there are,
+/// and the titles of the jobs holding one.
+struct Lane {
+    slots: Arc<tokio::sync::Semaphore>,
+    limit: usize,
+    holders: Vec<(String, String)>,
+}
+
+impl Lane {
+    fn new() -> Self {
+        Self { slots: Arc::new(tokio::sync::Semaphore::new(1)), limit: 1, holders: Vec::new() }
+    }
 }
 
 impl Jobs {
@@ -243,8 +256,28 @@ impl Jobs {
         self.spawn_in(None, kind, title, created_by, params, body).await
     }
 
-    /// Like spawn, but one job of `lane` runs at a time: a later one is queued and starts
-    /// when the one before it ends, in the order they were asked for.
+    /// How many jobs of `lane` may run at a time (1 when never set). Fewer than now: the
+    /// running ones finish, the queue waits until the number is under the new limit.
+    pub fn set_lane_limit(&self, lane: &str, limit: usize) {
+        let limit = limit.max(1);
+        let mut lanes = self.lanes.lock().unwrap();
+        let l = lanes.entry(lane.to_owned()).or_insert_with(Lane::new);
+        if limit > l.limit {
+            l.slots.add_permits(limit - l.limit);
+        } else if limit < l.limit {
+            // Slots taken back as they come free.
+            let (slots, n) = (l.slots.clone(), (l.limit - limit) as u32);
+            tokio::spawn(async move {
+                if let Ok(p) = slots.acquire_many_owned(n).await {
+                    p.forget();
+                }
+            });
+        }
+        l.limit = limit;
+    }
+
+    /// Like spawn, but only the lane's limit of jobs runs at a time: a later one is queued
+    /// and starts when a slot comes free, in the order they were asked for.
     pub async fn spawn_in_lane<F, Fut>(
         &self,
         lane: &str,
@@ -275,17 +308,17 @@ impl Jobs {
         Fut: std::future::Future<Output = Result<()>> + Send + 'static,
     {
         let id = uuid::Uuid::new_v4().to_string();
-        // The lane's lock, taken right here when it is free - so two asked for at once
-        // cannot both find it free - or waited for in the job's task.
+        // A slot of the lane, taken right here when one is free - so two asked for at once
+        // cannot both find the last one free - or waited for in the job's task.
         let lane = lane.map(|l| {
             let mut lanes = self.lanes.lock().unwrap();
-            let (lock, holder) = lanes.entry(l.to_owned()).or_insert_with(|| (Arc::new(Mutex::new(())), String::new()));
-            match lock.clone().try_lock_owned() {
+            let lane = lanes.entry(l.to_owned()).or_insert_with(Lane::new);
+            match lane.slots.clone().try_acquire_owned() {
                 Ok(g) => {
-                    *holder = title.to_owned();
-                    (l.to_owned(), lock.clone(), Some(g), String::new())
+                    lane.holders.push((id.clone(), title.to_owned()));
+                    (l.to_owned(), lane.slots.clone(), Some(g), Vec::new())
                 }
-                Err(_) => (l.to_owned(), lock.clone(), None, holder.clone()),
+                Err(_) => (l.to_owned(), lane.slots.clone(), None, lane.holders.iter().map(|h| h.1.clone()).collect()),
             }
         });
         let queued = lane.as_ref().is_some_and(|l| l.2.is_none());
@@ -326,21 +359,28 @@ impl Jobs {
             // job ends.
             let mut _lane_guard = None;
             let mut cancelled = None;
-            if let Some((name, lock, guard, before)) = lane {
+            let lane_name = lane.as_ref().map(|l| l.0.clone());
+            if let Some((name, slots, guard, before)) = lane {
                 match guard {
                     Some(g) => _lane_guard = Some(g),
                     None => {
-                        log.tag(Tag::Info, format!("Queued - starts when {} has finished", if before.is_empty() { "the job before it" } else { before.as_str() })).await;
-                        log.progress("Queued", None, if before.is_empty() { String::new() } else { format!("after {before}") });
-                        // One wait for the lock the whole time - tokio's lock is first come,
-                        // first served - with a look at Cancel every two seconds beside it.
-                        let wait = lock.lock_owned();
+                        let before = match before.as_slice() {
+                            [] => "the job before it".to_owned(),
+                            [one] => one.clone(),
+                            many => format!("one of {} has", many.join(", ")),
+                        };
+                        let before = if before.starts_with("one of ") { before } else { format!("{before} has") };
+                        log.tag(Tag::Info, format!("Queued - starts when {before} finished")).await;
+                        log.progress("Queued", None, String::new());
+                        // One wait for a slot the whole time - first come, first served - with
+                        // a look at Cancel every two seconds beside it.
+                        let wait = slots.acquire_owned();
                         tokio::pin!(wait);
                         let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
                         loop {
                             tokio::select! {
                                 g = &mut wait => {
-                                    _lane_guard = Some(g);
+                                    _lane_guard = g.ok();
                                     break;
                                 }
                                 _ = tick.tick() => {
@@ -353,7 +393,7 @@ impl Jobs {
                         }
                         if cancelled.is_none() {
                             if let Some(l) = this.lanes.lock().unwrap().get_mut(&name) {
-                                l.1 = job_title.clone();
+                                l.holders.push((job_id.clone(), job_title.clone()));
                             }
                             let _ = sqlx::query("UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?").bind(now()).bind(&job_id).execute(&this.db).await;
                             log.progress_done();
@@ -389,6 +429,12 @@ impl Jobs {
                 let _ = live.tx.send(Event::Status { status: status.into(), error });
             }
             this.running.write().await.remove(&job_id);
+            if let Some(name) = &lane_name
+                && let Some(l) = this.lanes.lock().unwrap().get_mut(name)
+            {
+                l.holders.retain(|h| h.0 != job_id);
+            }
+            drop(_lane_guard);
             if let Some(hook) = this.on_end.get() {
                 hook(job_id);
             }

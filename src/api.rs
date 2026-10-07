@@ -1048,6 +1048,12 @@ async fn get_worker(State(app): State<AppState>, _user: User) -> ApiResult<impl 
     let mut v = serde_json::to_value(&s).unwrap_or_default();
     v["debug_tools"] = json!(app.config.debug_tools);
     v["downloads_bytes"] = json!(crate::dir_size(&app.config.data_dir.join("work").join("uup-files")).await);
+    // The work volume, for "how many ISO builds fit".
+    if let Some((total, free)) = media::volume(&app.config.data_dir.join("work")) {
+        v["work_total"] = json!(total);
+        v["work_free"] = json!(free);
+        v["build_room"] = json!(media::BUILD_ROOM);
+    }
     Ok(Json(v))
 }
 
@@ -1077,7 +1083,11 @@ async fn put_worker(State(app): State<AppState>, user: User, Json(mut s): Json<m
     if !(2048..=262_144).contains(&s.memory_mb) || !(1..=64).contains(&s.cores) {
         return Err(ApiError::bad_request("memory is 2048-262144 MiB, cores 1-64"));
     }
+    if !(1..=4).contains(&s.parallel) {
+        return Err(ApiError::bad_request("ISO builds at a time: 1-4"));
+    }
     settings::save(&app.db, "worker", &s).await?;
+    app.jobs.set_lane_limit("media", s.parallel as usize);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1941,8 +1951,8 @@ pub async fn spawn_media_build(app: &AppState, by: &str, q: MediaBuild, extra: s
     params["run"] = json!(run);
     let job = app
         .jobs
-        // One ISO build at a time: each needs about three times its download (some 26 GB)
-        // on the work volume while it runs, and two side by side share one link and one disk.
+        // ISO builds as many at a time as Image settings allows (1 by default): each needs
+        // about three times its download (some 26 GB) on the work volume while it runs.
         .spawn_in_lane("media", "media", &title, by, params, move |log| async move {
             let pl = bake.resolve(&pve).await?;
             let req = media::Request { product: p, uuid: q.uuid, build: q.build, lang: q.lang, editions: q.editions, run };
@@ -2316,7 +2326,21 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
         nic_name: str_of("nicName"),
         windows_features: s["windowsFeatures"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default(),
         include_management_tools: s["includeManagementTools"].as_bool().unwrap_or(true),
-        rsat: s["rsatCapabilities"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default(),
+        // Rsat.PrintAndDocumentServices.Tools is gone since Windows 11 24H2 - Print Management
+        // is Print.Management.Console there; a design saved before asks for the new name.
+        rsat: s["rsatCapabilities"]
+            .as_array()
+            .map(|a| {
+                let mut v: Vec<String> = Vec::new();
+                for x in a.iter().filter_map(|x| x.as_str()) {
+                    let x = if x == "Rsat.PrintAndDocumentServices.Tools~~~~0.0.1.0" { "Print.Management.Console~~~~0.0.1.0" } else { x };
+                    if !v.iter().any(|y| y == x) {
+                        v.push(x.to_owned());
+                    }
+                }
+                v
+            })
+            .unwrap_or_default(),
         app_compat: s["appCompatFod"].as_bool().unwrap_or(false),
         client_features: s["clientFeatures"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()).unwrap_or_default(),
         // The design: removeBuiltInApps on, removeApps the picked subset or null for all of them.

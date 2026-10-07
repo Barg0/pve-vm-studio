@@ -170,8 +170,10 @@ fn options(g: &GoldRow) -> Option<WinBakeOptions> {
 }
 
 /// What makes two golds the same kind - one replaces the other: image, language, disk.
-fn kind(g: &GoldRow) -> (String, String, u32) {
-    (g.image_id.clone(), golds::language(g).to_lowercase(), options(g).map(|o| o.disk_gb()).unwrap_or(0))
+/// Golds of one kind replace each other: image, release (a 25H2 gold is its own branch
+/// beside 26H2), language and disk size.
+fn kind(g: &GoldRow) -> (String, &'static str, String, u32) {
+    (g.image_id.clone(), golds::release(g).unwrap_or(""), golds::language(g).to_lowercase(), options(g).map(|o| o.disk_gb()).unwrap_or(0))
 }
 
 fn newer_gold(a: &GoldRow, b: &GoldRow) -> bool {
@@ -228,7 +230,7 @@ pub fn eligibility(g: &GoldRow, isos: &[MediaIso]) -> Result<(&'static uup::Prod
 pub async fn tracks(app: &AppState) -> Result<Vec<(MediaIso, Vec<GoldRow>)>> {
     let isos = api::live_media_isos(app).await;
     let all: Vec<GoldRow> = golds::list(&app.db).await?.into_iter().filter(|g| g.status == "ready" && g.os == "windows").collect();
-    let mut newest: HashMap<(String, String, u32), GoldRow> = HashMap::new();
+    let mut newest: HashMap<(String, &'static str, String, u32), GoldRow> = HashMap::new();
     for g in &all {
         let k = kind(g);
         if newest.get(&k).is_none_or(|n| newer_gold(g, n)) {

@@ -243,8 +243,10 @@ $id("saveState").addEventListener("click", async () => {
   await openLab(lab.id, true); render();
 });
 /* The bell: what happened lately - every event the studio can mail about, mail or not.
-   Unread is per browser: the newest id seen when the panel was last opened. */
-const bell = { items: [], open: false, seen: (() => { try { return Number(localStorage.getItem("pvs.bellSeen")) || 0; } catch { return 0; } })() };
+   Unread is per browser: the newest id seen when the panel was last opened. Clear all is
+   per browser too - the newest id at that moment; the history stays in Studio settings. */
+const bellStored = key => { try { return Number(localStorage.getItem(key)) || 0; } catch { return 0; } };
+const bell = { items: [], open: false, seen: bellStored("pvs.bellSeen"), cleared: bellStored("pvs.bellCleared") };
 const BELL_TONE = { success: "ok", danger: "bad", warn: "warn", accent: "run", neutral: "idle" };
 function ago(iso) {
   const s = Math.max(0, Math.round((Date.now() - new Date(iso)) / 1000));
@@ -252,10 +254,14 @@ function ago(iso) {
     : new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 async function bellLoad() {
-  try { bell.items = await api("GET", "/notifications?limit=25"); } catch { return; }
-  const unread = bell.items.filter(n => n.id > bell.seen).length;
+  try { bell.items = (await api("GET", "/notifications?limit=25")).filter(n => n.id > bell.cleared); } catch { return; }
+  const fresh = bell.items.filter(n => n.id > bell.seen), unread = fresh.length;
   const c = $id("bellCount");
   c.hidden = !unread; c.textContent = unread > 9 ? "9+" : String(unread);
+  // The badge takes the worst new event's colour: a failure red, a warning amber, all good
+  // green - new is not alarming by itself.
+  const tone = fresh.some(n => n.tone === "danger") ? "bad" : fresh.some(n => n.tone === "warn") ? "warn" : fresh.every(n => n.tone === "success") ? "ok" : "accent";
+  c.className = "bell-count " + tone;
   $id("bellBtn").title = unread ? `${unread} new notification${unread === 1 ? "" : "s"}` : "Notifications";
   if (bell.open) bellPaint();
 }
@@ -265,16 +271,23 @@ function bellBand(icon) {
   const def = ICON_TEMPLATES[bellIcon(icon) + ".svg"];
   return (def && ["host", "work", "ident", "deploy", "linux", "studio"].includes(def[0])) ? def[0] : "ident";
 }
-function bellPaint() {
-  const pop = $id("bellPop");
-  const seenBefore = bell.paintedSeen ?? bell.seen;
-  pop.innerHTML = `<div class="bell-h"><b>Notifications</b><button class="btn sm" type="button" data-goto-studio title="Which events notify - Studio settings"><img src="${iconSrc("certificate.svg")}" alt=""> Notifications</button></div>
-    ${bell.items.length ? `<div class="bell-list">${bell.items.map(n => `<button class="bell-row${n.id > seenBefore ? " new" : ""}" type="button" data-bell-link="${esc(n.link)}" data-bell-job="${esc(n.job || "")}" title="${n.job ? "Open its log" : "Open"}">
+/* One notification: the bell's row, and the history's in Studio settings. */
+function bellRow(n, isNew) {
+  return `<button class="bell-row${isNew ? " new" : ""}" type="button" data-bell-link="${esc(n.link)}" data-bell-job="${esc(n.job || "")}" title="${n.job ? "Open its log" : "Open"}">
       <span class="bell-ico" style="--tile:var(--band-${bellBand(n.icon)})"><img src="${iconSrc(bellIcon(n.icon) + ".svg")}" alt=""></span>
       <span class="bell-txt"><span class="bell-t">${esc(n.title)}</span>${n.subtitle ? `<span class="bell-s">${esc(n.subtitle)}</span>` : ""}</span>
       <span class="bell-r"><span class="pill status ${BELL_TONE[n.tone] || "idle"}">${esc(cap(String(n.status).toLowerCase()))}</span><span class="bell-at" title="${esc(new Date(n.at).toLocaleString())}">${esc(ago(n.at))}</span></span>
-    </button>`).join("")}</div>`
-    : `<div class="bell-empty">Nothing yet. Bakes, builds, updates and alerts show up here.</div>`}`;
+    </button>`;
+}
+function bellPaint() {
+  const pop = $id("bellPop");
+  const seenBefore = bell.paintedSeen ?? bell.seen;
+  const fresh = bell.items.filter(n => n.id > seenBefore).length;
+  pop.innerHTML = `<div class="bell-h"><b>Notifications</b><button class="btn icon sm" type="button" data-goto-studio title="Which events notify - Studio settings" aria-label="Notification settings"><img src="${iconSrc("settings.svg")}" alt=""></button></div>
+    ${bell.items.length ? `<div class="bell-list">${bell.items.map(n => bellRow(n, n.id > seenBefore)).join("")}</div>`
+    : `<div class="bell-empty">${bell.cleared ? "All clear. The full history stays under Studio settings → Notifications → History." : "Nothing yet. Bakes, builds, updates and alerts show up here."}</div>`}
+    ${bell.items.length ? `<div class="bell-f"><span>${bell.items.length} notification${bell.items.length === 1 ? "" : "s"}${fresh ? ` · ${fresh} new` : ""}</span>
+      <button class="btn sm" type="button" data-bell-clear><img src="${iconSrcDanger("trash.svg")}" alt=""> Clear all</button></div>` : ""}`;
 }
 function bellToggle(open) {
   bell.open = open ?? !bell.open;
@@ -293,6 +306,13 @@ $id("bellBtn").addEventListener("click", e => { e.stopPropagation(); bellToggle(
 $id("bellPop").addEventListener("click", e => {
   e.stopPropagation();
   if (e.target.closest("[data-goto-studio]")) { bellToggle(false); state.expanded["gs-notify"] = true; state.blade = "studio"; render(); return; }
+  if (e.target.closest("[data-bell-clear]")) {
+    bell.cleared = bell.items.reduce((m, n) => Math.max(m, n.id), bell.cleared);
+    try { localStorage.setItem("pvs.bellCleared", String(bell.cleared)); } catch { /* this browser keeps nothing */ }
+    bell.items = [];
+    bellPaint();
+    return;
+  }
   const row = e.target.closest("[data-bell-link]");
   if (!row) return;
   bellToggle(false);
@@ -853,7 +873,8 @@ function openBake(os) { goldsUi.bake = true; goldsUi.os = os; state.blade = "gol
 /* One tile per kind - image, language and disk size, Build-Vms' "of their kind": two golds
    that differ in any of those are both wanted. The newest ready gold heads the tile (highest
    build, then latest bake), what is baking or failed after it shows below, older ones fold. */
-function goldKind(g) { return g.image_id + "|" + goldLang(g) + "|" + (goldManifest(g).diskSizeGB || ""); }
+// The release too: a 25H2 gold is its own branch beside 26H2, not an older 26H2.
+function goldKind(g) { return g.image_id + "|" + goldRelease(g) + "|" + goldLang(g) + "|" + (goldManifest(g).diskSizeGB || ""); }
 function goldTiles(golds, catalog) {
   const groups = new Map();
   golds.forEach(g => { const k = goldKind(g); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(g); });
@@ -1144,7 +1165,7 @@ function cleanupPanel(golds) {
   return `<div class="card bake-panel">
     <div class="bake-head"><div class="card-title"><img src="${iconSrcDanger("trash.svg")}" alt=""> Clean up golds</div>
       <button class="btn icon close-x" type="button" id="cleanupClose" title="Close" aria-label="Close">${chipRemoveIcon()}</button></div>
-    <p class="hint bake-lead">Pre-ticked: older golds of the same kind (image, language, disk size) and the rows failed bakes left. Golds with linked clones are locked - a linked clone needs its gold; full copies do not.</p>
+    <p class="hint bake-lead">Pre-ticked: older golds of the same kind (image, release, language, disk size) and the rows failed bakes left. Golds with linked clones are locked - a linked clone needs its gold; full copies do not.</p>
     <div class="table-wrap"><table class="data"><thead><tr><th></th><th>Gold</th><th>Image</th><th>Language · build · disk · age</th><th>Kind</th><th>Picked by</th><th></th></tr></thead><tbody>
     ${inv.map(e => `<tr class="${e.locked ? "muted-row" : ""}"><td>${toggle(`data-cleanup="${esc(e.g.id)}" aria-label="Remove ${esc(goldShortId(e.g))}"`, "", pick.has(e.g.id) && !e.locked, !!e.locked, "", "bare")}</td>
       <td class="mono">${esc(goldShortId(e.g))}</td><td>${esc(findImage(e.g.image_id).label)}</td><td class="muted">${esc(goldMetaLine(e.g))}</td>
@@ -1516,9 +1537,12 @@ function saveSoon() {
 const dpEd = { id: null, all: false, newPool: false, q: "", hi: 0, tagOpen: false, layer: null, plan: null };
 
 async function bladeDeploy(main, stale) {
-  const [vms, golds, tc] = await Promise.all([api("GET", "/vms"), api("GET", "/golds"), tagColours ? null : api("GET", "/tags").catch(() => null)]);
+  const [vms, golds, tc, fod] = await Promise.all([api("GET", "/vms"), api("GET", "/golds"), tagColours ? null : api("GET", "/tags").catch(() => null),
+    api("GET", "/settings/fod").catch(() => null)]);
   if (stale()) return;
   cluster.golds = golds; cluster.vms = vms;
+  // Preflight: which Windows has a Features on Demand ISO.
+  if (fod) dashFod = fod;
   if (tc) tagColours = tc.colours || {};
   refreshValidation();
   const errors = reviewErrorCount();
@@ -1532,7 +1556,7 @@ async function bladeDeploy(main, stale) {
   const toBuild = planned.filter(p => !p.built || p.built.status === "failed");
   const preflight = reviewPreflightCard();
   dpEd.plan = { planned, toBuild, errors };
-  const goAll = `<button class="btn" type="button" id="dpGo" ${toBuild.length && !errors ? "" : "disabled"} title="${errors ? "Fix the preflight errors first" : toBuild.length ? `Builds the ${toBuild.length} VM(s) not on the cluster yet` : state.servers.length ? "Every designed VM exists" : "Design a VM first"}"><img src="${iconSrc("deploy.svg")}" alt=""> Deploy all${toBuild.length ? ` · ${toBuild.length}` : ""}</button>`;
+  const goAll = `<button class="btn primary" type="button" id="dpGo" ${toBuild.length && !errors ? "" : "disabled"} title="${errors ? "Fix the preflight errors first" : toBuild.length ? `Builds the ${toBuild.length} VM(s) not on the cluster yet` : state.servers.length ? "Every designed VM exists" : "Design a VM first"}"><img src="${iconSrcOnAccent("deploy.svg")}" alt=""> Deploy all${toBuild.length ? ` · ${toBuild.length}` : ""}</button>`;
   main.innerHTML = bladeHead("deploy") + `
     <div class="chips"><span class="pill">Designed <b>${state.servers.length}</b></span><span class="pill">Built <b>${planned.filter(p => p.built && p.built.status === "ready").length}</b></span>
       <span class="pill">To build <b>${toBuild.length}</b></span>${errors ? `<span class="pill status off">${errors} preflight error(s)</span>` : `<span class="pill status on">Preflight OK</span>`}</div>
@@ -1546,9 +1570,7 @@ async function bladeDeploy(main, stale) {
     ${vms.filter(v => !state.servers.some(s => (s.name || "").toLowerCase() === v.name)).length ? gsCard("dp-other", "servers.svg", "Built by the studio, not in the design",
       "VMs the studio built whose card is gone - clearing them only takes them out of this list", `<div class="table-wrap"><table class="data"><tbody>${vms.filter(v => !state.servers.some(s => (s.name || "").toLowerCase() === v.name)).map(v => `<tr>
         <td><b>${esc(v.name)}</b></td><td>${pillOn(cap(v.power), v.power === "running")}</td><td class="mono">${esc(v.ip || "")}</td><td class="mono">${esc(v.node + " · " + (v.vmid ?? "—"))}</td>
-        <td class="row-actions"><button class="btn sm" type="button"${v.job_id ? ` data-job-open="${esc(v.job_id)}"` : ' disabled title="No build log"'}><img src="${iconSrc("log.svg")}" alt=""> Log</button><button class="btn icon sm danger-text" type="button" data-clear-record="${esc(v.id)}" title="Clear from view - takes it out of the studio's view; the VM in Proxmox VE is not touched" aria-label="Clear from view">${trashIcon()}</button></td></tr>`).join("")}</tbody></table></div>`, "", false) : ""}
-    <div class="field-group">The design at a glance</div>
-    ${reviewSummaryCards()}`;
+        <td class="row-actions"><button class="btn sm" type="button"${v.job_id ? ` data-job-open="${esc(v.job_id)}"` : ' disabled title="No build log"'}><img src="${iconSrc("log.svg")}" alt=""> Log</button><button class="btn icon sm danger-text" type="button" data-clear-record="${esc(v.id)}" title="Clear from view - takes it out of the studio's view; the VM in Proxmox VE is not touched" aria-label="Clear from view">${trashIcon()}</button></td></tr>`).join("")}</tbody></table></div>`, "", false) : ""}`;
   wireRowActions(main, () => renderServerBlade("deploy", main));
   dpWireRows();
   const deploy = async names => {
@@ -1594,7 +1616,7 @@ function dpRows() {
       <td><div class="dp-two"><span class="mono${b && b.status !== "failed" ? "" : " muted"}">${esc((b && b.ip) || p.s.ipAddress || "DHCP")}</span><span class="mono">${esc(node)} · ${b && b.status !== "failed" && b.vmid != null ? esc(b.vmid) : "—"}</span></div></td>
       <td class="row-actions">
         <button class="btn sm" type="button"${b && b.job_id ? ` data-job-open="${esc(b.job_id)}"` : ' disabled title="Not built yet - no log"'}><img src="${iconSrc("log.svg")}" alt=""> Log</button>
-        <button class="btn sm" type="button"${open && !why ? ` data-deploy-one="${esc(p.name)}"` : ` disabled title="${esc(open ? why : "Already on the cluster")}"`}><img src="${iconSrc("deploy.svg")}" alt=""> Deploy</button>
+        <button class="btn sm primary" type="button"${open && !why ? ` data-deploy-one="${esc(p.name)}"` : ` disabled title="${esc(open ? why : "Already on the cluster")}"`}><img src="${iconSrcOnAccent("deploy.svg")}" alt=""> Deploy</button>
         <button class="btn icon sm danger-text" type="button"${b && b.status !== "building" ? ` data-clear-vm="${esc(p.s._id)}" title="Clear from view - takes it out of the studio's view; the VM in Proxmox VE is not touched"` : ` disabled title="${b ? "Building - wait for it to finish" : "Not built - nothing to clear"}"`} aria-label="Clear from view">${trashIcon()}</button></td>
     </tr>`;
   }).join("");
@@ -2546,8 +2568,25 @@ async function bladeMedia(main, stale) {
 }
 
 /* -- Image settings: how and where images are built, and how Windows golds stay current -- */
+/* ISO builds at a time: later ones wait in the queue. Each needs about 26 GB of the studio's
+   work volume while it runs, so the choices say how many fit. */
+function isoBuildsCard(w) {
+  const n = w.parallel || 1, room = w.build_room || 26e9, total = w.work_total || 0;
+  const fit = total ? Math.max(1, Math.floor(total / room)) : 4;
+  const gb = b => Math.round(b / 1e9);
+  const choice = k => [String(k), `${k} at a time${k === 1 ? " · recommended" : ""}${k > fit ? ` · needs ${gb(k * room)} GB` : ""}`];
+  return gsCard("gd-isobuilds", "iso-media.svg", "ISO builds", `${n} at a time${total ? ` · work volume ${gb(total)} GB` : ""}`, `
+      <div class="grid-3">
+        ${field(`<span class="field-label"><img src="${iconSrc("iso-media.svg")}" alt="">At a time${infoTip("ISO builds at a time", `Builds started beyond this wait in the queue and start when one ends, in order. Each build needs about ${gb(room)} GB of the studio's work volume while it runs (three times its download)${total ? ` - this one has ${gb(total)} GB, room for ${fit}` : ""}. Side by side they share one download link and one disk, so two are not twice as fast. The maintenance window builds one after another either way.`)}</span>`,
+          `<select id="ibParallel">${opts([1, 2, 3, 4].map(choice), String(n))}</select>`)}
+      </div>
+      ${n > fit ? warnBanner(`${n} builds need about ${gb(n * room)} GB - the work volume has ${gb(total)} GB. Builds that run out of room fail partway.`) : ""}
+      ${actions("", act("ibSave", "save.svg", "Save", true))}`, "", false);
+}
+
 async function bladeImageSettings(main, stale) {
-  const [bake, c, au] = await Promise.all([api("GET", "/settings/bake"), refreshInventory(), api("GET", "/auto-update").catch(() => null)]);
+  const [bake, c, au, worker] = await Promise.all([api("GET", "/settings/bake"), refreshInventory(), api("GET", "/auto-update").catch(() => null),
+    api("GET", "/settings/worker").catch(() => null)]);
   if (stale()) return;
   const inv = c.inventory;
   const s = bake.settings, r = bake.resolved || {};
@@ -2578,8 +2617,15 @@ async function bladeImageSettings(main, stale) {
       </div>
       <div class="tip-box"><img src="${iconSrc("help.svg")}" alt=""><div>The Linux bake VM needs internet access on its network - by DHCP, or by the addresses above. "Auto" prefers shared storage, so one gold serves every node.</div></div>
       ${actions(bake.problem ? `<span class="hint err gs-actions-note">${esc(bake.problem)}</span>` : "", act("bsSave", "save.svg", "Save", true))}`, "", false)}
+    ${worker ? isoBuildsCard(worker) : ""}
     ${au ? autoUpdateCard(au) : ""}`;
   const on = (id, ev, fn) => { const el = $id(id); if (el) el.addEventListener(ev, fn); };
+  on("ibSave", "click", async () => {
+    try {
+      await api("PUT", "/settings/worker", { memory_mb: worker.memory_mb, cores: worker.cores, keep_downloads: !!worker.keep_downloads, parallel: parseInt($id("ibParallel").value, 10) || 1 });
+      toast("Saved"); renderServerBlade("imagesettings", main);
+    } catch (e) { toast(e.message, true); }
+  });
   on("bsSave", "click", async () => {
     const vlan = parseInt($id("bsVlan").value, 10);
     try {
@@ -2923,7 +2969,7 @@ function wireMail(main, m) {
   });
 }
 
-function notifyCard(n, mail) {
+function notifyCard(n, mail, history) {
   const ev = n.events || [];
   const groups = [...new Set(ev.map(e => e.group))];
   const onCount = ev.filter(e => e.on).length;
@@ -2932,10 +2978,24 @@ function notifyCard(n, mail) {
     ready ? `${onCount} of ${ev.length} on` : "needs mail", `
     ${ready ? "" : `<div class="notify-off-banner">${warnBanner("Notifications go out by mail - switch Mail on and fill it in first.")}</div>`}
     <div class="notify-groups${ready ? "" : " is-off"}" ${ready ? "" : 'aria-disabled="true"'}>${groups.map(g => `<div class="field-group">${esc(g)}</div>
-      <div class="toggle-grid">${ev.filter(e => e.group === g).map(e => toggle(`data-notify="${esc(e.key)}"`, esc(e.label), e.on, !ready)).join("")}</div>`).join("")}</div>`, "", false);
+      <div class="toggle-grid">${ev.filter(e => e.group === g).map(e => toggle(`data-notify="${esc(e.key)}"`, esc(e.label), e.on, !ready)).join("")}</div>`).join("")}</div>
+    ${notifyHistory(history || [])}`, "", false);
+}
+
+/* Every notification the studio kept - the bell's Clear all hides them there, not here. */
+function notifyHistory(rows) {
+  return `<div class="section collapsible ${isNestedOpen("gs-notify-history", false) ? "" : "collapsed"}" style="margin-top:12px"><div class="section-head" data-nested="gs-notify-history"><span class="section-chevron">${chevron()}</span>
+    <img src="${iconSrc("log.svg")}" alt=""> History<span class="section-meta">${rows.length ? `${rows.length} newest` : ""}</span></div>
+    <div class="section-body">${rows.length ? `<div class="bell-list notify-history">${rows.map(x => bellRow(x, false)).join("")}</div>` : `<p class="hint">Nothing yet.</p>`}</div></div>`;
 }
 
 function wireNotify(main, n) {
+  // History rows open what the bell's rows open.
+  main.querySelectorAll(".notify-history [data-bell-link]").forEach(row => row.addEventListener("click", () => {
+    if (row.dataset.bellJob) { openJob(row.dataset.bellJob); return; }
+    const id = (row.dataset.bellLink || "").replace(/^#\/?/, "").split("/")[0];
+    if (id) { state.blade = resolveBladeId(id); render(); }
+  }));
   if (!n) return;
   main.querySelectorAll("[data-notify]").forEach(c => c.addEventListener("change", async () => {
     const events = {};
@@ -2945,9 +3005,10 @@ function wireNotify(main, n) {
 }
 
 async function bladeStudio(main, stale) {
-  const [server, t, region, cat, worker, ver, maint, mail, notif] = await Promise.all([api("GET", "/settings/server"), api("GET", "/tls"), api("GET", "/settings/region"), catalogCache || api("GET", "/catalog"),
+  const [server, t, region, cat, worker, ver, maint, mail, notif, history] = await Promise.all([api("GET", "/settings/server"), api("GET", "/tls"), api("GET", "/settings/region"), catalogCache || api("GET", "/catalog"),
     api("GET", "/settings/worker").catch(() => ({ memory_mb: 4096, cores: 4 })), api("GET", "/studio/version").catch(() => null),
-    api("GET", "/settings/maintenance").catch(() => null), api("GET", "/settings/mail").catch(() => null), api("GET", "/settings/notify").catch(() => null)]);
+    api("GET", "/settings/maintenance").catch(() => null), api("GET", "/settings/mail").catch(() => null), api("GET", "/settings/notify").catch(() => null),
+    api("GET", "/notifications?limit=500").catch(() => [])]);
   if (maint && !maintUi.rows) maintUi.rows = maint.settings.windows.map(w => ({ ...w, days: [...w.days] }));
   catalogCache = cat;
   if (stale()) return;
@@ -3015,7 +3076,7 @@ async function bladeStudio(main, stale) {
       ${actions(act("rgSave", "save.svg", "Save", true))}`, "", false)}
     ${maint ? maintCard(maint) : ""}
     ${mail ? mailCard(mail, notif) : ""}
-    ${notif ? notifyCard(notif, mail && mail.settings) : ""}
+    ${notif ? notifyCard(notif, mail && mail.settings, history) : ""}
     ${versionCard(ver)}
     ${worker.debug_tools ? debugCard(worker) : ""}`;
   wireMaint(main); wireMail(main, mail); wireNotify(main, notif);
@@ -3047,13 +3108,13 @@ async function bladeStudio(main, stale) {
   });
   on("wkSave", "click", async () => {
     try {
-      await api("PUT", "/settings/worker", { memory_mb: parseInt($id("wkMem").value, 10) || 4096, cores: parseInt($id("wkCores").value, 10) || 2, keep_downloads: !!worker.keep_downloads });
+      await api("PUT", "/settings/worker", { memory_mb: parseInt($id("wkMem").value, 10) || 4096, cores: parseInt($id("wkCores").value, 10) || 2, keep_downloads: !!worker.keep_downloads, parallel: worker.parallel || 1 });
       toast("Saved"); render();
     } catch (e) { toast(e.message, true); }
   });
   on("dbgSave", "click", async () => {
     try {
-      await api("PUT", "/settings/worker", { memory_mb: worker.memory_mb, cores: worker.cores, keep_downloads: $id("dbgKeep").checked });
+      await api("PUT", "/settings/worker", { memory_mb: worker.memory_mb, cores: worker.cores, keep_downloads: $id("dbgKeep").checked, parallel: worker.parallel || 1 });
       toast("Saved"); render();
     } catch (e) { toast(e.message, true); }
   });

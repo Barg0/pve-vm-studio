@@ -910,6 +910,18 @@ pub struct DeployPass<'a> {
     pub remove_apps: &'a [String],
 }
 
+/// What a client feature must leave behind and must not (Build-Vms' ClientFeatureChecks).
+/// /All enables a feature's parents "with default values", and the Microsoft-Hyper-V-All
+/// container's defaults include the platform: asking for the consoles enables the
+/// hypervisor and vmms too (measured on vm-w11-02, 2026-10-07). So the guard is switched
+/// back off, then the leaves that carry the consoles are read back.
+///   (feature, guard - must end off, expect - must end on)
+const CLIENT_FEATURE_CHECKS: &[(&str, &[&str], &[&str])] = &[(
+    "Microsoft-Hyper-V-Tools-All",
+    &["Microsoft-Hyper-V"],
+    &["Microsoft-Hyper-V-Management-Clients", "Microsoft-Hyper-V-Management-PowerShell"],
+)];
+
 /// The deploy pass's pe.cmd. Servicing failures are markers, not stops (the job log shows
 /// each; GuestProvision retries capabilities online); a disk that cannot be reached or an
 /// answer file that cannot be written ends the pass, and the build with it.
@@ -931,9 +943,23 @@ pub fn pe_deploy_cmd(p: &DeployPass) -> String {
         .client_features
         .iter()
         .map(|f| {
-            format!(
+            let mut s = format!(
                 "call :dism /Image:W:\\ /Enable-Feature /FeatureName:{f} /All && (echo PVS-FEATURE-OK {f} > COM1) || (echo PVS-FEATURE-FAIL {f} > COM1 & set FALLBACK=1)\n"
-            )
+            );
+            if let Some((_, guard, expect)) = CLIENT_FEATURE_CHECKS.iter().find(|c| c.0.eq_ignore_ascii_case(f)) {
+                // Guard first, leaves after: the state that ships is the one after every change.
+                for g in *guard {
+                    s += &format!(
+                        "dism /English /Image:W:\\ /Get-FeatureInfo /FeatureName:{g} | find \"State : Enabled\" >nul && (call :dism /Image:W:\\ /Disable-Feature /FeatureName:{g} & dism /English /Image:W:\\ /Get-FeatureInfo /FeatureName:{g} | find \"State : Enabled\" >nul && (echo PVS-GUARD-STILL {g} > COM1) || (echo PVS-GUARD-OFF {g} > COM1))\n"
+                    );
+                }
+                for e in *expect {
+                    s += &format!(
+                        "dism /English /Image:W:\\ /Get-FeatureInfo /FeatureName:{e} | find \"State : Enabled\" >nul && (echo PVS-FEATURE-HAS {e} > COM1) || (echo PVS-FEATURE-MISSING {e} > COM1)\n"
+                    );
+                }
+            }
+            s
         })
         .collect();
     let app_checks: String = p
@@ -1966,6 +1992,9 @@ mod tests {
         assert!(cmd.contains("call :cap Rsat.Dns.Tools~~~~0.0.1.0\r\n"));
         assert!(cmd.contains("/Source:%FOD%\\LanguagesAndOptionalFeatures /LimitAccess"));
         assert!(cmd.contains("/FeatureName:Microsoft-Hyper-V-Tools-All /All"));
+        // The platform the tools pull in is switched back off, the consoles read back.
+        assert!(cmd.contains("/Disable-Feature /FeatureName:Microsoft-Hyper-V &"));
+        assert!(cmd.contains("PVS-FEATURE-HAS Microsoft-Hyper-V-Management-Clients"));
         assert!(cmd.contains("if /i \"!p:~0,19!\"==\"Microsoft.BingNews_\" goto :rm"));
         assert!(!cmd.contains("Not.In.Catalog"));
         assert!(cmd.contains("W:\\Windows\\Panther\\unattend.xml"));

@@ -164,13 +164,20 @@ pub struct WorkerSettings {
     /// after a build, so the next build of the same files downloads nothing. Off: a build
     /// uses them up and the rest goes after six idle hours.
     pub keep_downloads: bool,
+    /// ISO builds at a time (Image settings); later ones are queued. Each needs about three
+    /// times its download on the work volume while it runs - some 26 GB for Windows 11.
+    pub parallel: u32,
 }
 
 impl Default for WorkerSettings {
     fn default() -> Self {
-        Self { memory_mb: 4096, cores: 2, keep_downloads: false }
+        Self { memory_mb: 4096, cores: 2, keep_downloads: false, parallel: 1 }
     }
 }
+
+/// What one ISO build needs on the work volume at most, for "how many fit": three times
+/// a Windows 11 download (8.7 GB).
+pub const BUILD_ROOM: u64 = 26_000_000_000;
 
 pub struct Request {
     pub product: &'static Product,
@@ -1966,6 +1973,14 @@ async fn move_file(from: &Path, to: &Path) -> Result<()> {
         tokio::fs::remove_file(from).await?;
     }
     Ok(())
+}
+
+/// The volume a path is on: its size and what is free, in bytes.
+pub fn volume(path: &Path) -> Option<(u64, u64)> {
+    let out = std::process::Command::new("df").args(["-B1", "--output=size,avail"]).arg(path).output().ok()?;
+    let line = String::from_utf8_lossy(&out.stdout).lines().nth(1)?.to_owned();
+    let mut n = line.split_whitespace().filter_map(|x| x.parse().ok());
+    Some((n.next()?, n.next()?))
 }
 
 fn statvfs_free(path: &Path) -> Result<u64> {

@@ -771,6 +771,20 @@ async fn deploy_inner(
         for f in spec.client_features.iter().filter(|f| ok("PVS-FEATURE-OK", f)) {
             log.ok(format!("{f} enabled offline")).await;
         }
+        // What a client feature pulled in and was switched back off (the Hyper-V platform
+        // under the Hyper-V tools), and the leaves read back.
+        for g in m.iter().filter_map(|l| l.strip_prefix("PVS-GUARD-OFF ")) {
+            log.ok(format!("{} pulled in by the tools - switched back off", g.trim())).await;
+        }
+        for g in m.iter().filter_map(|l| l.strip_prefix("PVS-GUARD-STILL ")) {
+            log.warn(format!("{} is still enabled after switching it off - the VM carries it", g.trim())).await;
+        }
+        for e in m.iter().filter_map(|l| l.strip_prefix("PVS-FEATURE-MISSING ")) {
+            log.warn(format!("{} is not enabled - the VM may lack that tool", e.trim())).await;
+        }
+        for e in m.iter().filter_map(|l| l.strip_prefix("PVS-FEATURE-HAS ")) {
+            log.debug(format!("{} is enabled", e.trim())).await;
+        }
         if count("PVS-APP-REMOVED") > 0 {
             log.ok(format!("{} built-in app(s) removed offline", count("PVS-APP-REMOVED"))).await;
         }
