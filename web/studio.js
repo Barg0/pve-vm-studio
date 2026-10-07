@@ -5003,8 +5003,19 @@ function navBadge(id) {
     return running ? `<span class="nav-badge">${running}</span>` : "";
   }
   if (id === "networks" && state.networks.length) return `<span class="nav-badge ok">${state.networks.length}</span>`;
-  if (id === "domainjoin" && state.domainJoinAccounts.length) return `<span class="nav-badge">${state.domainJoinAccounts.length}</span>`;
-  if (id === "azurearc" && state.azureArcPrincipals.length) return `<span class="nav-badge">${state.azureArcPrincipals.length}</span>`;
+  /* Green when every entry is complete, red when one is not - as the preflight judges them.
+     Purple stays for what is running (bakes, jobs). */
+  const filled = v => !!String(v || "").trim();
+  if (id === "domainjoin" && state.domainJoinAccounts.length) {
+    const bad = state.domainJoinAccounts.filter(a => !filled(a.domain) || !filled(a.joinUser) || !filled(a.joinPassword)).length;
+    return `<span class="nav-badge ${bad ? "err" : "ok"}"${bad ? ` title="${bad} account(s) without a domain, user or password"` : ""}>${state.domainJoinAccounts.length}</span>`;
+  }
+  if (id === "azurearc" && state.azureArcPrincipals.length) {
+    // Host context has no way into a Proxmox VE guest: a principal on it onboards nothing.
+    const bad = state.azureArcPrincipals.filter(p => !filled(p.subscriptionId) || !filled(p.tenantId) || !filled(p.resourceGroup)
+      || p.authMode === "hostContext" || !filled(p.servicePrincipalAppId) || !filled(p.servicePrincipalSecret)).length;
+    return `<span class="nav-badge ${bad ? "err" : "ok"}"${bad ? ` title="${bad} principal(s) incomplete or on host context"` : ""}>${state.azureArcPrincipals.length}</span>`;
+  }
   if (id === "licenses" && (state.windowsLicenses || []).length) {
     const bad = state.windowsLicenses.filter(w => !w.edition || !productKeyOk(w.productKey)).length;
     return bad ? `<span class="nav-badge err" title="${bad} licence(s) without an image or a valid key">${state.windowsLicenses.length}</span>`
@@ -7810,9 +7821,6 @@ function validate() {
       warn(`Arc principal ${p.id || ""} uses host context, which needs a channel from the host into the guest that Proxmox VE does not have — switch it to a service principal; VMs attached to it skip Arc until then.`, "Azure Arc");
     }
   });
-  if (state.servers.some(s => !isLinuxServer(s) && effectiveDomainJoinAccount(s))) {
-    info("Windows VMs join their domain deferred: GuestProvision registers the join at first boot, it runs five minutes later and restarts the VM. A specialize-time join needs the answer file before specialize, which a cloned gold does not read.", "Domain Join");
-  }
   if (!state.servers.length) {
     info("No virtual machines designed yet - nothing to deploy.", "Virtual machines");
   }
