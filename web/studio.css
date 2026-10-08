@@ -761,6 +761,8 @@
     background-repeat: no-repeat; background-position: left 9px center; background-size: 15px 15px;
   }
   .list-row .btn.icon, .list-row .btn.danger-text { flex-shrink: 0; }
+  /* The bin is as tall as the input beside it (32px), not the 28px of a toolbar icon. */
+  .dns-row .btn.icon, .list-row .btn.icon { width: 32px; height: 32px; }
   /* Group chips. One chip is one group, because an AD group name carries spaces as a
      matter of course - "Domain Admins" - and a comma-separated box cannot tell a
      separator from a character somebody typed inside a name. */

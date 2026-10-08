@@ -1364,6 +1364,7 @@ pub async fn bake(
             ("cpu", &p.cpu_windows),
             ("cores", p.cores.max(2)),
             ("memory", p.memory_mb.max(4096)),
+            ("numa", 1),
             ("efidisk0", format!("{}:1,efitype=4m,pre-enrolled-keys=1", p.disk_storage)),
             ("scsihw", "virtio-scsi-single"),
             ("scsi0", format!("{}:{},discard=on,iothread=1,ssd=1", p.disk_storage, opt.disk_gb())),

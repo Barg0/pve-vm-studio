@@ -388,7 +388,19 @@ async fn pve_nodes_loop(app: AppState) {
 }
 
 async fn warm_caches(app: AppState) {
-    tokio::join!(virtio::upstream(&app.web), tls::dns_providers());
+    virtio::load_known(&app.db).await;
+    // Right after a boot the resolver can fail for minutes; ask fedorapeople again until it
+    // answers in full, beside the rest of the warming.
+    let a = app.clone();
+    tokio::spawn(async move {
+        for _ in 0..20 {
+            if virtio::complete(&virtio::upstream(&a.web, &a.db).await) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(61)).await;
+        }
+    });
+    tls::dns_providers().await;
     loop {
         let mut isos = Vec::new();
         if let Ok(mut stores) = tokio::fs::read_dir(&app.config.iso_root).await {

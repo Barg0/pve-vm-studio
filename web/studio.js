@@ -2289,7 +2289,6 @@ function hwOf(s) {
   return {
     own,
     cpu: own && s.cpuType ? s.cpuType : d.cpu,
-    numa: own && s.numa ? s.numa : d.numa,
     nested: nestedVirtRequired(s) || (hotpatchCapable(s) && !!s.hotpatchReady) || (own ? (s.nestedVirtualization ?? d.nested) : d.nested),
     queues: own ? (s.netQueues ?? d.queues !== "off") : d.queues !== "off"
   };
@@ -5180,7 +5179,7 @@ function gsCard(key, icon, title, meta, bodyHtml, iconAttrs, defaultOpen, badge)
 
 /* VM settings → Hardware defaults: the design keeps them (defaults.hardware), a VM card may
    override them; "auto" is settled at deploy against the nodes (src/hardware.rs). */
-const HW_DEFAULTS = { cpu: "auto", securityFlags: "auto", nested: true, numa: "auto", ksm: true, queues: "auto", protection: true };
+const HW_DEFAULTS = { cpu: "auto", securityFlags: "auto", nested: true, ksm: true, queues: "auto", protection: true };
 function hwDefaults() { return Object.assign({}, HW_DEFAULTS, (state.defaults && state.defaults.hardware) || {}); }
 let hwCluster = null, hwClusterBusy = false, hwClusterAt = 0;
 /* The nodes once a page needs them, again after 30 s - the load bars stay current. */
@@ -5227,9 +5226,8 @@ function hardwareDefaultsCard() {
     .concat(models.map(m => [m.name, m.custom ? `${m.name} (custom)` : m.name]));
   if (h.cpu !== "auto" && !models.some(m => m.name === h.cpu)) cpuOpts.push([h.cpu, h.cpu]);
   const sel = (key, options, value, disabled) => `<select data-hw="${key}"${disabled ? " disabled" : ""}>${options.map(([v, l]) => `<option value="${esc(v)}"${v === value ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`;
-  const multi = !!c.multiSocket;
   const flagsNote = generic ? ((auto.flags || []).join(", ") || "none every node has") : (eff === "host" ? "not needed with host" : "a named model brings its own");
-  const meta = [eff || "auto", h.nested ? "nested" : "", `NUMA ${h.numa}`].filter(Boolean).join(" · ");
+  const meta = [eff || "auto", h.nested ? "nested" : ""].filter(Boolean).join(" · ");
   return gsCard("gs-hardware", "cpu.svg", "Hardware defaults", esc(meta), `
     <div class="field-group">Cluster</div>
     ${nodeCards}
@@ -5243,10 +5241,6 @@ function hardwareDefaultsCard() {
       ${toggle('data-hw="nested"', `Nested virtualization${infoTip("Nested virtualization", "Gives Windows the processor's virtualization extensions: VBS, Credential Guard, Memory Integrity and Hotpatch need them. Measured on PVE 9.2 (Server 2025, host): VBS runs, about 3% of one core more at idle. Server 2025 in a domain turns Credential Guard on by itself (not on domain controllers): NTLMv1, Kerberos DES and unconstrained delegation stop working there. On AMD, do not live-migrate a VM while it runs VMs of its own. Needs host or a named model.")}`, h.nested)}
     </div>
     <div class="field-group">Memory</div>
-    <div class="grid-3">
-      ${field(`<span class="field-label"><img src="${iconSrc("ram.svg")}" alt="">NUMA${infoTip("NUMA", "Gives the VM the node's memory layout, so Windows and Linux keep a process next to its memory. Auto: on only where a node has more than one socket - with one socket the VM has one NUMA node either way. A VM gets a second socket only when its cores or memory do not fit one of the node's sockets.")}</span>`,
-        sel("numa", [["auto", `Auto · ${multi ? "on: a node has more than one socket" : "no effect: every node has 1 socket"}`], ["on", "On"], ["off", "Off"]], h.numa))}
-    </div>
     <div class="toggle-grid hw-toggles">
       ${toggle('data-hw="ksm"', `Share identical memory pages (KSM)${infoTip("KSM", "The node keeps one copy of memory pages that several VMs hold alike - many Windows VMs from one gold share a lot. Off for VMs that must not learn anything about each other: page sharing is a known side channel.")}`, h.ksm)}
     </div>
@@ -5874,14 +5868,13 @@ function renderServerOptionalSection(s) {
   </div>`;
 }
 function renderServerWingetSection(s) {
-  if (isLinuxServer(s)) return "";
+  // Linux and Server Core have no WinGet: no section at all (apps chosen before stay
+  // in the design, but nothing installs them - see the manifest).
+  if (!wingetCapable(s)) return "";
   const open = isNestedOpen(s._id + "-winget", false);
   const head = (meta, muted) => `<div class="section-head" data-nested="${esc(s._id)}-winget"${muted ? ' style="color:var(--fg-muted)"' : ""}>
       <span class="section-chevron">${chevron()}</span><img src="${iconSrcBand("app-stack.svg", "deploy")}" alt=""> Applications (WinGet)
       <span class="section-meta">${meta}</span></div>`;
-  if (!wingetCapable(s)) {
-    return `<div class="section collapsible collapsed">${head("not on Server Core - WinGet ships with Desktop Experience", true)}</div>`;
-  }
   const apps = Array.isArray(s.wingetApps) ? s.wingetApps : [];
   const on = !!s.wingetEnabled;
   const picking = wgPick.sid === s._id;
@@ -6338,6 +6331,8 @@ function renderServerCard(s) {
   const adminOnlyLocked = !supportsBuiltInAdminOnly(s);
   const djBadge = djAccount ? `<span class="pill status on" title="Domain Join · ${esc(domainJoinAccountTitle(djAccount))}"><img src="${iconSrc("identity.svg")}" alt="">Domain</span>` : "";
   const arcBadge = arcPrincipal ? `<span class="pill status on" title="Azure Arc · ${esc(azureArcPrincipalTitle(arcPrincipal))}"><img src="${iconSrc("arc.svg")}" alt="">Arc</span>` : "";
+  const lic = effectiveLicense(s);
+  const licBadge = lic ? `<span class="pill status on" title="Windows license · ${esc(licenseTitle(lic.edition))} - installed and activated at first boot"><img src="${iconSrc("key.svg")}" alt="">Licensed</span>` : "";
   const clusterOn = clusterIncludesServer(s);
   /* "HA", not "Clustered": it is what the VM gains, it is Microsoft's own wording for a
      clustered role, and it fits the fixed badge width that "Clustered" was straining. */
@@ -6349,7 +6344,7 @@ function renderServerCard(s) {
         <span class="card-chevron">${chevron()}</span>
         <div class="card-icon"><img src="${iconSrcBand("vm.svg", serverGlyphBand(s))}"></div>
         <div>
-          <div class="card-title"><span data-name-title="${esc(s._id)}">${esc(hyperVName)}</span>${titleBadges(`${djBadge}${arcBadge}${clusterBadge}<span class="pill role ${pillClass}">${esc(img.kind)}</span>${built
+          <div class="card-title"><span data-name-title="${esc(s._id)}">${esc(hyperVName)}</span>${titleBadges(`${djBadge}${arcBadge}${licBadge}${clusterBadge}<span class="pill role ${pillClass}">${esc(img.kind)}</span>${built
             ? `<span class="pill status ok" title="VM ${esc(built.vmid)} on ${esc(built.node)}">Built</span>`
             : clash ? `<span class="pill status warn" title="${esc(clash.what)} ${esc(clash.vmid)} on ${esc(clash.node)} has this name">Name in use</span>` : ""}`)}</div>
           <div class="card-meta"><span data-name-guest="${esc(s._id)}">${hyperVName !== shortName ? "guest " + esc(shortName) + " · " : ""}</span>${esc(displayImageLabel)}${goldRelease(goldFor(s)) ? " " + esc(goldRelease(goldFor(s))) : ""} · ${esc(s.memoryGB)} GB / ${esc(s.cpuCount)} CPU · ${esc(s.switchName || "no switch")}${s.vlanId != null ? " · VLAN " + esc(s.vlanId) : ""}${disks.length ? " · " + disks.length + " data disk(s)" : ""}<span data-name-folder="${esc(s._id)}">${folderName !== hyperVName ? " · folder " + esc(folderName) + "\\" : ""}</span></div>
@@ -6553,8 +6548,6 @@ function renderServerCard(s) {
                 <div class="grid-2" style="margin-top:12px">
                   ${field(`<span class="field-label"><img src="${iconSrc("cpu.svg")}" alt="">CPU type${infoTip("CPU type", "Default from VM settings → Hardware defaults; with Override, this VM's own.")}</span>`,
                     `<select data-s="${esc(s._id)}" data-k="cpuType"${hw.own ? "" : " disabled"}>${[["", `Default · ${hwEffectiveCpu(hwDefaults().cpu) || "auto"}`]].concat(((hwCluster && hwCluster.models) || []).map(m => [m.name, m.name])).map(([v, l]) => `<option value="${esc(v)}"${(hw.own ? (s.cpuType || "") : "") === v ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>`)}
-                  ${field(`<span class="field-label"><img src="${iconSrc("ram.svg")}" alt="">NUMA${infoTip("NUMA", "Default from VM settings. On a one-socket node a VM has one NUMA node either way.")}</span>`,
-                    `<select data-s="${esc(s._id)}" data-k="numa"${hw.own ? "" : " disabled"}>${[["", `Default · ${hwDefaults().numa}`], ["auto", "Auto"], ["on", "On"], ["off", "Off"]].map(([v, l]) => `<option value="${v}"${(hw.own ? (s.numa || "") : "") === v ? " selected" : ""}>${l}</option>`).join("")}</select>`)}
                 </div>
                 <div class="toggle-grid hw-toggles">
                   ${toggle(`data-s="${esc(s._id)}" data-k="nestedVirtualization"`, `Nested virtualization${infoTip("Nested virtualization", NESTED_VIRT_INFO)}`,
@@ -7052,6 +7045,14 @@ function serversForLicense(w) {
   return state.servers.filter(s => s.windowsLicense && s.windowsLicense.licenseId === w.id);
 }
 function detachLicense(s) { s.windowsLicense = { licenseId: "" }; }
+/* The licence a VM's build installs - as the server reads it (api.rs license_for): the
+   attached one, of the VM's edition, with a valid key. Else the gold's KMS client key. */
+function effectiveLicense(s) {
+  const lid = s && s.windowsLicense && s.windowsLicense.licenseId;
+  if (!lid) return null;
+  const w = (state.windowsLicenses || []).find(x => x.id === lid);
+  return w && licenseFits(w, s) && productKeyOk(w.productKey) ? w : null;
+}
 function productKeyOk(k) { return /^[A-Za-z0-9]{5}(-[A-Za-z0-9]{5}){4}$/.test(String(k || "").trim()); }
 /* One row per Windows edition with a ready gold (plus the licence's own, if its golds are
    gone), grouped like the VM card's image picker. */
@@ -10321,7 +10322,7 @@ document.getElementById("main").addEventListener("change", e => {
         s.hwOverride = e.target.checked;
         if (s.hwOverride) {
           const d = hwDefaults();
-          Object.assign(s, { cpuType: "", numa: "", nestedVirtualization: nestedVirtRequired(s) || d.nested, netQueues: d.queues !== "off" });
+          Object.assign(s, { cpuType: "", nestedVirtualization: nestedVirtRequired(s) || d.nested, netQueues: d.queues !== "off" });
         }
         scheduleRender();
         return;

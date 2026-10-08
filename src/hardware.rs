@@ -104,8 +104,6 @@ pub struct Defaults {
     /// "auto": the vendor's security flags on a generic x86-64-vX type; "off": none.
     pub security_flags: String,
     pub nested: bool,
-    /// "auto" (on where a node has more than one socket), "on", "off".
-    pub numa: String,
     pub ksm: bool,
     /// "auto" (one queue per vCPU, 8 at most, on servers), "off".
     pub queues: String,
@@ -114,7 +112,7 @@ pub struct Defaults {
 
 impl Default for Defaults {
     fn default() -> Self {
-        Self { cpu: "auto".into(), security_flags: "auto".into(), nested: true, numa: "auto".into(), ksm: true, queues: "auto".into(), protection: true }
+        Self { cpu: "auto".into(), security_flags: "auto".into(), nested: true, ksm: true, queues: "auto".into(), protection: true }
     }
 }
 
@@ -184,20 +182,19 @@ pub fn cpu_value(cpu: &str, nested: bool, flags: &[&str], nested_flag: bool) -> 
     if f.is_empty() { cpu.to_owned() } else { format!("{cpu},flags={}", f.join(";")) }
 }
 
-/// NUMA for a VM on a node: off on a one-socket node (one NUMA node either way); on a
-/// bigger one on, and two sockets only when the VM does not fit one of the node's.
-pub fn numa_for(mode: &str, node: Option<&NodeCpu>, cores: u32, memory_mb: u32) -> (bool, u32) {
-    let multi = node.is_some_and(|n| n.sockets > 1);
-    let on = match mode {
-        "on" => true,
-        "off" => false,
-        _ => multi,
-    };
-    if !on {
-        return (false, 1);
+/// A VM's sockets: as many as the node it lands on has, so with NUMA (always on) its
+/// memory and cores split the way the node's do - on a one-socket node one NUMA node, the
+/// same as NUMA off. Fewer where its cores do not split evenly, and two at most for a
+/// Windows client (Pro and Enterprise use two sockets, no more).
+pub fn sockets_for(node: Option<&NodeCpu>, cores: u32, client: bool) -> u32 {
+    let mut s = node.map_or(1, |n| n.sockets.max(1)).min(cores.max(1));
+    if client {
+        s = s.min(2);
     }
-    let fits = node.is_none_or(|n| cores <= n.cores && (memory_mb as u64) <= n.memory_gb * 1024 / n.sockets.max(1) as u64);
-    (true, if fits || cores % 2 == 1 { 1 } else { 2 })
+    while s > 1 && cores % s != 0 {
+        s -= 1;
+    }
+    s
 }
 
 /// PVE 9.1 brought the `nested-virt` flag.
@@ -239,9 +236,15 @@ mod tests {
         assert_eq!(cpu_value("host", false, &[], true), "host,flags=-nested-virt");
         assert_eq!(cpu_value("x86-64-v3", true, &["md-clear", "pcid"], true), "x86-64-v3,flags=+md-clear;+pcid");
         assert_eq!(cpu_value("Skylake-Client-v4", true, &[], true), "Skylake-Client-v4,flags=+nested-virt");
-        assert_eq!(numa_for("auto", Some(&a), 4, 4096), (false, 1));
+        assert_eq!(sockets_for(Some(&a), 4, false), 1);
+        assert_eq!(sockets_for(None, 4, false), 1);
         let two = node("big", "EPYC", "AuthenticAMD", 2, all);
-        assert_eq!(numa_for("auto", Some(&two), 4, 4096), (true, 1));
-        assert_eq!(numa_for("auto", Some(&two), 12, 4096), (true, 2));
+        assert_eq!(sockets_for(Some(&two), 4, false), 2);
+        assert_eq!(sockets_for(Some(&two), 3, false), 1);
+        assert_eq!(sockets_for(Some(&two), 1, false), 1);
+        let four = node("huge", "Xeon", "GenuineIntel", 4, all);
+        assert_eq!(sockets_for(Some(&four), 8, false), 4);
+        assert_eq!(sockets_for(Some(&four), 6, false), 3);
+        assert_eq!(sockets_for(Some(&four), 8, true), 2);
     }
 }

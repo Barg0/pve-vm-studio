@@ -49,35 +49,63 @@ pub async fn releases(web: &reqwest::Client) -> Result<Vec<String>> {
 /// What the settings page shows about upstream - the release list and where "stable" and
 /// "latest" point - fetched together and kept for an hour: three round trips to
 /// fedorapeople on every page view made General Settings take over a second.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Upstream {
     pub releases: Vec<String>,
     pub stable: Option<String>,
     pub latest: Option<String>,
 }
 
-pub async fn upstream(web: &reqwest::Client) -> Upstream {
+/// The last answer that had something in it, kept in the settings table: a resolver that
+/// fails right after a reboot (the gateway's answered SERVFAIL for fedorapeople.org for
+/// minutes) left "stable" unknown and Windows not ready, though nothing had changed.
+static KNOWN: std::sync::Mutex<Upstream> = std::sync::Mutex::new(Upstream { releases: Vec::new(), stable: None, latest: None });
+const KNOWN_KEY: &str = "virtio_upstream";
+
+/// Loads the last known answer; the studio calls it once at start.
+pub async fn load_known(db: &sqlx::SqlitePool) {
+    if let Ok(u) = crate::settings::load::<Upstream>(db, KNOWN_KEY).await {
+        *KNOWN.lock().unwrap() = u;
+    }
+}
+
+fn known() -> Upstream {
+    KNOWN.lock().unwrap().clone()
+}
+
+pub async fn upstream(web: &reqwest::Client, db: &sqlx::SqlitePool) -> Upstream {
     static CACHE: tokio::sync::Mutex<Option<(std::time::Instant, Upstream)>> = tokio::sync::Mutex::const_new(None);
     let mut c = CACHE.lock().await;
     if let Some((at, u)) = c.as_ref() {
         // A complete answer holds an hour; one with a lookup missing is asked again after a
         // minute - a slow fedorapeople once left "stable" unknown, and Windows not ready,
         // for the whole hour.
-        let complete = !u.releases.is_empty() && u.stable.is_some() && u.latest.is_some();
-        if at.elapsed() < std::time::Duration::from_secs(if complete { 3600 } else { 60 }) {
+        if at.elapsed() < std::time::Duration::from_secs(if complete(u) { 3600 } else { 60 }) {
             return u.clone();
         }
     }
-    let (releases, stable, latest) = tokio::join!(releases(web), resolve("stable"), resolve("latest"));
-    // A lookup that fails keeps what the last one found.
-    let last = c.as_ref().map(|(_, u)| u.clone()).unwrap_or_default();
+    let (releases, stable, latest) = tokio::join!(releases(web), resolve_channel("stable"), resolve_channel("latest"));
+    // A lookup that fails keeps what the last one found - this run's, else the stored one.
+    let last = c.as_ref().map(|(_, u)| u.clone()).unwrap_or_else(known);
+    let fresh = releases.is_ok() || stable.is_ok() || latest.is_ok();
     let u = Upstream {
         releases: releases.ok().filter(|r| !r.is_empty()).unwrap_or(last.releases),
         stable: stable.ok().or(last.stable),
         latest: latest.ok().or(last.latest),
     };
+    if fresh {
+        *KNOWN.lock().unwrap() = u.clone();
+        if let Err(e) = crate::settings::save(db, KNOWN_KEY, &u).await {
+            tracing::warn!("keeping the virtio-win releases: {e:#}");
+        }
+    }
     *c = Some((std::time::Instant::now(), u.clone()));
     u
+}
+
+pub fn complete(u: &Upstream) -> bool {
+    !u.releases.is_empty() && u.stable.is_some() && u.latest.is_some()
 }
 
 fn version_key(v: &str) -> Vec<u32> {
@@ -99,9 +127,31 @@ pub fn known_bad(release: &str) -> Option<&'static str> {
 /// "stable" and "latest" are redirects to a release; this follows them. A release Proxmox
 /// lists as broken is refused, the channels' too.
 pub async fn resolve(wanted: &str) -> Result<String> {
-    let r = resolve_any(wanted).await?;
+    let r = match resolve_any(wanted).await {
+        Ok(r) => r,
+        // fedorapeople out of reach: the channel points where it last did.
+        Err(e) => {
+            let k = known();
+            match if wanted == "stable" { k.stable } else if wanted == "latest" { k.latest } else { None } {
+                Some(r) => {
+                    tracing::warn!("virtio-win {wanted}: {e:#} - using {r}, where it last pointed");
+                    r
+                }
+                None => return Err(e),
+            }
+        }
+    };
     if let Some(why) = known_bad(&r) {
         bail!("virtio-win {r}{} - {why}; pin another release under Media", if r == wanted { String::new() } else { format!(" (what '{wanted}' points at)") });
+    }
+    Ok(r)
+}
+
+/// Where a channel points, from fedorapeople only (no fallback), refused if broken.
+async fn resolve_channel(wanted: &str) -> Result<String> {
+    let r = resolve_any(wanted).await?;
+    if let Some(why) = known_bad(&r) {
+        bail!("virtio-win {r} (what '{wanted}' points at) - {why}; pin another release under Media");
     }
     Ok(r)
 }

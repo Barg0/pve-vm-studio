@@ -524,6 +524,7 @@ async fn bake_linux_inner(
                 ("cpu", &p.cpu),
                 ("cores", p.cores),
                 ("memory", p.memory_mb),
+                ("numa", 1),
                 ("efidisk0", format!("{}:1,efitype=4m,pre-enrolled-keys={}", p.disk_storage, u8::from(img.secure_boot))),
                 ("scsihw", "virtio-scsi-single"),
                 ("scsi0", format!("{}:0,import-from={import_volid},discard=on,iothread=1,ssd=1", p.disk_storage)),

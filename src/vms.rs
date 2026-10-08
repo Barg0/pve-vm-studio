@@ -85,9 +85,6 @@ pub struct VmSpec {
     /// The vendor's security flags on a generic x86-64-vX type.
     #[serde(default = "yes")]
     pub security_flags: bool,
-    /// "auto", "on", "off" (hardware::numa_for).
-    #[serde(default)]
-    pub numa: String,
     /// KSM may share this VM's memory pages.
     #[serde(default = "yes")]
     pub ksm: bool,
@@ -457,10 +454,10 @@ async fn deploy_inner(
         log.warn(format!("Nested virtualization needs host or a named CPU model - {cpu_type} has none to give")).await;
     }
     let cpu = crate::hardware::cpu_value(&cpu_type, spec.nested, &flags, crate::hardware::nested_flag(pve).await);
-    let (numa, sockets) = crate::hardware::numa_for(&spec.numa, here, spec.cores, spec.memory_mb);
+    let sockets = crate::hardware::sockets_for(here, spec.cores, client);
     log.line(format!(
         "CPU {cpu} ({why}){}{}",
-        if numa { format!(", NUMA with {sockets} socket(s)") } else { String::new() },
+        format!(", NUMA with {sockets} socket(s)"),
         if queues > 1 { format!(", {queues} network queues") } else { String::new() }
     ))
     .await;
@@ -469,15 +466,13 @@ async fn deploy_inner(
         ("sockets", sockets),
         ("memory", spec.memory_mb),
         ("cpu", cpu),
+        ("numa", 1),
         ("delete", "balloon"),
         ("net0", &net0),
         ("onboot", u8::from(spec.onboot)),
         ("tags", tags.join(";")),
         ("description", notes),
     ];
-    if numa {
-        hw.push(("numa".into(), "1".into()));
-    }
     if !spec.ksm {
         hw.push(("allow-ksm".into(), "0".into()));
     }

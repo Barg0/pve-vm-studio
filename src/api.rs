@@ -396,7 +396,6 @@ async fn hardware_cluster(State(app): State<AppState>, _user: User) -> ApiResult
         "nodes": nodes,
         "auto": { "cpu": cpu, "why": why, "flags": crate::hardware::security_flags(&nodes, "x86-64-v3") },
         "sameCpu": same,
-        "multiSocket": nodes.iter().any(|n| n.sockets > 1),
         "nestedFlag": crate::hardware::nested_flag(&app.pve).await,
         "models": names,
     })))
@@ -1232,7 +1231,7 @@ async fn new_self_signed(State(app): State<AppState>, user: User) -> ApiResult<i
 
 async fn get_windows(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
     let s: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
-    let virtio::Upstream { releases, stable, latest } = virtio::upstream(&app.web).await;
+    let virtio::Upstream { releases, stable, latest } = virtio::upstream(&app.web, &app.db).await;
     // Which releases PVE already holds, on the bake node's ISO storage.
     let bake: BakeSettings = settings::load(&app.db, "bake").await?;
     let mut present = Vec::new();
@@ -2233,7 +2232,7 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
     let user = if builtin_admin { "Administrator".to_owned() } else { str_of("localUserName") };
     let bridge = str_of("switchName");
     // Hardware: the design's defaults (VM settings), or the card's own under "Override the
-    // defaults" (CPU type, NUMA, nesting, network queues).
+    // defaults" (CPU type, nesting, network queues).
     let hw: crate::hardware::Defaults = serde_json::from_value(defaults["hardware"].clone()).unwrap_or_default();
     let own = s["hwOverride"].as_bool() == Some(true);
     let pick = |k: &str, d: &str| if own { s[k].as_str().filter(|v| !v.is_empty()).unwrap_or(d).to_owned() } else { d.to_owned() };
@@ -2302,7 +2301,6 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
         nested: str_of("imageId") == "azl" || hotpatch || if own { s["nestedVirtualization"].as_bool().unwrap_or(hw.nested) } else { hw.nested },
         cpu_type: if cpu_type == "auto" { String::new() } else { cpu_type },
         security_flags: hw.security_flags != "off",
-        numa: pick("numa", &hw.numa),
         ksm: hw.ksm,
         queues: if own { on(&s["netQueues"]).unwrap_or(hw.queues != "off") } else { hw.queues != "off" },
         protection: hw.protection,

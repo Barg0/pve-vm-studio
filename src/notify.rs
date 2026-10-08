@@ -739,7 +739,7 @@ async fn watch_once(app: &AppState) {
 
     // A virtio-win newer than the one golds are baked with.
     let win: crate::virtio::WindowsSettings = settings::load(&app.db, "windows").await.unwrap_or_default();
-    let up = crate::virtio::upstream(&app.web).await;
+    let up = crate::virtio::upstream(&app.web, &app.db).await;
     let used = match win.virtio.as_str() {
         "stable" => up.stable.clone(),
         "latest" => up.latest.clone(),
