@@ -7,6 +7,7 @@ mod api;
 mod apps;
 mod auth;
 mod autoupdate;
+mod cas;
 mod catalog;
 mod config;
 mod error;
@@ -25,6 +26,7 @@ mod notify;
 mod progress;
 mod pve;
 mod seed;
+mod selfnet;
 mod serial;
 mod settings;
 mod tags;
@@ -184,6 +186,12 @@ async fn main() -> Result<()> {
         tls: tls_live.clone(),
         config: Arc::new(config),
     };
+
+    // The CAs an admin added in Studio settings, trusted for PVE before the first call to it.
+    let added: Vec<Vec<u8>> = cas::read_file(&cas::path(&state.config.data_dir)).into_iter().map(|c| c.der).collect();
+    if let Err(e) = state.pve.set_extra_cas(&added) {
+        tracing::warn!("trusting the added CAs: {e:#}");
+    }
 
     // ISO builds at a time, as Image settings has it.
     let worker: media::WorkerSettings = settings::load(&state.db, "worker").await.unwrap_or_default();
@@ -365,13 +373,28 @@ pub async fn dir_size(path: &std::path::Path) -> u64 {
 
 /// The cluster's nodes as further ways to the PVE API (failover when the configured node is
 /// down): the ones known from before right away - so a restart with that node down still
-/// gets through - then asked of PVE every ten minutes.
+/// gets through - then asked of PVE every two minutes, so a certificate name configured in
+/// PVE (an ACME domain) is known before the certificate is ordered.
 async fn pve_nodes_loop(app: AppState) {
     let known: Vec<pve::NodeEndpoint> = settings::load(&app.db, "pve_nodes").await.unwrap_or_default();
     app.pve.set_nodes(&known);
     let mut last = known;
     loop {
-        match app.pve.discover_nodes().await {
+        match app.pve.discover_nodes().await.map(|mut nodes| {
+            // Names only grow: a node that is offline, or a call that failed, keeps the ones
+            // learned before - they are what lets its new certificate through later.
+            for n in &mut nodes {
+                if let Some(old) = last.iter().find(|o| o.node == n.node) {
+                    for name in &old.names {
+                        if !n.names.contains(name) {
+                            n.names.push(name.clone());
+                        }
+                    }
+                    n.names.sort();
+                }
+            }
+            nodes
+        }) {
             Ok(nodes) if nodes != last => {
                 tracing::info!("PVE reachable through {} node(s): {}", nodes.len(), nodes.iter().map(|n| if n.tls_name.is_empty() { format!("{} ({})", n.node, n.ip) } else { format!("{} ({} as {})", n.node, n.ip, n.tls_name) }).collect::<Vec<_>>().join(", "));
                 app.pve.set_nodes(&nodes);
@@ -383,7 +406,7 @@ async fn pve_nodes_loop(app: AppState) {
             Ok(_) => {}
             Err(e) => tracing::warn!("asking PVE for its nodes: {e:#}"),
         }
-        tokio::time::sleep(std::time::Duration::from_secs(600)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
     }
 }
 

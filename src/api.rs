@@ -35,7 +35,7 @@ use crate::{update,
     tls::{self, AcmeSettings, ServerSettings, TlsSettings},
     virtio,
     vms::{self, VmSpec},
-    autoupdate, mail, maintenance, media, notify, uup, wim, windows, winpe,
+    autoupdate, cas, mail, maintenance, media, notify, selfnet, uup, wim, windows, winpe,
     AppState,
 };
 
@@ -63,6 +63,9 @@ pub fn router() -> Router<AppState> {
         .route("/vms", get(list_vms).post(start_deploy))
         .route("/vms/{id}", axum::routing::delete(remove_vm))
         .route("/settings/server", get(get_server).put(put_server))
+        .route("/settings/network", get(get_network).put(put_network))
+        .route("/settings/cas", get(get_cas).post(post_cas))
+        .route("/settings/cas/{fingerprint}", axum::routing::delete(delete_cas))
         .route("/settings/region", get(get_region).put(put_region))
         .route("/pools", get(list_pools).post(create_pool))
         .route("/tags", get(list_tag_colours))
@@ -1040,6 +1043,74 @@ async fn require_admin(app: &AppState, user: &User) -> ApiResult<()> {
 async fn get_server(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
     let s: ServerSettings = settings::load(&app.db, "server").await?;
     Ok(Json(json!({ "settings": s, "suggested": tls::local_names("") })))
+}
+
+/// The CAs trusted for PVE's certificate: the cluster CA the installer configured, and the
+/// ones added here.
+async fn get_cas(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    let cluster = app.pve.ca_file().map(cas::read_file).unwrap_or_default();
+    Ok(Json(json!({ "cluster": cluster, "added": cas::read_file(&cas::path(&app.config.data_dir)) })))
+}
+
+#[derive(Deserialize)]
+struct CaUpload {
+    /// The file, base64.
+    data: String,
+    /// false: only say what the file holds.
+    #[serde(default)]
+    commit: bool,
+}
+
+async fn post_cas(State(app): State<AppState>, user: User, Json(u): Json<CaUpload>) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(u.data.trim()).map_err(|_| ApiError::bad_request("the file did not arrive whole"))?;
+    let parsed = cas::parse(&bytes).map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    if !u.commit {
+        return Ok(Json(serde_json::to_value(&parsed).unwrap_or_default()));
+    }
+    if parsed.cas.is_empty() {
+        return Err(ApiError::bad_request("the file holds no CA certificate"));
+    }
+    let names = parsed.cas.iter().map(|c| c.name.clone()).collect::<Vec<_>>().join(", ");
+    let all = cas::add(&app.config.data_dir, parsed.cas)?;
+    app.pve.set_extra_cas(&all.iter().map(|c| c.der.clone()).collect::<Vec<_>>())?;
+    tracing::info!("trusted for PVE by {}: {names}", user.session.user);
+    Ok(Json(json!({ "added": all })))
+}
+
+async fn delete_cas(State(app): State<AppState>, user: User, Path(fp): Path<String>) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    let all = cas::remove(&app.config.data_dir, &fp).map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    app.pve.set_extra_cas(&all.iter().map(|c| c.der.clone()).collect::<Vec<_>>())?;
+    tracing::info!("no longer trusted for PVE, by {}: {fp}", user.session.user);
+    Ok(Json(json!({ "added": all })))
+}
+
+/// The studio's own address, gateway and DNS servers - its container's, in PVE.
+async fn get_network(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    Ok(Json(selfnet::read(&app.pve).await?))
+}
+
+/// Sets them and restarts the container. Refused while a job runs: the restart would cut it off.
+async fn put_network(State(app): State<AppState>, user: User, Json(c): Json<selfnet::Change>) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    let running = app.jobs.running_ids().await.len();
+    if running > 0 {
+        return Err(ApiError::bad_request(format!("{running} job(s) running - the studio restarts to change its network; wait until they end")));
+    }
+    let server: ServerSettings = settings::load(&app.db, "server").await?;
+    let own = selfnet::apply(&app.pve, &c, &server.fqdn).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    tracing::info!("network of container {} set by {} ({}), restarting", own.vmid, user.session.user, if own.mode == "dhcp" { "DHCP".to_owned() } else { own.ip.clone() });
+    let (pve, node, vmid) = (app.pve.clone(), own.node.clone(), own.vmid);
+    tokio::spawn(async move {
+        // The answer goes out first; the reboot then takes the studio down with it.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        if let Err(e) = selfnet::reboot(&pve, &node, vmid).await {
+            tracing::warn!("restart of container {vmid} after the network change: {e:#}");
+        }
+    });
+    Ok(Json(own))
 }
 
 async fn get_worker(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {

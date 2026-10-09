@@ -3,7 +3,7 @@
 # install.sh - installs PVE VM Studio into its own LXC. Run on any node of the cluster,
 # as root:
 #
-#   ./install.sh                 menus: container id, DNS name, storage, network, size
+#   ./install.sh                 menus: container id, DNS name, storage, network, address, DNS, size
 #   ./install.sh --defaults      no questions - everything on its default (DHCP)
 #
 # Next to this script: the pve-vm-studio binary (a release names it pve-vm-studio-x86_64)
@@ -238,7 +238,7 @@ run_steps() {
 
 NODE=$(hostname)
 SEARCH=$(awk '/^search/ {print $2; exit}' /etc/resolv.conf 2>/dev/null)
-VMID="" FQDN="" STORAGE="" BRIDGE="" IPMODE=dhcp IP="" GW="" VLAN="" CORES=2 MEMORY=2048 DISK=8 WORK=64
+VMID="" FQDN="" STORAGE="" BRIDGE="" IPMODE=dhcp IP="" GW="" DNS="" DNS_ASKED="" VLAN="" CORES=2 MEMORY=2048 DISK=8 WORK=64
 
 step_vmid() {
     local next; next=$(pvesh get /cluster/nextid 2>/dev/null)
@@ -295,6 +295,17 @@ step_address() {
     GW=$TEXT; ANS[Address]="$IP via $GW"
 }
 
+step_dns() {
+    # The node's own resolvers by default - what the container would inherit anyway.
+    [[ -n $DNS_ASKED ]] || DNS=$(awk '/^nameserver/ {printf "%s%s", sep, $2; sep=" "}' /etc/resolv.conf 2>/dev/null)
+    ask_text "DNS servers, space-separated (empty: the node's)" "$DNS" || return 1
+    local d
+    for d in $TEXT; do
+        [[ $d =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ || $d =~ ^[0-9a-fA-F:]+:[0-9a-fA-F:]*$ ]] || { log warn "$d is not an IP address"; sleep 1; return 4; }
+    done
+    DNS=$(echo $TEXT) DNS_ASKED=1; ANS[DNS]=${DNS:-from the node}
+}
+
 step_vlan() {
     ask_text "VLAN tag (empty: none)" "$VLAN" || return 1
     [[ -z $TEXT || ( $TEXT =~ ^[0-9]+$ && TEXT -ge 1 && TEXT -le 4094 ) ]] || { log warn "1-4094 or empty"; sleep 1; return 4; }
@@ -320,7 +331,7 @@ step_confirm() {
 }
 
 declare -A STEP_KEY=([step_vmid]=ID [step_fqdn]=Name [step_storage]=Storage [step_bridge]=Network
-    [step_address]=Address [step_vlan]=VLAN [step_size]=Size [step_confirm]=Install)
+    [step_address]=Address [step_dns]=DNS [step_vlan]=VLAN [step_size]=Size [step_confirm]=Install)
 
 # ---------------------------------------------------------------------------------
 # Install
@@ -419,7 +430,7 @@ install() {
     [[ $FQDN == *.* ]] && domain=${FQDN#*.}
     log run "Creating container $VMID ($FQDN)"
     pct create "$VMID" "local:vztmpl/$template" \
-        --hostname "$host" ${domain:+--searchdomain "$domain"} \
+        --hostname "$host" ${domain:+--searchdomain "$domain"} ${DNS:+--nameserver "$DNS"} \
         --description "PVE VM Studio" --tags pve-vm-studio \
         --cores "$CORES" --memory "$MEMORY" --swap 512 --rootfs "$STORAGE:$DISK" \
         --mp9 "${WORK_VOLUME:-$STORAGE:$WORK},mp=/var/lib/pve-vm-studio/work,backup=0,mountoptions=discard" \
@@ -521,7 +532,7 @@ main() {
     if [[ ${1:-} == --defaults ]]; then
         VMID=$(pvesh get /cluster/nextid) FQDN=pve-vm-studio${SEARCH:+.$SEARCH} STORAGE=local-lvm BRIDGE=vmbr0
     else
-        run_steps step_vmid step_fqdn step_storage step_bridge step_address step_vlan step_size step_confirm
+        run_steps step_vmid step_fqdn step_storage step_bridge step_address step_dns step_vlan step_size step_confirm
     fi
     install
 }

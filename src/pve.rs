@@ -21,8 +21,15 @@ pub struct Pve {
     endpoints: std::sync::Arc<std::sync::RwLock<Vec<std::sync::Arc<Endpoint>>>>,
     active: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     cfg: std::sync::Arc<PveConfig>,
-    /// TLS for that websocket - the same trust as the API client.
+    /// TLS for the API and that websocket: one trust for every way in.
     pub ws_tls: std::sync::Arc<rustls::ClientConfig>,
+    /// The names a node's certificate may carry, learned from PVE itself (cert_names):
+    /// a certificate valid for one of them passes even though it does not name the address
+    /// the studio connects to - so an ACME or uploaded certificate added later does not
+    /// cut the studio off.
+    names: std::sync::Arc<std::sync::RwLock<Vec<String>>>,
+    /// The check behind ws_tls, for adding the CAs an admin trusts (none when `insecure`).
+    verifier: Option<std::sync::Arc<LearnedNames>>,
     token_header: String,
     /// /cluster/nextid only suggests an id; two jobs asking at once get the same one. Held
     /// from asking until the VM exists.
@@ -78,10 +85,14 @@ pub struct NodeEndpoint {
     /// The DNS name of its own certificate (ACME or uploaded); "" while it runs on PVE's.
     #[serde(default)]
     pub tls_name: String,
+    /// Every name its certificate may carry - its FQDN from /etc/hosts, its ACME domains and
+    /// the names on its own certificate - asked of PVE while the connection is trusted.
+    #[serde(default)]
+    pub names: Vec<String>,
 }
 
 impl Endpoint {
-    fn new(cfg: &PveConfig, label: &str, url_s: &str, tls_name: Option<&str>) -> Result<Self> {
+    fn new(tls: &rustls::ClientConfig, label: &str, url_s: &str, tls_name: Option<&str>) -> Result<Self> {
         // tls_name: requests name the certificate's name, but go to url's address - the
         // certificate is checked for that name, and no DNS lookup is involved.
         let url = reqwest::Url::parse(url_s).with_context(|| format!("[pve] url {url_s}"))?;
@@ -109,13 +120,8 @@ impl Endpoint {
             if let Some(t) = timeout {
                 b = b.timeout(t);
             }
-            if let Some(ca) = &cfg.ca_file {
-                let pem = std::fs::read(ca).with_context(|| format!("reading {}", ca.display()))?;
-                b = b.add_root_certificate(reqwest::Certificate::from_pem(&pem)?);
-            }
-            if cfg.insecure {
-                b = b.danger_accept_invalid_certs(true);
-            }
+            // The roots (system + configured CA), `insecure` and the learned names are all in it.
+            b = b.tls_backend_preconfigured(tls.clone());
             Ok(b.build()?)
         };
         Ok(Self {
@@ -131,12 +137,16 @@ impl Endpoint {
 
 impl Pve {
     pub fn new(cfg: &PveConfig) -> Result<Self> {
-        let first = Endpoint::new(cfg, &cfg.url, &cfg.url, cfg.tls_name.as_deref())?;
+        let names: std::sync::Arc<std::sync::RwLock<Vec<String>>> = Default::default();
+        let (tls, verifier) = tls_config(cfg, names.clone())?;
+        let first = Endpoint::new(&tls, &cfg.url, &cfg.url, cfg.tls_name.as_deref())?;
         Ok(Self {
             endpoints: std::sync::Arc::new(std::sync::RwLock::new(vec![std::sync::Arc::new(first)])),
             active: Default::default(),
             cfg: std::sync::Arc::new(cfg.clone()),
-            ws_tls: std::sync::Arc::new(ws_tls_config(cfg)?),
+            ws_tls: std::sync::Arc::new(tls),
+            names,
+            verifier,
             token_header: format!("PVEAPIToken={}={}", cfg.token_id, cfg.token_secret),
             vmid_lock: Default::default(),
         })
@@ -157,10 +167,15 @@ impl Pve {
     pub fn set_nodes(&self, nodes: &[NodeEndpoint]) {
         let configured = reqwest::Url::parse(&self.cfg.url).ok().and_then(|u| u.host_str().map(|h| h.trim_matches(['[', ']']).to_owned())).unwrap_or_default();
         let current = self.endpoint().label.clone();
+        // The names first - the configured node's own included, which keeps its endpoint.
+        let mut learned: Vec<String> = nodes.iter().flat_map(|n| n.names.iter().chain(std::iter::once(&n.tls_name))).filter(|n| !n.is_empty()).map(|n| n.to_ascii_lowercase()).collect();
+        learned.sort();
+        learned.dedup();
+        *self.names.write().unwrap() = learned;
         let mut eps = vec![self.endpoints.read().unwrap()[0].clone()];
         for n in nodes.iter().filter(|n| !n.ip.is_empty() && n.ip != configured && n.tls_name != configured) {
             let host = if n.ip.contains(':') { format!("[{}]", n.ip) } else { n.ip.clone() };
-            match Endpoint::new(&self.cfg, &n.node, &format!("https://{host}:8006"), (!n.tls_name.is_empty()).then_some(n.tls_name.as_str())) {
+            match Endpoint::new(&self.ws_tls, &n.node, &format!("https://{host}:8006"), (!n.tls_name.is_empty()).then_some(n.tls_name.as_str())) {
                 Ok(e) => eps.push(std::sync::Arc::new(e)),
                 Err(e) => tracing::warn!("PVE node {} as a way to the API: {e:#}", n.node),
             }
@@ -177,8 +192,10 @@ impl Pve {
         let mut out = Vec::new();
         for s in status.iter().filter(|s| s.kind == "node") {
             let Some(ip) = s.ip.clone() else { continue };
-            let tls_name = if s.online == Some(1) { self.custom_cert_name(&s.name).await.unwrap_or_default() } else { String::new() };
-            out.push(NodeEndpoint { node: s.name.clone(), ip, tls_name });
+            let online = s.online == Some(1);
+            let tls_name = if online { self.custom_cert_name(&s.name).await.unwrap_or_default() } else { String::new() };
+            let names = if online { self.cert_names(&s.name).await } else { Vec::new() };
+            out.push(NodeEndpoint { node: s.name.clone(), ip, tls_name, names });
         }
         out.sort_by(|a, b| a.node.cmp(&b.node));
         Ok(out)
@@ -593,17 +610,18 @@ impl Pve {
     }
 }
 
-/// rustls for the serial console's websocket: the system's roots plus the configured CA, as
-/// for the API client (a PVE with an ACME certificate is signed by a public CA, not by its
-/// own), or no checks at all when `insecure` is set.
-fn ws_tls_config(cfg: &PveConfig) -> Result<rustls::ClientConfig> {
+/// rustls for the API and the serial console's websocket: the system's roots plus the
+/// configured CA (a PVE with an ACME certificate is signed by a public CA, not by its own),
+/// a certificate valid for the address asked for or for a name learned from PVE, or no
+/// checks at all when `insecure` is set.
+fn tls_config(cfg: &PveConfig, names: std::sync::Arc<std::sync::RwLock<Vec<String>>>) -> Result<(rustls::ClientConfig, Option<std::sync::Arc<LearnedNames>>)> {
     let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
     let builder = rustls::ClientConfig::builder_with_provider(provider.clone()).with_safe_default_protocol_versions()?;
     if cfg.insecure {
-        return Ok(builder
+        return Ok((builder
             .dangerous()
             .with_custom_certificate_verifier(std::sync::Arc::new(NoVerify(provider)))
-            .with_no_client_auth());
+            .with_no_client_auth(), None));
     }
     let mut roots = rustls::RootCertStore::empty();
     let (_, unreadable) = roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
@@ -616,7 +634,98 @@ fn ws_tls_config(cfg: &PveConfig) -> Result<rustls::ClientConfig> {
             roots.add(c?)?;
         }
     }
-    Ok(builder.with_root_certificates(roots).with_no_client_auth())
+    let inner = rustls::client::WebPkiServerVerifier::builder_with_provider(std::sync::Arc::new(roots.clone()), provider.clone()).build()?;
+    let v = std::sync::Arc::new(LearnedNames { inner: std::sync::RwLock::new(inner), names, base: roots, provider });
+    Ok((builder.dangerous().with_custom_certificate_verifier(v.clone()).with_no_client_auth(), Some(v)))
+}
+
+/// The full check (chain to a trusted root, validity, signature) for the name asked for -
+/// and when only the name does not match, the same full check for each name PVE named
+/// itself. Nothing else is loosened.
+#[derive(Debug)]
+struct LearnedNames {
+    inner: std::sync::RwLock<std::sync::Arc<rustls::client::WebPkiServerVerifier>>,
+    names: std::sync::Arc<std::sync::RwLock<Vec<String>>>,
+    /// The system's roots and the configured CA - what the added CAs go on top of.
+    base: rustls::RootCertStore,
+    provider: std::sync::Arc<rustls::crypto::CryptoProvider>,
+}
+
+impl LearnedNames {
+    fn inner(&self) -> std::sync::Arc<rustls::client::WebPkiServerVerifier> {
+        self.inner.read().unwrap().clone()
+    }
+
+    /// The base roots plus these; takes effect with the next connection.
+    fn set_extra(&self, ders: &[Vec<u8>]) -> Result<()> {
+        let mut roots = self.base.clone();
+        // One that cannot be a trust anchor is left out, not the whole list with it.
+        let (_, bad) = roots.add_parsable_certificates(ders.iter().map(|d| rustls::pki_types::CertificateDer::from(d.clone())));
+        if bad > 0 {
+            tracing::warn!("{bad} added CA(s) could not be used as trust anchors");
+        }
+        *self.inner.write().unwrap() = rustls::client::WebPkiServerVerifier::builder_with_provider(std::sync::Arc::new(roots), self.provider.clone()).build()?;
+        Ok(())
+    }
+}
+
+impl Pve {
+    /// Trusts these CAs (DER) for PVE's certificate beside the system's and the configured
+    /// one - the admin's list from Studio settings, replacing the one before.
+    pub fn set_extra_cas(&self, ders: &[Vec<u8>]) -> Result<()> {
+        match &self.verifier {
+            Some(v) => v.set_extra(ders),
+            None => Ok(()),
+        }
+    }
+
+    pub fn ca_file(&self) -> Option<&Path> {
+        self.cfg.ca_file.as_deref()
+    }
+}
+
+impl rustls::client::danger::ServerCertVerifier for LearnedNames {
+    fn verify_server_cert(
+        &self,
+        end: &rustls::pki_types::CertificateDer<'_>,
+        inter: &[rustls::pki_types::CertificateDer<'_>],
+        name: &rustls::pki_types::ServerName<'_>,
+        ocsp: &[u8],
+        now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        use rustls::{CertificateError::*, Error::InvalidCertificate};
+        let inner = self.inner();
+        match inner.verify_server_cert(end, inter, name, ocsp, now) {
+            Err(e @ InvalidCertificate(NotValidForName | NotValidForNameContext { .. })) => {
+                let names = self.names.read().unwrap().clone();
+                names
+                    .iter()
+                    .filter_map(|n| rustls::pki_types::ServerName::try_from(n.clone()).ok())
+                    .find_map(|n| inner.verify_server_cert(end, inter, &n, ocsp, now).ok())
+                    .ok_or(e)
+            }
+            r => r,
+        }
+    }
+    fn verify_tls12_signature(
+        &self,
+        m: &[u8],
+        c: &rustls::pki_types::CertificateDer<'_>,
+        d: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.inner().verify_tls12_signature(m, c, d)
+    }
+    fn verify_tls13_signature(
+        &self,
+        m: &[u8],
+        c: &rustls::pki_types::CertificateDer<'_>,
+        d: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.inner().verify_tls13_signature(m, c, d)
+    }
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.inner().supported_verify_schemes()
+    }
 }
 
 #[derive(Debug)]
@@ -747,6 +856,109 @@ impl Pve {
         let custom = certs.iter().find(|c| c["filename"].as_str() == Some("pveproxy-ssl.pem"))?;
         custom["san"].as_array()?.iter().filter_map(|s| s.as_str()).find(|s| s.parse::<std::net::IpAddr>().is_err() && *s != "localhost" && s.contains('.')).map(str::to_owned)
     }
+
+    /// Every DNS name a node's certificate may carry, now or once one is ordered or
+    /// uploaded: its FQDN from its /etc/hosts, its ACME domains (configured before an
+    /// order), and the names on the certificates it has. Asked over the trusted connection.
+    pub async fn cert_names(&self, node: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Ok(h) = self.get::<Value>(&format!("/nodes/{}/hosts", enc(node))).await {
+            out.extend(hosts_names(h["data"].as_str().unwrap_or(""), node));
+        }
+        if let Ok(c) = self.get::<HashMap<String, Value>>(&format!("/nodes/{}/config", enc(node))).await {
+            out.extend(acme_names(&c));
+        }
+        if let Ok(certs) = self.get::<Vec<Value>>(&format!("/nodes/{}/certificates/info", enc(node))).await {
+            for c in &certs {
+                out.extend(c["san"].as_array().into_iter().flatten().filter_map(|s| s.as_str()).map(str::to_owned));
+            }
+        }
+        let mut out: Vec<String> = out.into_iter().map(|n| n.trim().trim_end_matches('.').to_ascii_lowercase())
+            .filter(|n| n.contains('.') && n.parse::<std::net::IpAddr>().is_err() && !n.starts_with('*') && n != "localhost.localdomain")
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+}
+
+/// The node's own FQDNs in its /etc/hosts: names whose first label is the node's name.
+fn hosts_names(hosts: &str, node: &str) -> Vec<String> {
+    hosts
+        .lines()
+        .map(|l| l.split('#').next().unwrap_or(""))
+        .flat_map(|l| l.split_whitespace().skip(1).map(str::to_owned).collect::<Vec<_>>())
+        .filter(|n| n.split('.').next().is_some_and(|f| f.eq_ignore_ascii_case(node)) && n.contains('.'))
+        .collect()
+}
+
+/// The ACME domains of a node's config: `acme: domains=a;b,...` and `acmedomainN: domain=x,...`.
+fn acme_names(cfg: &HashMap<String, Value>) -> Vec<String> {
+    let mut out = Vec::new();
+    for (k, v) in cfg {
+        let v = v.as_str().unwrap_or("");
+        let field = |name: &str| v.split(',').find_map(|kv| kv.strip_prefix(name).and_then(|r| r.strip_prefix('='))).map(str::to_owned);
+        if k == "acme" {
+            out.extend(field("domains").unwrap_or_default().split(';').filter(|d| !d.is_empty()).map(str::to_owned));
+        } else if k.starts_with("acmedomain") {
+            // The domain is the default key: "domain=x,plugin=y" or plain "x,plugin=y".
+            out.extend(field("domain").or_else(|| v.split(',').next().filter(|f| !f.contains('=')).map(str::to_owned)));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn names_from_hosts_and_acme() {
+        let hosts = "127.0.0.1 localhost.localdomain localhost\n10.10.0.10 pve-01.migolf.io pve-01 # node\n10.10.0.9 other.migolf.io\n";
+        assert_eq!(hosts_names(hosts, "pve-01"), ["pve-01.migolf.io"]);
+        let cfg: HashMap<String, Value> = [
+            ("acme".to_owned(), Value::from("account=default,domains=a.example.com;b.example.com")),
+            ("acmedomain0".to_owned(), Value::from("domain=c.example.com,plugin=cf")),
+            ("acmedomain1".to_owned(), Value::from("d.example.com,plugin=cf")),
+            ("description".to_owned(), Value::from("domain=no.example.com")),
+        ].into_iter().collect();
+        let mut n = acme_names(&cfg);
+        n.sort();
+        assert_eq!(n, ["a.example.com", "b.example.com", "c.example.com", "d.example.com"]);
+    }
+
+    #[test]
+    fn a_learned_name_passes_only_with_the_full_check() {
+        use rustls::client::danger::ServerCertVerifier;
+        use rustls::pki_types::{ServerName, UnixTime};
+        let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+        let ca = |cn: &str| {
+            let mut p = rcgen::CertificateParams::new(Vec::<String>::new()).unwrap();
+            p.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+            p.distinguished_name.push(rcgen::DnType::CommonName, cn);
+            let k = rcgen::KeyPair::generate().unwrap();
+            let c = p.self_signed(&k).unwrap();
+            (c, rcgen::Issuer::new(p, k))
+        };
+        let leaf = |name: &str, issuer: &rcgen::Issuer<rcgen::KeyPair>| {
+            let k = rcgen::KeyPair::generate().unwrap();
+            rcgen::CertificateParams::new(vec![name.to_owned()]).unwrap().signed_by(&k, issuer).unwrap()
+        };
+        let (trusted, issuer) = ca("trusted");
+        let (_, rogue) = ca("rogue");
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(trusted.der().clone()).unwrap();
+        let names: std::sync::Arc<std::sync::RwLock<Vec<String>>> = Default::default();
+        let v = LearnedNames { inner: std::sync::RwLock::new(rustls::client::WebPkiServerVerifier::builder_with_provider(std::sync::Arc::new(roots.clone()), provider.clone()).build().unwrap()), names: names.clone(), base: rustls::RootCertStore::empty(), provider };
+        let ip = ServerName::try_from("10.10.0.10").unwrap();
+        let check = |c: &rcgen::Certificate| v.verify_server_cert(c.der(), &[], &ip, &[], UnixTime::now()).is_ok();
+        let good = leaf("pve-01.migolf.io", &issuer);
+        assert!(!check(&good), "a name nobody learned");
+        names.write().unwrap().push("pve-01.migolf.io".into());
+        assert!(check(&good), "the learned name");
+        assert!(!check(&leaf("evil.example.com", &issuer)), "another name, same CA");
+        assert!(!check(&leaf("pve-01.migolf.io", &rogue)), "the learned name from an untrusted CA");
+    }
 }
 
 /// One row of GET /cluster/status: the cluster itself, or a node's membership.
@@ -851,7 +1063,7 @@ mod endpoint_tests {
     fn nodes_behind_the_configured_one() {
         let p = pve();
         assert_eq!(p.endpoint().origin, "https://pve-01.example.com:8006");
-        let n = |node: &str, ip: &str, name: &str| NodeEndpoint { node: node.into(), ip: ip.into(), tls_name: name.into() };
+        let n = |node: &str, ip: &str, name: &str| NodeEndpoint { node: node.into(), ip: ip.into(), tls_name: name.into(), names: vec![] };
         // The configured node (by its address) is not added again; the others follow it.
         p.set_nodes(&[n("pve-01", "10.10.0.10", "pve-01.example.com"), n("pve-02", "10.10.0.11", ""), n("pve-03", "10.10.0.12", "pve-03.example.com")]);
         assert_eq!(p.endpoint_count(), 3);

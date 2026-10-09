@@ -69,6 +69,11 @@ pub struct JobRow {
     pub created_at: String,
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
+    /// The catalog image the job's gold is of - its own gold, or the gold of the VM it
+    /// built. Read from the golds table, which keeps a removed gold's row, so the job
+    /// list can colour a gold or VM by what it is long after the gold is gone.
+    #[sqlx(default)]
+    pub image: Option<String>,
 }
 
 /// The handle a job's body writes through.
@@ -443,7 +448,13 @@ impl Jobs {
     }
 
     pub async fn list(&self, limit: i64) -> Result<Vec<JobRow>> {
-        Ok(sqlx::query_as("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?")
+        Ok(sqlx::query_as(
+            "SELECT j.*, COALESCE(g.image_id, gv.image_id) AS image FROM jobs j \
+             LEFT JOIN golds g ON g.id = CASE WHEN json_valid(j.params) THEN json_extract(j.params, '$.gold') END \
+             LEFT JOIN vms v ON v.id = CASE WHEN json_valid(j.params) THEN json_extract(j.params, '$.vm') END \
+             LEFT JOIN golds gv ON gv.id = v.gold_id \
+             ORDER BY j.created_at DESC LIMIT ?",
+        )
             .bind(limit)
             .fetch_all(&self.db)
             .await?)

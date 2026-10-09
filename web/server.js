@@ -659,7 +659,7 @@ function wmBuild(b) {
 
 async function bladeWinMedia(main, stale) {
   wmUi.main = main; wmUi.stale = stale;
-  // The language starts at the studio's region preselection (Studio settings).
+  // The language starts at the studio's region preselection (Image settings).
   if (!wmUi.lang) {
     try { catalogCache = catalogCache || await api("GET", "/catalog"); wmUi.lang = String(catalogCache.region.language || "en-US").toLowerCase(); } catch { /* the catalog picks en-us */ }
   }
@@ -1744,6 +1744,15 @@ function openJob(id) { jobSelected = id; state.blade = "jobs"; render(); }
 let jobsPoll = null, jobFilter = "all", jobsCache = [];
 const JOB_KIND = { "auto-update": "Windows update", bake: "Linux gold", "windows-bake": "Windows gold", media: "Windows media", fod: "Features on Demand", winpe: "WinPE", virtio: "virtio-win", deploy: "Deploy", "cluster-check": "Cluster check", acme: "Certificate" };
 const JOB_FILTERS = [["all", "All"], ["running", "Running"], ["failed", "Failed"], ["succeeded", "Succeeded"]];
+/* A window's times as a list in quarter hours, written in the studio's time format - the
+   browser's own time input follows the OS locale instead (AM/PM on a 24-hour studio). */
+function mwTimeOpts(value) {
+  const hm = [];
+  for (let m = 0; m < 1440; m += 15) hm.push(`${String(m / 60 | 0).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+  if (value && !hm.includes(value)) hm.push(value), hm.sort();
+  const label = v => { if (clockFmt === "24h") return v; const [h, m] = v.split(":").map(Number); return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
+  return hm.map(v => `<option value="${v}"${v === value ? " selected" : ""}>${label(v)}</option>`).join("");
+}
 function clock(iso) { return iso ? new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: clockFmt !== "24h" }) : ""; }
 function dayOf(iso) {
   const d = new Date(iso), today = new Date(); today.setHours(0, 0, 0, 0);
@@ -1762,17 +1771,21 @@ function jobSubject(j) {
     const vm = p.vm && (cluster.vms || []).find(v => v.id === p.vm);
     const goldId = p.gold || (vm && vm.gold);
     const g = goldId && (cluster.golds || []).find(x => x.id === goldId);
-    const band = g && g.image_id ? serverGlyphBand({ imageId: g.image_id }) : srv ? serverGlyphBand(srv) : g && g.os === "linux" ? "linux" : "work";
+    // j.image is the server's answer from the golds table, which keeps a removed gold's row.
+    const image = j.image || (g && g.image_id);
+    const band = image ? serverGlyphBand({ imageId: image }) : srv ? serverGlyphBand(srv) : g && g.os === "linux" ? "linux" : "studio";
     return { key: "vm:" + n, name: n, icon: "vm.svg", band, what: "VM" };
   }
   if (j.kind === "media" && p.media) return { key: "media:" + p.media + ":" + p.build, name: j.title.replace(/^Build /, "").replace(/ media \(.*\)$/, ""), icon: "download.svg", what: "Windows media" };
   if (p.gold) {
     const g = (cluster.golds || []).find(x => x.id === p.gold);
-    // A removed gold's newest job (its removal) names no image: its bake does.
+    // A removed gold's newest job (its removal) names no image: its Linux bake does.
     const bakeImage = () => { for (const o of cluster.jobs || []) { try { const q = JSON.parse(o.params || "{}"); if (q.gold === p.gold && q.image) return q.image; } catch { /* none */ } } return ""; };
-    const image = (g && g.image_id) || p.image || bakeImage();
+    const image = j.image || (g && g.image_id) || p.image || bakeImage();
+    // Linux and Windows bakes share the kind "bake", so without an image the colour is
+    // unknown - neutral grey rather than a guessed OS colour.
     return { key: "gold:" + p.gold, name: "Gold " + String(p.gold).replace(/^(pve-|bake-)/, ""), icon: "gold-image.svg",
-      band: image ? serverGlyphBand({ imageId: image }) : (j.kind === "bake" ? "linux" : "work"), what: "Gold" };
+      band: image ? serverGlyphBand({ imageId: image }) : g && g.os === "linux" ? "linux" : "studio", what: "Gold" };
   }
   if (j.kind === "fod" && p.fod) return { key: "fod:" + p.fod, name: j.title.replace(/^Build /, ""), icon: "fod.svg", what: "Features on Demand" };
   const k = { winpe: ["WinPE", "os-window.svg"], virtio: ["virtio-win", "disk.svg"], "cluster-check": ["Cluster", "servers.svg"], certificate: ["Certificate", "certificate.svg"] }[j.kind];
@@ -2007,7 +2020,7 @@ function paintJobDelete(runs) {
 
 /* Asking before a delete: an overlay with the consequence, and "Don't ask again" for this
    kind of delete - remembered in this browser, switched back on under Studio settings. */
-const CONFIRM_KINDS = { jobs: "Deleting job history", golds: "Removing golds", clear: "Clearing VMs from view", abort: "Cancelling a running job", isos: "Deleting ISOs" };
+const CONFIRM_KINDS = { jobs: "Deleting job history", golds: "Removing golds", clear: "Clearing VMs from view", abort: "Cancelling a running job", isos: "Deleting ISOs", cas: "Removing trusted CAs" };
 const skipConfirm = kind => { try { return localStorage.getItem("pvs.skipConfirm." + kind) === "1"; } catch { return false; } };
 function setSkipConfirm(kind, skip) { try { skip ? localStorage.setItem("pvs.skipConfirm." + kind, "1") : localStorage.removeItem("pvs.skipConfirm." + kind); } catch { /* this browser keeps nothing */ } }
 /* Resolves false (cancel), true (the main action) or "alt" (the second, smaller choice - e.g.
@@ -2311,6 +2324,89 @@ function highlightHelp(text) {
 }
 
 const acmeForm = { email: "", challenge: "dns-01", dns_provider: "", staging: false, extra_names: [] };
+/* The Network card's form: kept across renders, filled from the container on first sight. */
+let netForm = null;
+function netFormFrom(net) {
+  const [ip, prefix] = (net.mode === "static" ? net.ip : net.current_ip || "").split("/");
+  return { mode: net.mode, ip: ip || "", prefix: Number(prefix) || 24, gw: (net.mode === "static" ? net.gw : net.current_gw) || "", dns: net.dns.length ? [...net.dns] : [""] };
+}
+function netMeta(net) {
+  const dns = net.dns.length ? `DNS ${net.dns.join(", ")}` : "DNS from the node";
+  return net.mode === "static" ? `${net.ip} · gateway ${net.gw} · ${dns}` : `DHCP · ${net.current_ip || "no lease"} · ${dns}`;
+}
+function netCard(net, err) {
+  if (!net) return gsCard("gs-net", "static-ip.svg", "Network", "unavailable", `<p class="hint err">${esc(err || "The studio's container was not found in PVE.")}</p>`, "", false);
+  const f = netForm, st = f.mode === "static";
+  const dnsRows = f.dns.map((d, i) => `<div class="dns-row"><input data-net-dns="${i}" value="${esc(d)}" placeholder="from the node" style="background-image:url('${iconSrc("dns.svg")}')">
+      ${f.dns.length > 1 ? `<button class="btn icon danger-text" type="button" title="Remove DNS server" aria-label="Remove DNS server" data-net-dns-del="${i}">${trashIcon()}</button>` : ""}</div>`).join("");
+  return gsCard("gs-net", "static-ip.svg", `Network ${infoTip("Network", `The address of the studio's container (CT ${net.vmid}, ${net.iface} on ${net.bridge}${net.vlan ? `, VLAN ${net.vlan}` : ""}), set through Proxmox VE. Apply restarts the container; the page follows the studio to its new address. The search domain comes from the DNS name.`)}`, esc(netMeta(net)), `
+    <div class="grid-3"><div class="field-like">${fieldLabel("static-ip.svg", "Address")}
+      <div class="ov-seg" role="group" aria-label="Address">
+        <button type="button" class="btn${st ? "" : " on"}" data-net-mode="dhcp" aria-pressed="${!st}">DHCP</button><button type="button" class="btn${st ? " on" : ""}" data-net-mode="static" aria-pressed="${st}">Static</button>
+      </div></div></div>
+    <div style="margin-top:12px">${st ? `<div class="grid-2">
+        ${field(fieldLabel("static-ip.svg", "IP address / prefix"), `<div class="ip-prefix-row"><input id="netIp" value="${esc(f.ip)}" placeholder="10.10.0.20">${prefixSelectHtml('id="netPrefix"', f.prefix)}</div>`)}
+        ${field(fieldLabel("vnet.svg", "Gateway"), `<input id="netGw" value="${esc(f.gw)}" placeholder="10.10.0.1">`)}</div>`
+      : `<div class="kv-grid"><div>Address</div><div class="kv-val mono">${esc(net.current_ip || "no lease yet")}</div><div>Gateway</div><div class="kv-val mono">${esc(net.current_gw || "—")}</div></div>`}</div>
+    <div class="field-group">DNS servers ${infoTip("DNS servers", "Empty: the container uses the DNS servers of its Proxmox VE node.")}</div>
+    <div class="grid-2"><label class="field">Search order
+      <div class="dns-list" style="display:flex; flex-direction:column; gap:6px">${dnsRows}
+        <button class="btn" type="button" id="netDnsAdd" style="align-self:flex-start;margin-top:4px"><img src="${iconSrc("dns.svg")}" alt=""> Add DNS server</button></div></label></div>
+    ${actions(act("netApply", "save.svg", "Apply", true))}`, "", false);
+}
+/* Trusted CAs: the cluster CA (read-only) and the ones added here, one row each. */
+const caFp = fp => { const b = String(fp).split(":"); return b.length > 6 ? `${b.slice(0, 4).join(":")}:…:${b.slice(-2).join(":")}` : fp; };
+const caDate = d => new Date(d + "T00:00:00").toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+function caCard(cas) {
+  if (!cas) return "";
+  const row = (c, fixed) => `<tr><td><div class="dp-cell"><img src="${iconSrc("certificate.svg")}" alt=""><div class="dp-two"><b>${esc(c.name)}</b><span>${fixed ? "PVE cluster CA" : c.kind === "root" ? "self-signed" : `issued by ${esc(c.issuer)}`}</span></div></div></td>
+    <td><span class="pill">${fixed ? "Cluster CA" : c.kind === "root" ? "Root" : "Intermediate"}</span></td><td>${esc(caDate(c.not_after))}</td><td class="mono" title="${esc(c.fingerprint)}">${esc(caFp(c.fingerprint))}</td>
+    <td style="text-align:right">${fixed ? "" : `<button class="btn icon danger-text" type="button" title="Remove CA" aria-label="Remove CA" data-ca-del="${esc(c.fingerprint)}" data-ca-name="${esc(c.name)}">${trashIcon()}</button>`}</td></tr>`;
+  const meta = ["Public roots", cas.cluster.length ? "PVE cluster CA" : "", cas.added.length ? `${cas.added.length} added` : ""].filter(Boolean).join(" · ");
+  return gsCard("gs-ca", "certificate.svg", `Trusted CAs ${infoTip("Trusted CAs", "Certificates PVE presents are checked against these and the public roots of the system. Add your own CA here before you install a certificate from it in PVE.")}`, esc(meta), `
+    <div class="table-wrap"><table class="data"><thead><tr><th>CA</th><th>Kind</th><th>Valid until</th><th>Fingerprint (SHA-256)</th><th></th></tr></thead>
+      <tbody>${cas.cluster.map(c => row(c, true)).join("")}${cas.added.map(c => row(c, false)).join("")}</tbody></table></div>
+    <div class="row gs-actions"><input type="file" id="caFile" accept=".cer,.crt,.pem,.der,.p7b,.p7c" hidden>${act("caAdd", "certificate.svg", "Add CA", true)}</div>`, "", false);
+}
+/* What a picked file holds, before anything is trusted. */
+function caConfirm(file, parsed) {
+  return new Promise(resolve => {
+    const ov = document.createElement("div");
+    ov.className = "overlay open confirm-overlay";
+    const n = parsed.cas.length;
+    const rows = parsed.cas.map(c => `<div class="cf-row keep"><span class="cf-ic">${CF_ROW_ICON.keep()}</span><span><b>${esc(c.name)}</b> · ${c.kind === "root" ? "root" : `issued by ${esc(c.issuer)}`} · until ${esc(caDate(c.not_after))}</span><span class="cf-n">${esc(caFp(c.fingerprint))}</span></div>`).join("") +
+      parsed.skipped.map(x => `<div class="cf-row"><span class="cf-ic" style="color:var(--fg-muted)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 8h8"/></svg></span><span style="color:var(--fg-muted)">${esc(x)} · not a CA, skipped</span><span class="cf-n"></span></div>`).join("");
+    ov.innerHTML = `<div class="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle">
+      <h2 class="cf-title" id="cfTitle"><img src="${iconSrc("certificate.svg")}" alt="">${n ? `Trust ${n === 1 ? "this CA" : `${n} CAs`} from ${esc(file)}?` : `No CA in ${esc(file)}`}</h2>
+      <div class="cf-rows">${rows}</div>
+      <div class="cf-foot"><div class="cf-actions"><button class="btn" type="button" data-cf="no">${n ? "Cancel" : "Close"}</button>${n ? `<button class="btn primary" type="button" data-cf="yes"><img src="${iconSrcOnAccent("certificate.svg")}" alt=""> Trust ${n === 1 ? "CA" : `${n} CAs`}</button>` : ""}</div></div></div>`;
+    const done = v => { document.removeEventListener("keydown", key, true); ov.remove(); resolve(v); };
+    const key = e => { if (e.key === "Escape") { e.stopPropagation(); done(false); } };
+    ov.addEventListener("click", e => { const b = e.target.closest("[data-cf]"); if (b) done(b.dataset.cf === "yes"); else if (e.target === ov) done(false); });
+    document.addEventListener("keydown", key, true);
+    document.body.appendChild(ov);
+    ov.querySelector('[data-cf="no"]').focus();
+  });
+}
+/* Asks before the move: the page goes with the studio, and the DNS name has to follow. */
+function netConfirm(target, fqdn) {
+  return new Promise(resolve => {
+    const ov = document.createElement("div");
+    ov.className = "overlay open confirm-overlay";
+    const row = (k, text, n) => `<div class="cf-row ${k}"><span class="cf-ic">${CF_ROW_ICON[k]()}</span><span>${esc(text)}</span><span class="cf-n">${esc(n)}</span></div>`;
+    ov.innerHTML = `<div class="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle">
+      <h2 class="cf-title" id="cfTitle"><img src="${iconSrc("static-ip.svg")}" alt="">${target ? `Move the studio to ${esc(target)}?` : "Switch the studio to DHCP?"}</h2>
+      <div class="cf-rows">${row("move", "The container restarts, this page reloads at the new address", target || "DHCP")}
+        ${fqdn ? row("move", `The A record of ${fqdn} must follow`, "A") : ""}${row("keep", "No job is running", "0")}</div>
+      <div class="cf-foot"><div class="cf-actions"><button class="btn" type="button" data-cf="no">Cancel</button><button class="btn primary" type="button" data-cf="yes"><img src="${iconSrcOnAccent("save.svg")}" alt=""> ${target ? "Move" : "Switch"}</button></div></div></div>`;
+    const done = v => { document.removeEventListener("keydown", key, true); ov.remove(); resolve(v); };
+    const key = e => { if (e.key === "Escape") { e.stopPropagation(); done(false); } };
+    ov.addEventListener("click", e => { const b = e.target.closest("[data-cf]"); if (b) done(b.dataset.cf === "yes"); else if (e.target === ov) done(false); });
+    document.addEventListener("keydown", key, true);
+    document.body.appendChild(ov);
+    ov.querySelector('[data-cf="no"]').focus();
+  });
+}
 
 /* The names the certificate is for: the studio's own DNS name first (fixed - it is set
    above), then any added with +. Painted in place, so a typed credential stays. */
@@ -2568,25 +2664,53 @@ async function bladeMedia(main, stale) {
 }
 
 /* -- Image settings: how and where images are built, and how Windows golds stay current -- */
-/* ISO builds at a time: later ones wait in the queue. Each needs about 26 GB of the studio's
-   work volume while it runs, so the choices say how many fit. */
-function isoBuildsCard(w) {
+/* The media worker: the WinPE VM a Windows media build runs DISM in - how many builds at a
+   time, its size, and where it runs (the Build environment's node, disks and network). */
+function mediaWorkerCard(w, r) {
   const n = w.parallel || 1, room = w.build_room || 26e9, total = w.work_total || 0;
   const fit = total ? Math.max(1, Math.floor(total / room)) : 4;
   const gb = b => Math.round(b / 1e9);
   const choice = k => [String(k), `${k} at a time${k === 1 ? " · recommended" : ""}${k > fit ? ` · needs ${gb(k * room)} GB` : ""}`];
-  return gsCard("gd-isobuilds", "iso-media.svg", "ISO builds", `${n} at a time${total ? ` · work volume ${gb(total)} GB` : ""}`, `
+  const where = [r.node, r.disk_storage, r.bridge + (r.vlan ? ` (VLAN ${r.vlan})` : "")].filter(Boolean).join(" · ");
+  return gsCard("gd-worker", "ram.svg", `Media worker ${infoTip("Media worker", "The WinPE VM that applies the cumulative update to a Windows media build with DISM. It lives only while the build runs, on the Build environment's node, VM disks and network.")}`,
+    `${n} at a time · ${w.cores} cores · ${w.memory_mb / 1024} GB`, `
       <div class="grid-3">
         ${field(`<span class="field-label"><img src="${iconSrc("iso-media.svg")}" alt="">At a time${infoTip("ISO builds at a time", `Builds started beyond this wait in the queue and start when one ends, in order. Each build needs about ${gb(room)} GB of the studio's work volume while it runs (three times its download)${total ? ` - this one has ${gb(total)} GB, room for ${fit}` : ""}. Side by side they share one download link and one disk, so two are not twice as fast. The maintenance window builds one after another either way.`)}</span>`,
           `<select id="ibParallel">${opts([1, 2, 3, 4].map(choice), String(n))}</select>`)}
+        ${field(fieldLabel("cpu.svg", "Cores"), `<input id="wkCores" type="number" min="1" max="64" value="${w.cores}">`)}
+        ${field(fieldLabel("ram.svg", "Memory (MiB)"), `<input id="wkMem" type="number" min="2048" max="262144" step="1024" value="${w.memory_mb}">`)}
       </div>
+      <div class="kv-grid" style="margin-top:12px"><div>Runs on</div><div class="kv-val">${esc(where || "—")} <span class="muted" style="font-family:var(--font)">· as in Build environment</span></div></div>
       ${n > fit ? warnBanner(`${n} builds need about ${gb(n * room)} GB - the work volume has ${gb(total)} GB. Builds that run out of room fail partway.`) : ""}
       ${actions("", act("ibSave", "save.svg", "Save", true))}`, "", false);
 }
 
+/* What new bakes and Windows media downloads start with - preselected, never enforced. */
+function regionCard(region, cat) {
+  return gsCard("gd-region", "language.svg", `Region preselection ${infoTip("Region preselection", "Preselected, not enforced: new Linux and Windows bakes and Windows media downloads start with these, and each can still pick something else.")}`, region.language ? `${esc(region.language)} · formats ${esc(region.locale || region.language)} · ${esc(region.timezone || "time zone of the browser")}` : "not set - English (United States)", `
+      <div class="grid-2">
+        ${field(fieldLabel("language.svg", "Language"), `<select id="rgLang">${opts(regionLocales(cat), region.language || "en-US")}</select>`)}
+        ${field(fieldLabel("language.svg", "Formats"), `<select id="rgFormat">${opts(regionLocales(cat), region.locale || region.language || "en-US")}</select>`)}
+        ${field(fieldLabel("language.svg", "Keyboard"), `<select id="rgKeyboard">${opts(regionLocales(cat), region.keyboard || region.language || "en-US")}</select>`)}
+        ${field(fieldLabel("clock.svg", "Time zone"), `<select id="rgTz">${opts(cat.timezones.map(z => [z.id, z.id]), region.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC")}</select>`)}
+      </div>
+      ${actions(act("rgSave", "save.svg", "Save", true))}`, "", false);
+}
+function wireRegion(main) {
+  const on = (id, ev, fn) => { const el = $id(id); if (el) el.addEventListener(ev, fn); };
+  on("rgSave", "click", async () => {
+    try {
+      await api("PUT", "/settings/region", { language: $id("rgLang").value, locale: $id("rgFormat").value, keyboard: $id("rgKeyboard").value, timezone: $id("rgTz").value });
+      catalogCache = null; bakeForm.language = ""; winForm.locale = ""; winForm.keyboard = ""; winForm.timezone = ""; wmUi.lang = "";
+      toast("Saved - new bakes and downloads start with it"); renderServerBlade("imagesettings", main);
+    } catch (e) { toast(e.message, true); }
+  });
+}
+
 async function bladeImageSettings(main, stale) {
-  const [bake, c, au, worker] = await Promise.all([api("GET", "/settings/bake"), refreshInventory(), api("GET", "/auto-update").catch(() => null),
-    api("GET", "/settings/worker").catch(() => null)]);
+  const [bake, c, au, worker, region, cat] = await Promise.all([api("GET", "/settings/bake"), refreshInventory(), api("GET", "/auto-update").catch(() => null),
+    api("GET", "/settings/worker").catch(() => null), api("GET", "/settings/region").catch(() => ({})), catalogCache || api("GET", "/catalog")]);
+  catalogCache = cat;
   if (stale()) return;
   const inv = c.inventory;
   const s = bake.settings, r = bake.resolved || {};
@@ -2599,7 +2723,7 @@ async function bladeImageSettings(main, stale) {
     ${gsCard("gd-where", "settings.svg", "Build environment", `${esc(r.node || "")} · ${esc(r.disk_storage || "")} · ${esc(r.bridge || "")}`, `
       <div class="grid-3">
         ${field(fieldLabel("servers.svg", "Node"), `<select id="bsNode">${opts(inv.nodes.filter(n => n.status === "online").map(n => [n.node, n.node]), s.node, auto(r.node))}</select>`)}
-        ${field(fieldLabel("disk.svg", "Gold disks (images)"), `<select id="bsDisk">${opts(stor("images"), s.disk_storage, auto(r.disk_storage))}</select>`)}
+        ${field(`<span class="field-label"><img src="${iconSrc("disk.svg")}" alt="">VM disks (images)${infoTip("VM disks", "Golds, bake VMs and the media worker's scratch disk.")}</span>`, `<select id="bsDisk">${opts(stor("images"), s.disk_storage, auto(r.disk_storage))}</select>`)}
         ${field(fieldLabel("storage.svg", "Cloud image cache (import)"), `<select id="bsImport">${opts(stor("import"), s.import_storage, auto(r.import_storage))}</select>`)}
         ${field(fieldLabel("iso-media.svg", "ISOs: WinPE, virtio-win, media (iso)"), `<select id="bsIso">${opts(stor("iso"), s.iso_storage, auto(r.iso_storage))}</select>`)}
         ${field(fieldLabel("ram.svg", "Memory (MiB)"), `<input id="bsMem" type="number" min="1024" step="512" value="${s.memory_mb}">`)}
@@ -2617,12 +2741,13 @@ async function bladeImageSettings(main, stale) {
       </div>
       <div class="tip-box"><img src="${iconSrc("help.svg")}" alt=""><div>The Linux bake VM needs internet access on its network - by DHCP, or by the addresses above. "Auto" prefers shared storage, so one gold serves every node.</div></div>
       ${actions(bake.problem ? `<span class="hint err gs-actions-note">${esc(bake.problem)}</span>` : "", act("bsSave", "save.svg", "Save", true))}`, "", false)}
-    ${worker ? isoBuildsCard(worker) : ""}
+    ${worker ? mediaWorkerCard(worker, r) : ""}
+    ${regionCard(region, cat)}
     ${au ? autoUpdateCard(au) : ""}`;
   const on = (id, ev, fn) => { const el = $id(id); if (el) el.addEventListener(ev, fn); };
   on("ibSave", "click", async () => {
     try {
-      await api("PUT", "/settings/worker", { memory_mb: worker.memory_mb, cores: worker.cores, keep_downloads: !!worker.keep_downloads, parallel: parseInt($id("ibParallel").value, 10) || 1 });
+      await api("PUT", "/settings/worker", { memory_mb: parseInt($id("wkMem").value, 10) || 4096, cores: parseInt($id("wkCores").value, 10) || 2, keep_downloads: !!worker.keep_downloads, parallel: parseInt($id("ibParallel").value, 10) || 1 });
       toast("Saved"); renderServerBlade("imagesettings", main);
     } catch (e) { toast(e.message, true); }
   });
@@ -2639,6 +2764,7 @@ async function bladeImageSettings(main, stale) {
     } catch (e) { toast(e.message, true); }
   });
   wireAutoUpdate(main);
+  wireRegion(main);
 }
 
 /* -- Studio settings: the studio's own name and certificate -- */
@@ -2743,7 +2869,7 @@ function maintRowsHtml() {
   if (!rows.length) return `<p class="hint mw-empty">No window - the studio never updates itself or Windows golds on its own.</p>`;
   return rows.map((w, i) => `<div class="mw-row">
     <div class="ov-seg mw-days" role="group" aria-label="Days">${MW_DAYS.map(([k, l]) => `<button type="button" class="btn${w.days.includes(k) ? " on" : ""}" data-mw-day="${i}" data-day="${k}" aria-pressed="${w.days.includes(k)}">${l}</button>`).join("")}</div>
-    <div class="mw-times"><input type="time" data-mw-start="${i}" value="${esc(w.start)}" aria-label="Start"><span class="mw-dash">to</span><input type="time" data-mw-end="${i}" value="${esc(w.end)}" aria-label="End"></div>
+    <div class="mw-times"><select data-mw-start="${i}" aria-label="Start">${mwTimeOpts(w.start)}</select><span class="mw-dash">to</span><select data-mw-end="${i}" aria-label="End">${mwTimeOpts(w.end)}</select></div>
     ${toggle(`data-mw-patch="${i}"`, `Patch week only${infoTip("Patch week only", "The window opens only from Patch Tuesday (the second Tuesday of the month) to the Monday after it.")}`, !!w.patch_week_only, false, "", "mw-patch")}
     <button class="btn icon sm danger-text" type="button" data-mw-del="${i}" title="Remove this window" aria-label="Remove this window">${trashIcon()}</button>
   </div>`).join("");
@@ -3005,12 +3131,13 @@ function wireNotify(main, n) {
 }
 
 async function bladeStudio(main, stale) {
-  const [server, t, region, cat, worker, ver, maint, mail, notif, history] = await Promise.all([api("GET", "/settings/server"), api("GET", "/tls"), api("GET", "/settings/region"), catalogCache || api("GET", "/catalog"),
+  const [server, t, worker, ver, maint, mail, notif, history, netRaw, cas] = await Promise.all([api("GET", "/settings/server"), api("GET", "/tls"),
     api("GET", "/settings/worker").catch(() => ({ memory_mb: 4096, cores: 4 })), api("GET", "/studio/version").catch(() => null),
     api("GET", "/settings/maintenance").catch(() => null), api("GET", "/settings/mail").catch(() => null), api("GET", "/settings/notify").catch(() => null),
-    api("GET", "/notifications?limit=500").catch(() => [])]);
+    api("GET", "/notifications?limit=500").catch(() => []), api("GET", "/settings/network").catch(e => ({ error: e.message })), api("GET", "/settings/cas").catch(() => null)]);
+  const net = netRaw && !netRaw.error ? netRaw : null;
+  if (net && !netForm) netForm = netFormFrom(net);
   if (maint && !maintUi.rows) maintUi.rows = maint.settings.windows.map(w => ({ ...w, days: [...w.days] }));
-  catalogCache = cat;
   if (stale()) return;
   const c = t.certificate, st = t.settings;
   if (!acmeForm.email && st.acme.email) Object.assign(acmeForm, st.acme);
@@ -3022,6 +3149,7 @@ async function bladeStudio(main, stale) {
       <span class="pill">DNS name: ${esc(server.settings.fqdn || "not set")}</span>
       ${c ? `<span class="pill status ${c.days_left < 21 ? "warn" : "on"}">${esc(cap(mode))} · ${c.days_left} days left</span>` : `<span class="pill status off">No certificate</span>`}
     </div>
+    ${netCard(net, netRaw && netRaw.error)}
     ${gsCard("gs-dns", "dns.svg", "DNS name", server.settings.fqdn || "not set", `
       <div class="grid-2">${field(fieldLabel("dns.svg", "Fully qualified name"), `<input id="stFqdn" placeholder="pve-vm-studio.example.com" value="${esc(server.settings.fqdn)}">
         <span class="hint">What people type to reach the studio; the certificate is issued for it. It needs an A record for ${esc(server.suggested.filter(n => /^\d/.test(n)).join(", "))}.</span>`)}</div>
@@ -3052,28 +3180,13 @@ async function bladeStudio(main, stale) {
         <div class="grid-2">${field(fieldLabel("certificate.svg", "Certificate (PEM, with its chain)"), `<textarea id="imCert" placeholder="-----BEGIN CERTIFICATE-----"></textarea><input type="file" id="imCertFile" accept=".pem,.crt,.cer">`)}
           ${field(fieldLabel("key.svg", "Private key (PEM)"), `<textarea id="imKey" placeholder="-----BEGIN PRIVATE KEY-----"></textarea><input type="file" id="imKeyFile" accept=".pem,.key">`)}</div>
         ${actions(act("ssGo", "update.svg", "New self-signed certificate"), act("imGo", "certificate.svg", "Import", true))}</div></div>`, "", false)}
+    ${caCard(cas)}
     ${gsCard("gs-clock", "clock.svg", "Time format", clockFmt === "24h" ? "24-hour" : "12-hour", `
       <div class="grid-2">${field(fieldLabel("clock.svg", "Times show as"), `<select id="stClock">${opts([["12h", "12-hour - 3:45 PM"], ["24h", "24-hour - 15:45"]], clockFmt)}</select>
         <span class="hint">For everyone using the studio: jobs, the dashboard, certificates. Job logs always use 24-hour.</span>`)}</div>
       ${actions(act("stClockSave", "save.svg", "Save", true))}`, "", false)}
-    ${gsCard("gs-worker", "ram.svg", "Media worker", `${worker.cores} cores · ${worker.memory_mb / 1024} GB`, `
-      <div class="grid-2">
-        ${field(`<span class="field-label"><img src="${iconSrc("cpu.svg")}" alt="">Cores${infoTip("Media worker", "The WinPE VM that applies the cumulative update to a Windows media build with DISM. It lives only while the build runs.")}</span>`,
-          `<input id="wkCores" type="number" min="1" max="64" value="${worker.cores}">`)}
-        ${field(fieldLabel("ram.svg", "Memory (MiB)"), `<input id="wkMem" type="number" min="2048" max="262144" step="1024" value="${worker.memory_mb}">`)}
-      </div>
-      ${actions(act("wkSave", "save.svg", "Save", true))}`, "", false)}
     ${gsCard("gs-confirm", "trash.svg", `Confirmations ${infoTip("Confirmations", "All on by default. \"Don't ask again\" in a delete dialog switches its question off here - remembered per browser, not for everyone.")}`, Object.keys(CONFIRM_KINDS).some(skipConfirm) ? "some skipped in this browser" : "asks before every delete", `
       <div class="toggle-grid">${Object.entries(CONFIRM_KINDS).map(([k, l]) => toggle(`id="cf_${k}"`, `Ask before ${esc(l.toLowerCase())}`, !skipConfirm(k))).join("")}</div>`, "", false)}
-    ${gsCard("gs-region", "language.svg", "Region preselection", region.language ? `${esc(region.language)} · formats ${esc(region.locale || region.language)} · ${esc(region.timezone || "time zone of the browser")}` : "not set - English (United States)", `
-      <div class="grid-2">
-        ${field(fieldLabel("language.svg", "Language"), `<select id="rgLang">${opts(regionLocales(cat), region.language || "en-US")}</select>`)}
-        ${field(fieldLabel("language.svg", "Formats"), `<select id="rgFormat">${opts(regionLocales(cat), region.locale || region.language || "en-US")}</select>`)}
-        ${field(fieldLabel("language.svg", "Keyboard"), `<select id="rgKeyboard">${opts(regionLocales(cat), region.keyboard || region.language || "en-US")}</select>`)}
-        ${field(fieldLabel("clock.svg", "Time zone"), `<select id="rgTz">${opts(cat.timezones.map(z => [z.id, z.id]), region.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC")}</select>`)}
-      </div>
-      <p class="hint" style="margin-top:8px">Preselected - not enforced: new Linux and Windows bakes and Windows media downloads start with these, and each can still pick something else.</p>
-      ${actions(act("rgSave", "save.svg", "Save", true))}`, "", false)}
     ${maint ? maintCard(maint) : ""}
     ${mail ? mailCard(mail, notif) : ""}
     ${notif ? notifyCard(notif, mail && mail.settings, history) : ""}
@@ -3097,21 +3210,50 @@ async function bladeStudio(main, stale) {
     } catch (err) { toast(err.message, true); }
   }));
   on("upAuto", "change", async e => { try { await api("PUT", "/settings/update", { auto: e.target.checked, channel: (ver && ver.channel) || "stable" }); toast(e.target.checked ? "Updates install in a maintenance window" : "Updates wait for you"); } catch (err) { toast(err.message, true); } });
+  const netKeep = () => {
+    if (!netForm) return;
+    if ($id("netIp")) { netForm.ip = $id("netIp").value.trim(); netForm.prefix = Number($id("netPrefix").value) || 24; netForm.gw = $id("netGw").value.trim(); }
+    main.querySelectorAll("[data-net-dns]").forEach(x => { netForm.dns[+x.dataset.netDns] = x.value.trim(); });
+  };
+  main.querySelectorAll("[data-net-mode]").forEach(b => b.addEventListener("click", () => { netKeep(); netForm.mode = b.dataset.netMode; renderServerBlade("studio", main); }));
+  main.querySelectorAll("[data-net-dns-del]").forEach(b => b.addEventListener("click", () => { netKeep(); netForm.dns.splice(+b.dataset.netDnsDel, 1); renderServerBlade("studio", main); }));
+  on("netDnsAdd", "click", () => { netKeep(); netForm.dns.push(""); renderServerBlade("studio", main); });
+  on("netApply", "click", async () => {
+    netKeep();
+    const f = netForm, st = f.mode === "static";
+    const busy = (cluster.jobs || []).filter(j => j.status === "running" || j.status === "queued").length;
+    if (busy) { toast(`${busy} job${busy === 1 ? "" : "s"} running - the studio restarts to change its network; wait until ${busy === 1 ? "it ends" : "they end"}`, true); return; }
+    if (!(await netConfirm(st ? f.ip : "", server.settings.fqdn))) return;
+    try {
+      // PVE moves a running container's address at once, which can cut this very request off
+      // before its answer arrives: a lost connection (no HTTP status) means it went through.
+      await api("PUT", "/settings/network", { mode: f.mode, ip: st ? `${f.ip}/${f.prefix}` : "", gw: st ? f.gw : "", dns: f.dns.filter(Boolean) })
+        .catch(e => { if (e instanceof TypeError) return null; throw e; });
+      netForm = null;
+      toast("Restarting the studio - the page follows in a few seconds");
+      // Reached by address: follow it. Reached by DNS name (or DHCP, which keeps its lease by MAC): reload.
+      setTimeout(() => { if (st && /^[\d.]+$/.test(location.hostname) && location.hostname !== f.ip) location.href = `${location.protocol}//${f.ip}${location.port ? ":" + location.port : ""}/`; else location.reload(); }, 15000);
+    } catch (e) { toast(e.message, true); }
+  });
+  on("caAdd", "click", () => $id("caFile").click());
+  on("caFile", "change", async e => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    try {
+      const data = await new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(",")[1] || ""); r.onerror = () => bad(new Error("could not read the file")); r.readAsDataURL(f); });
+      const parsed = await api("POST", "/settings/cas", { data, commit: false });
+      if (!(await caConfirm(f.name, parsed))) return;
+      await api("POST", "/settings/cas", { data, commit: true });
+      toast(parsed.cas.length === 1 ? `${parsed.cas[0].name} trusted` : `${parsed.cas.length} CAs trusted`);
+      renderServerBlade("studio", main);
+    } catch (err) { toast(err.message, true); }
+  });
+  main.querySelectorAll("[data-ca-del]").forEach(b => b.addEventListener("click", async () => {
+    if (!(await confirmDelete("cas", `Stop trusting ${b.dataset.caName}?`, "A PVE certificate from this CA no longer passes - the studio loses that node until its certificate comes from a CA it trusts.", "Remove"))) return;
+    try { await api("DELETE", `/settings/cas/${encodeURIComponent(b.dataset.caDel)}`); toast("No longer trusted"); renderServerBlade("studio", main); } catch (err) { toast(err.message, true); }
+  }));
   on("stFqdnSave", "click", async () => { try { await api("PUT", "/settings/server", { ...server.settings, fqdn: $id("stFqdn").value }); toast("Saved"); render(); } catch (e) { toast(e.message, true); } });
   Object.keys(CONFIRM_KINDS).forEach(k => on("cf_" + k, "change", e => { setSkipConfirm(k, !e.target.checked); toast(e.target.checked ? "Asks again" : "Won't ask"); }));
-  on("rgSave", "click", async () => {
-    try {
-      await api("PUT", "/settings/region", { language: $id("rgLang").value, locale: $id("rgFormat").value, keyboard: $id("rgKeyboard").value, timezone: $id("rgTz").value });
-      catalogCache = null; bakeForm.language = ""; winForm.locale = ""; winForm.keyboard = ""; winForm.timezone = ""; wmUi.lang = "";
-      toast("Saved - new bakes and downloads start with it"); render();
-    } catch (e) { toast(e.message, true); }
-  });
-  on("wkSave", "click", async () => {
-    try {
-      await api("PUT", "/settings/worker", { memory_mb: parseInt($id("wkMem").value, 10) || 4096, cores: parseInt($id("wkCores").value, 10) || 2, keep_downloads: !!worker.keep_downloads, parallel: worker.parallel || 1 });
-      toast("Saved"); render();
-    } catch (e) { toast(e.message, true); }
-  });
   on("dbgSave", "click", async () => {
     try {
       await api("PUT", "/settings/worker", { memory_mb: worker.memory_mb, cores: worker.cores, keep_downloads: $id("dbgKeep").checked, parallel: worker.parallel || 1 });
