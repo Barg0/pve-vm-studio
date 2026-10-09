@@ -359,6 +359,17 @@ async fn lego_args(paths: &Paths, fqdn: &str, acme: &AcmeSettings) -> Result<(Ve
 }
 
 async fn run_lego(args: Vec<String>, env: Vec<(String, String)>, log: Option<&JobLog>) -> Result<()> {
+    // Which lego answers: a DNS provider's fix arrives with a version, and Debian's stable one
+    // lags far behind its backports.
+    // Debian builds it without a version ("lego version dev"), so the package says it.
+    if let Some(log) = log {
+        if let Ok(o) = tokio::process::Command::new("dpkg-query").args(["-W", "-f=${Version}", "lego"]).output().await {
+            let v = String::from_utf8_lossy(&o.stdout).trim().to_owned();
+            if !v.is_empty() {
+                log.debug(format!("lego {v} (Debian package)")).await;
+            }
+        }
+    }
     let mut child = tokio::process::Command::new("lego")
         .args(&args)
         .envs(env)

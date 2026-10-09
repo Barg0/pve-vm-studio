@@ -843,9 +843,17 @@ a.btn, a.btn:hover { text-decoration: none; }
   /* the group names become a divider line */
   body.nav-rail .nav-group { font-size: 0; padding: 0; margin: 10px 12px; border-top: 1px solid var(--border); }
   body.nav-rail .nav-group:first-child { display: none; }
-  /* the count stays, small on the icon's corner */
-  body.nav-rail .nav-badge { position: absolute; top: 3px; right: 5px; transform: scale(.8); transform-origin: top right; }
-  body.nav-rail .nav-badge-word { display: none; }
+  /* the count stays on the icon's corner, solid and in front, as the bell's count does;
+     a word ("OK") has no room there and goes */
+  body.nav-rail .nav-badge {
+    position: absolute; top: 4px; right: 6px; z-index: 1; min-width: 16px; height: 16px; padding: 0 4px;
+    box-sizing: border-box; border: 0; font-size: 10px; line-height: 16px; justify-content: center;
+    background: var(--accent); color: var(--accent-fg);
+  }
+  body.nav-rail .nav-badge.ok { background: var(--success); color: var(--bg); }
+  body.nav-rail .nav-badge.err { background: var(--danger); color: var(--danger-fg); }
+  body.nav-rail .nav-badge.muted { background: var(--fg-muted); color: var(--bg); }
+  body.nav-rail .nav-badge-word, body.nav-rail .nav-badge.is-word { display: none; }
 }
 @media (max-width: 900px) {
   .layout { grid-template-columns: minmax(0, 1fr); }

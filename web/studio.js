@@ -5027,7 +5027,7 @@ function navBadge(id) {
   }
   if (id === "deploy") {
     const errors = reviewErrorCount();
-    return errors ? `<span class="nav-badge err">${errors}</span>` : state.servers.length ? `<span class="nav-badge ok">OK</span>` : "";
+    return errors ? `<span class="nav-badge err">${errors}</span>` : state.servers.length ? `<span class="nav-badge ok is-word">OK</span>` : "";
   }
   if (id === "access") {
     const missing = credentialRows().filter(r => !r.value).length;
@@ -8333,9 +8333,11 @@ function ovRdpFile(s) {
     `full address:s:${ovHost(s)}`,
     ...(ovInDomain(s) ? [] : [`username:s:${ovCredential(s)}`]),
     "prompt for credentials:i:1",
-    "screen mode id:i:1",
+    /* Full screen, as mstsc starts by default; a windowed file without desktopwidth and
+       desktopheight opens at mstsc's small default size. No smart sizing: it scales the
+       session to the window instead of letting dynamic resolution resize it. */
+    "screen mode id:i:2",
     "dynamic resolution:i:1",
-    "smart sizing:i:1",
     "authentication level:i:2"
   ].join("\r\n") + "\r\n";
 }
