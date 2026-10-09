@@ -510,7 +510,7 @@ fieldset.built-lock:disabled { opacity: .72; }
 .wm-pre-grid > div:nth-child(-n+2) { border-top: 0; }
 .wm-pre-grid > div:nth-child(odd) { border-right: 1px solid var(--divider); }
 .wm-pre-grid b { display: block; font-family: var(--mono); font-size: 15px; color: var(--fg); font-weight: 600; }
-@media (max-width: 1150px) { .wm-layout { grid-template-columns: 1fr; } .wm-scroll { height: auto; max-height: 60vh; } .wm-filter-row { grid-template-columns: 1fr; } }
+@media (max-width: 1150px) { .wm-layout { grid-template-columns: 1fr; } .wm-scroll { height: auto; max-height: 60vh; overflow-x: auto; } .wm-filter-row { grid-template-columns: minmax(0, 1fr); } .wm-filter-row > * { min-width: 0; } }
 /* The VM card's "New pool..." row under the Pool picker. */
 .pool-new { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; align-items: center; min-width: 260px; }
 .pool-new input { grid-column: span 2; }
@@ -794,3 +794,93 @@ a.btn, a.btn:hover { text-decoration: none; }
 
 /* A virtual edition says what it is made from too: Core or Desktop, then Virtual. */
 .wi-types { display: inline-flex; gap: 6px; align-items: center; }
+
+/* ---- Smaller screens: laptops, tablets, phones ----
+   Field grids follow the width of their own card (container queries), not the window: a
+   card beside the nav and a card on a phone break the same way. 1fr would never shrink below
+   a select's longest option - minmax(0, 1fr) lets it, and the select ellipsizes instead. */
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-1 > *, .grid-2 > *, .grid-3 > *, .card-body > *, .section-body > * { min-width: 0; }
+.field select, .field input:not([type=checkbox]):not([type=radio]):not([type=file]), .field textarea { max-width: 100%; min-width: 0; }
+.card:not(.login-card) { container-type: inline-size; }
+@container (max-width: 860px) {
+  .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* the disk table keeps its columns and scrolls sideways inside its frame */
+  .disk-grid { overflow-x: auto; }
+  .disk-grid-head, .disk-grid-row { min-width: max-content; }
+  .gold-card .card-head { grid-template-columns: minmax(0, 1fr) auto; }
+  .gold-card .gold-buildcol, .gold-card .gold-facts { grid-column: 1 / -1; grid-row: auto; }
+  .gold-card .gold-acts { grid-column: 2; grid-row: 1; }
+}
+@container (max-width: 600px) {
+  .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); }
+  /* key above value: a 220px key column leaves a phone nothing for the value */
+  .kv-grid { grid-template-columns: minmax(0, 1fr); }
+  .kv-grid > div:nth-child(2n+1) { border-bottom: none; padding-bottom: 2px; }
+  .kv-grid > div:nth-child(2n) { padding-top: 2px; }
+  .kv-grid > div:nth-last-child(2) { border-bottom: none; }
+  .kv-val .pill { white-space: normal; height: auto; }
+  .card-head { flex-wrap: wrap; }
+  .card-head > .card-actions { margin-left: auto; flex-wrap: wrap; }
+  .gold-card .card-head { grid-template-columns: minmax(0, 1fr); }
+  .gold-card .gold-acts { grid-column: 1; grid-row: auto; justify-content: flex-start; }
+  .gs-actions { flex-wrap: wrap; }
+  .fod-slot-foot { flex-wrap: wrap; }
+}
+
+/* The menu button: a drawer below 900px, the nav folded to a rail of icons above. */
+.nav-toggle { display: inline-flex; width: 36px; height: 36px; flex: none; padding: 0; align-items: center; justify-content: center; }
+.nav-scrim { display: none; }
+@media (min-width: 901px) {
+  .layout { transition: grid-template-columns .15s ease-out; }
+  body.nav-rail .layout { grid-template-columns: 56px minmax(0, 1fr); }
+  body.nav-rail .nav { overflow-x: hidden; }
+  body.nav-rail .nav-item { justify-content: center; padding-left: 0; padding-right: 3px; position: relative; }
+  body.nav-rail .nav-item .nav-label, body.nav-rail .nav-subgroup { display: none; }
+  /* the group names become a divider line */
+  body.nav-rail .nav-group { font-size: 0; padding: 0; margin: 10px 12px; border-top: 1px solid var(--border); }
+  body.nav-rail .nav-group:first-child { display: none; }
+  /* the count stays, small on the icon's corner */
+  body.nav-rail .nav-badge { position: absolute; top: 3px; right: 5px; transform: scale(.8); transform-origin: top right; }
+}
+@media (max-width: 900px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .nav {
+    position: fixed; top: 48px; bottom: 0; left: 0; width: min(280px, 85vw); z-index: 60;
+    transform: translateX(-100%); transition: transform .18s ease-out; box-shadow: var(--shadow-2);
+  }
+  body.nav-open .nav { transform: none; }
+  .nav-scrim { display: block; position: fixed; inset: 48px 0 0 0; background: rgba(0, 0, 0, .45); z-index: 59; }
+  .nav-scrim[hidden] { display: none; }
+  .content { padding: 16px 16px 40px; }
+  .blade-toolbar { flex-wrap: wrap; }
+}
+@media (max-width: 600px) {
+  .topbar { padding: 0 4px; }
+  .topbar .brand { font-size: 14px; margin: 0 4px; white-space: nowrap; }
+  #themeName, .user-chip, .topbar .save-state { display: none; }
+  .content { padding: 12px 12px 32px; }
+  .page-title { font-size: 18px; }
+  .overlay { padding: 12px; align-items: flex-start; overflow-y: auto; }
+  .modal { padding: 16px; }
+  .cf-foot, .cf-actions { flex-wrap: wrap; }
+}
+@media (max-width: 400px) { .topbar .brand { font-size: 0; gap: 0; } }
+/* iOS Safari zooms the page into any field whose text is under 16px when it gets focus. */
+@media (pointer: coarse) and (max-width: 600px) { input, select, textarea { font-size: 16px; } }
+@media (prefers-reduced-motion: reduce) { .nav, .layout { transition: none; } }
+
+/* Touch: fingers, not a pointer - controls at least 36px, list rows a little taller. The
+   desktop keeps its density (pointer: fine never matches this). The floor is !important:
+   many controls pin a height with min-height: 0 in rules more specific than these, and on
+   a touch screen this floor is meant to win over every one of them. */
+@media (pointer: coarse) {
+  .btn, select, input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]) { min-height: 36px !important; height: auto; }
+  .btn.icon, .le-name-add .btn.sm { min-width: 36px !important; }
+  .dp-dest { min-height: 36px; }
+  .gold-label { padding: 8px 0; margin: -8px 0; }
+  .chip-input input, .ml-to input { min-height: 0 !important; }
+  .nav-item { padding-top: 12px; padding-bottom: 12px; }
+  .toggle { min-height: 44px; }
+}

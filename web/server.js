@@ -99,6 +99,26 @@ $id("loginForm").addEventListener("submit", async e => {
   finally { $id("loginBtn").disabled = false; }
 });
 
+/* The menu button: below 900px it opens the nav as a drawer (picking a blade, the scrim or
+   Escape closes it); wider, it folds the nav to a rail of icons and back - remembered per
+   browser. */
+const narrow = () => matchMedia("(max-width: 900px)").matches;
+function navDrawer(open) {
+  document.body.classList.toggle("nav-open", open);
+  $id("navToggle").setAttribute("aria-expanded", String(open));
+  $id("navScrim").hidden = !open;
+}
+function navRail(on) {
+  document.body.classList.toggle("nav-rail", on);
+  $id("navToggle").setAttribute("aria-expanded", String(!on));
+  try { on ? localStorage.setItem("pvs.navRail", "1") : localStorage.removeItem("pvs.navRail"); } catch { /* this browser keeps nothing */ }
+}
+try { if (localStorage.getItem("pvs.navRail") === "1") document.body.classList.add("nav-rail"); } catch { /* none */ }
+$id("navToggle").addEventListener("click", () => narrow() ? navDrawer(!document.body.classList.contains("nav-open")) : navRail(!document.body.classList.contains("nav-rail")));
+$id("navScrim").addEventListener("click", () => navDrawer(false));
+$id("nav").addEventListener("click", e => { if (e.target.closest("[data-blade]")) navDrawer(false); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && document.body.classList.contains("nav-open")) navDrawer(false); });
+
 $id("logoutBtn").addEventListener("click", async () => {
   await flushSave();
   try { await api("DELETE", "/session"); } catch { /* gone already */ }

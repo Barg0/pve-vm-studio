@@ -5048,7 +5048,7 @@ function renderNav() {
     /* subhead: the designing blades above, building and connecting below. */
     if (b.subhead) head += `<div class="nav-group nav-subgroup">${esc(b.subhead)}</div>`;
     return `${head}
-    <button class="nav-item ${state.blade === b.id ? "active" : ""}" data-blade="${b.id}">
+    <button class="nav-item ${state.blade === b.id ? "active" : ""}" data-blade="${b.id}" title="${esc(b.label)}">
       <img src="${iconSrc(b.icon)}" alt=""><span class="nav-label">${esc(b.label)}</span>${navBadge(b.id)}
     </button>`;
   }).join("");
