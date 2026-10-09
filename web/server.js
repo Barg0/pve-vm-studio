@@ -2408,6 +2408,24 @@ function caConfirm(file, parsed) {
     ov.querySelector('[data-cf="no"]').focus();
   });
 }
+/* Asks before the studio restarts on another time zone. */
+function tzConfirm(name) {
+  return new Promise(resolve => {
+    const ov = document.createElement("div");
+    ov.className = "overlay open confirm-overlay";
+    const row = (k, text) => `<div class="cf-row ${k}"><span class="cf-ic">${CF_ROW_ICON[k]()}</span><span>${esc(text)}</span><span class="cf-n"></span></div>`;
+    ov.innerHTML = `<div class="modal confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="cfTitle">
+      <h2 class="cf-title" id="cfTitle"><img src="${iconSrc("clock.svg")}" alt="">Switch the studio to ${esc(name)}?</h2>
+      <div class="cf-rows">${row("move", "The studio restarts, this page reloads in a few seconds")}${row("keep", "Maintenance windows keep their times, in the new zone")}${row("keep", "No job is running")}</div>
+      <div class="cf-foot"><div class="cf-actions"><button class="btn" type="button" data-cf="no">Cancel</button><button class="btn primary" type="button" data-cf="yes"><img src="${iconSrcOnAccent("clock.svg")}" alt=""> Switch</button></div></div></div>`;
+    const done = v => { document.removeEventListener("keydown", key, true); ov.remove(); resolve(v); };
+    const key = e => { if (e.key === "Escape") { e.stopPropagation(); done(false); } };
+    ov.addEventListener("click", e => { const b = e.target.closest("[data-cf]"); if (b) done(b.dataset.cf === "yes"); else if (e.target === ov) done(false); });
+    document.addEventListener("keydown", key, true);
+    document.body.appendChild(ov);
+    ov.querySelector('[data-cf="no"]').focus();
+  });
+}
 /* Asks before the move: the page goes with the studio, and the DNS name has to follow. */
 function netConfirm(target, fqdn) {
   return new Promise(resolve => {
@@ -2896,7 +2914,7 @@ function maintRowsHtml() {
 }
 
 function maintCard(m) {
-  const meta = m.open ? `open now, until ${esc(m.open)}` : m.next ? `next ${esc(fmtWhen(m.next))}` : "none - nothing runs on its own";
+  const meta = (m.open ? `open now, until ${esc(m.open)}` : m.next ? `next ${esc(fmtWhen(m.next))}` : "none - nothing runs on its own") + (m.zone && (m.open || m.next) ? ` · ${esc(m.zone)}` : "");
   const badge = m.open ? `<span class="pill status on">Open</span>` : "";
   return gsCard("gs-maint", "clock.svg", `Maintenance windows ${infoTip("Maintenance windows", "When the studio may do work nobody started: its own update (when Install updates automatically is on), then the Windows golds that keep current. Work starts only inside a window; at its end no new step starts, and one already running finishes. An end before the start runs past midnight. Times are the studio's" + (m.zone ? " (" + m.zone + ")" : "") + ".")}`, meta, `
     <div id="mwRows" class="mw-rows">${maintRowsHtml()}</div>
@@ -3151,10 +3169,12 @@ function wireNotify(main, n) {
 }
 
 async function bladeStudio(main, stale) {
-  const [server, t, worker, ver, maint, mail, notif, history, netRaw, cas] = await Promise.all([api("GET", "/settings/server"), api("GET", "/tls"),
+  const [server, t, worker, ver, maint, mail, notif, history, netRaw, cas, tz, cat] = await Promise.all([api("GET", "/settings/server"), api("GET", "/tls"),
     api("GET", "/settings/worker").catch(() => ({ memory_mb: 4096, cores: 4 })), api("GET", "/studio/version").catch(() => null),
     api("GET", "/settings/maintenance").catch(() => null), api("GET", "/settings/mail").catch(() => null), api("GET", "/settings/notify").catch(() => null),
-    api("GET", "/notifications?limit=500").catch(() => []), api("GET", "/settings/network").catch(e => ({ error: e.message })), api("GET", "/settings/cas").catch(() => null)]);
+    api("GET", "/notifications?limit=500").catch(() => []), api("GET", "/settings/network").catch(e => ({ error: e.message })), api("GET", "/settings/cas").catch(() => null),
+    api("GET", "/settings/timezone").catch(() => null), catalogCache || api("GET", "/catalog")]);
+  catalogCache = cat;
   const net = netRaw && !netRaw.error ? netRaw : null;
   if (net && !netForm) netForm = netFormFrom(net);
   if (maint && !maintUi.rows) maintUi.rows = maint.settings.windows.map(w => ({ ...w, days: [...w.days] }));
@@ -3201,9 +3221,11 @@ async function bladeStudio(main, stale) {
           ${field(fieldLabel("key.svg", "Private key (PEM)"), `<textarea id="imKey" placeholder="-----BEGIN PRIVATE KEY-----"></textarea><input type="file" id="imKeyFile" accept=".pem,.key">`)}</div>
         ${actions(act("ssGo", "update.svg", "New self-signed certificate"), act("imGo", "certificate.svg", "Import", true))}</div></div>`, "", false)}
     ${caCard(cas)}
-    ${gsCard("gs-clock", "clock.svg", "Time format", clockFmt === "24h" ? "24-hour" : "12-hour", `
-      <div class="grid-2">${field(fieldLabel("clock.svg", "Times show as"), `<select id="stClock">${opts([["12h", "12-hour - 3:45 PM"], ["24h", "24-hour - 15:45"]], clockFmt)}</select>
-        <span class="hint">For everyone using the studio: jobs, the dashboard, certificates. Job logs always use 24-hour.</span>`)}</div>
+    ${gsCard("gs-clock", "clock.svg", "Time", [clockFmt === "24h" ? "24-hour" : "12-hour", tz && tz.current].filter(Boolean).join(" · "), `
+      <div class="grid-2">${field(`<span class="field-label"><img src="${iconSrc("clock.svg")}" alt="">Times show as${infoTip("Times show as", "For everyone using the studio: jobs, the dashboard, certificates. Job logs always use 24-hour.")}</span>`,
+          `<select id="stClock">${opts([["12h", "12-hour - 3:45 PM"], ["24h", "24-hour - 15:45"]], clockFmt)}</select>`)}
+        ${tz ? field(`<span class="field-label"><img src="${iconSrc("language.svg")}" alt="">Time zone${infoTip("Time zone", `The studio's own: maintenance windows and its log run on it. Set on its container (CT ${tz.vmid}) through Proxmox VE; changing it restarts the studio. Times in the browser stay in the browser's zone.`)}</span>`,
+          `<select id="stTz">${opts([["host", `Same as the node${tz.config === "host" ? ` (${tz.current})` : ""}`], ...cat.timezones.map(z => [z.id, z.id])], tz.config)}</select>`) : ""}</div>
       ${actions(act("stClockSave", "save.svg", "Save", true))}`, "", false)}
     ${gsCard("gs-confirm", "trash.svg", `Confirmations ${infoTip("Confirmations", "All on by default. \"Don't ask again\" in a delete dialog switches its question off here - remembered per browser, not for everyone.")}`, Object.keys(CONFIRM_KINDS).some(skipConfirm) ? "some skipped in this browser" : "asks before every delete", `
       <div class="toggle-grid">${Object.entries(CONFIRM_KINDS).map(([k, l]) => toggle(`id="cf_${k}"`, `Ask before ${esc(l.toLowerCase())}`, !skipConfirm(k))).join("")}</div>`, "", false)}
@@ -3297,7 +3319,22 @@ async function bladeStudio(main, stale) {
     } catch (e) { toast(e.message, true); }
   }));
   on("stClockSave", "click", async () => {
-    try { const clock = $id("stClock").value; await api("PUT", "/settings/server", { ...server.settings, clock }); clockFmt = clock; toast("Saved"); render(); } catch (e) { toast(e.message, true); }
+    try {
+      const clock = $id("stClock").value;
+      if (clock !== clockFmt) { await api("PUT", "/settings/server", { ...server.settings, clock }); clockFmt = clock; }
+      const zone = $id("stTz") ? $id("stTz").value : null;
+      if (tz && zone && zone !== tz.config) {
+        const busy = (cluster.jobs || []).filter(j => j.status === "running" || j.status === "queued").length;
+        if (busy) { toast(`${busy} job${busy === 1 ? "" : "s"} running - the studio restarts to change its time zone; wait until ${busy === 1 ? "it ends" : "they end"}`, true); return; }
+        const name = zone === "host" ? "the node's time zone" : zone;
+        if (!(await tzConfirm(name))) return;
+        await api("PUT", "/settings/timezone", { timezone: zone });
+        toast("Restarting the studio on its new time zone");
+        setTimeout(() => location.reload(), 15000);
+        return;
+      }
+      toast("Saved"); render();
+    } catch (e) { toast(e.message, true); }
   });
   const keepAcme = () => { acmeForm.email = $id("leMail").value.trim(); acmeForm.challenge = $id("leChallenge").value; acmeForm.dns_provider = $id("leProvider").value; };
   leFqdn = server.settings.fqdn || "";

@@ -173,6 +173,50 @@ pub async fn apply(pve: &Pve, c: &Change, fqdn: &str) -> Result<Own> {
     read(pve).await
 }
 
+/// The studio's time zone: what its container's config says ("host" follows the node, as the
+/// installer set it) and the zone the container runs on now. Maintenance windows are in it.
+#[derive(Debug, Clone, Serialize)]
+pub struct TimeZone {
+    pub node: String,
+    pub vmid: u32,
+    pub config: String,
+    pub current: String,
+}
+
+fn current_zone() -> String {
+    std::fs::read_to_string("/etc/timezone")
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::fs::read_link("/etc/localtime").ok().and_then(|p| p.to_string_lossy().split("zoneinfo/").nth(1).map(str::to_owned)))
+        .unwrap_or_else(|| "UTC".into())
+}
+
+pub async fn read_timezone(pve: &Pve) -> Result<TimeZone> {
+    let (node, vmid, _, cfg) = locate(pve).await?;
+    Ok(TimeZone { node, vmid, config: cfg.get("timezone").and_then(Value::as_str).unwrap_or("host").to_owned(), current: current_zone() })
+}
+
+/// "host", or an IANA zone the container knows (its tzdata has the file).
+pub fn zone_ok(tz: &str) -> bool {
+    tz == "host"
+        || (!tz.is_empty()
+            && tz.len() <= 64
+            && !tz.contains("..")
+            && tz.chars().all(|c| c.is_ascii_alphanumeric() || "/_-+".contains(c))
+            && std::path::Path::new("/usr/share/zoneinfo").join(tz).is_file())
+}
+
+/// Writes the zone into the container's config; it takes effect with the reboot that follows.
+pub async fn set_timezone(pve: &Pve, tz: &str) -> Result<TimeZone> {
+    if !zone_ok(tz) {
+        bail!("'{tz}' is not a time zone");
+    }
+    let (node, vmid, _, _) = locate(pve).await?;
+    let _: Value = pve.put(&format!("/nodes/{}/lxc/{vmid}/config", enc(&node)), vec![("timezone".into(), tz.to_owned())]).await?;
+    Ok(TimeZone { node, vmid, config: tz.to_owned(), current: current_zone() })
+}
+
 /// Restarts the studio's container so the new network is in place - the studio stops
 /// with it, so this is called after the answer went out.
 pub async fn reboot(pve: &Pve, node: &str, vmid: u32) -> Result<()> {

@@ -64,6 +64,7 @@ pub fn router() -> Router<AppState> {
         .route("/vms/{id}", axum::routing::delete(remove_vm))
         .route("/settings/server", get(get_server).put(put_server))
         .route("/settings/network", get(get_network).put(put_network))
+        .route("/settings/timezone", get(get_timezone).put(put_timezone))
         .route("/settings/cas", get(get_cas).post(post_cas))
         .route("/settings/cas/{fingerprint}", axum::routing::delete(delete_cas))
         .route("/settings/region", get(get_region).put(put_region))
@@ -1043,6 +1044,38 @@ async fn require_admin(app: &AppState, user: &User) -> ApiResult<()> {
 async fn get_server(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
     let s: ServerSettings = settings::load(&app.db, "server").await?;
     Ok(Json(json!({ "settings": s, "suggested": tls::local_names("") })))
+}
+
+/// The studio's time zone - its container's, in PVE.
+async fn get_timezone(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    Ok(Json(selfnet::read_timezone(&app.pve).await?))
+}
+
+#[derive(Deserialize)]
+struct ZoneChange {
+    timezone: String,
+}
+
+/// Sets it and restarts the container. Refused while a job runs: the restart would cut it off.
+async fn put_timezone(State(app): State<AppState>, user: User, Json(z): Json<ZoneChange>) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    if !selfnet::zone_ok(&z.timezone) {
+        return Err(ApiError::bad_request(format!("'{}' is not a time zone", z.timezone)));
+    }
+    let running = app.jobs.running_ids().await.len();
+    if running > 0 {
+        return Err(ApiError::bad_request(format!("{running} job(s) running - the studio restarts to change its time zone; wait until they end")));
+    }
+    let tz = selfnet::set_timezone(&app.pve, &z.timezone).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+    tracing::info!("time zone of container {} set to {} by {}, restarting", tz.vmid, tz.config, user.session.user);
+    let (pve, node, vmid) = (app.pve.clone(), tz.node.clone(), tz.vmid);
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        if let Err(e) = selfnet::reboot(&pve, &node, vmid).await {
+            tracing::warn!("restart of container {vmid} after the time zone change: {e:#}");
+        }
+    });
+    Ok(Json(tz))
 }
 
 /// The CAs trusted for PVE's certificate: the cluster CA the installer configured, and the

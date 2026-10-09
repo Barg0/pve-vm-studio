@@ -832,6 +832,8 @@ a.btn, a.btn:hover { text-decoration: none; }
 /* The menu button: a drawer below 900px, the nav folded to a rail of icons above. */
 .nav-toggle { display: inline-flex; width: 36px; height: 36px; flex: none; padding: 0; align-items: center; justify-content: center; }
 .nav-scrim { display: none; }
+.nav-badge { white-space: nowrap; }
+.nav-badge-word { margin-left: .3em; }
 @media (min-width: 901px) {
   .layout { transition: grid-template-columns .15s ease-out; }
   body.nav-rail .layout { grid-template-columns: 56px minmax(0, 1fr); }
@@ -843,6 +845,7 @@ a.btn, a.btn:hover { text-decoration: none; }
   body.nav-rail .nav-group:first-child { display: none; }
   /* the count stays, small on the icon's corner */
   body.nav-rail .nav-badge { position: absolute; top: 3px; right: 5px; transform: scale(.8); transform-origin: top right; }
+  body.nav-rail .nav-badge-word { display: none; }
 }
 @media (max-width: 900px) {
   .layout { grid-template-columns: minmax(0, 1fr); }

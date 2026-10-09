@@ -30,7 +30,12 @@ LOG_FILE=/var/log/pve-vm-studio-install.log
 USER_ID=pve-vm-studio@pve
 TOKEN=studio
 ROLES=PVEVMAdmin,PVEDatastoreAdmin,PVESDNUser,PVEAuditor
-PACKAGES="ca-certificates curl xorriso lego 7zip wimtools dosfstools mtools cabextract genisoimage gcab"
+PACKAGES="ca-certificates curl xorriso 7zip wimtools dosfstools mtools cabextract genisoimage gcab"
+# lego comes from Debian's backports: the stable release keeps 4.9.1, whose INWX support no
+# longer reads INWX's answers (fixed in lego 4.29). Only lego is taken from there.
+LEGO_FROM_BACKPORTS='codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+echo "deb http://deb.debian.org/debian ${codename}-backports main" > /etc/apt/sources.list.d/backports.list
+apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q -t "${codename}-backports" lego'
 
 # ---------------------------------------------------------------------------------
 # Output - the studio's palette and the PowerShell log layout
@@ -449,6 +454,9 @@ install() {
     log get "Packages: $PACKAGES"
     with_bar "installing packages" apt -- pct exec "$VMID" -- bash -c "apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q $PACKAGES" ||
         die "package installation failed - see $LOG_FILE"
+    log get "lego from Debian backports"
+    with_bar "installing lego" apt -- pct exec "$VMID" -- bash -c "$LEGO_FROM_BACKPORTS" ||
+        die "installing lego from backports failed - see $LOG_FILE"
 
     # ---- the studio ----
     log run "Installing the studio"

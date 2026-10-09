@@ -4992,7 +4992,7 @@ function navBadge(id) {
   const srv = typeof cluster !== "undefined" ? cluster : null;
   if (id === "golds" && srv) {
     const baking = srv.golds.filter(g => g.status === "baking").length;
-    if (baking) return `<span class="nav-badge">${baking} baking</span>`;
+    if (baking) return `<span class="nav-badge" title="${baking} baking">${baking}<span class="nav-badge-word">baking</span></span>`;
     const ready = srv.golds.filter(g => g.status === "ready").length;
     return ready ? `<span class="nav-badge ok">${ready}</span>` : `<span class="nav-badge err">0</span>`;
   }

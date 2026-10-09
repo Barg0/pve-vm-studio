@@ -33,8 +33,18 @@ if [[ ${FORCE:-0} != 1 ]] && pct exec "$VMID" -- systemctl is-active -q pve-vm-s
 fi
 
 # Packages a newer studio needs, installed when missing (the same list as install.sh).
-PACKAGES="ca-certificates curl xorriso lego 7zip wimtools dosfstools mtools cabextract genisoimage gcab"
+PACKAGES="ca-certificates curl xorriso 7zip wimtools dosfstools mtools cabextract genisoimage gcab"
 pct exec "$VMID" -- bash -c "missing=\$(for p in $PACKAGES; do dpkg -s \$p >/dev/null 2>&1 || echo \$p; done); [ -z \"\$missing\" ] || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \$missing >/dev/null; }"
+# lego from Debian's backports, as install.sh does: the stable release keeps 4.9.1, whose INWX
+# support no longer reads INWX's answers (fixed in 4.29). Once - a newer lego is left alone.
+pct exec "$VMID" -- bash -c '
+v=$(dpkg-query -W -f="\${Version}" lego 2>/dev/null)
+if [ -z "$v" ] || dpkg --compare-versions "$v" lt 4.29; then
+    codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+    echo "deb http://deb.debian.org/debian ${codename}-backports main" > /etc/apt/sources.list.d/backports.list
+    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -t "${codename}-backports" lego >/dev/null &&
+        echo "lego $(dpkg-query -W -f="\${Version}" lego) from ${codename}-backports"
+fi'
 # ISO storages read-only into the container (newer studios read Windows ISOs' editions).
 # A new mount point takes a container restart to appear.
 restart=0

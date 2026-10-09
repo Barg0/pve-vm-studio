@@ -533,7 +533,12 @@ rem virtual-edition bake here instead of after twenty minutes of audit mode.
 dism /English /Image:W:\ /Get-TargetEditions > X:\targets.txt 2>&1
 type X:\targets.txt > COM1
 for /f "usebackq tokens=1,2,3 delims=: " %%a in ("X:\targets.txt") do if /i "%%a %%b"=="Target Edition" echo PVS-TARGET %%c > COM1
-bcdboot W:\Windows /s S: /f UEFI > COM1 2>&1
+rem The image's own bcdboot, as Microsoft's apply steps do: its sysprep later updates the
+rem firmware boot entries this writes, and this WinPE can be a newer build than the image.
+set BCDBOOT=bcdboot
+if exist W:\Windows\System32\bcdboot.exe set BCDBOOT=W:\Windows\System32\bcdboot.exe
+echo PVS-BCDBOOT-WITH %BCDBOOT% > COM1
+%BCDBOOT% W:\Windows /s S: /f UEFI > COM1 2>&1
 rem Judged by the loader being there, not by the exit code - a bcdboot that did nothing
 rem once shipped a gold that could not boot.
 if not exist S:\EFI\Microsoft\Boot\bootmgfw.efi (echo PVS-NO-BOOTLOADER > COM1 & goto :fail)
@@ -783,6 +788,8 @@ echo PVS-PASS2-OK > COM1
 goto :eof
 :fail
 type W:\Windows\System32\Sysprep\Panther\setuperr.log > COM1 2>&1
+rem The whole sysprep log too: setuperr names the error, setupact what sysprep did around it.
+type W:\Windows\System32\Sysprep\Panther\setupact.log > COM1 2>&1
 echo PVS-PASS2-FAILED > COM1
 goto :eof
 :dism

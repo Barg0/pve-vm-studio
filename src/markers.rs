@@ -15,6 +15,7 @@ const TEXT: &[(&str, &str)] = &[
     ("APPLIED", "Image applied"),
     ("DRIVERS", "virtio drivers added to the image"),
     ("BCDBOOT", "Boot files written"),
+    ("BCDBOOT-WITH", "Boot files with"),
     ("TARGET", "Edition target"),
     ("EDITION", "Edition set to"),
     ("EDITION-NOT-CHANGED", "Edition not changed, still"),
