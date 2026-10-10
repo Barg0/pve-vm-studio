@@ -40,6 +40,7 @@ mod vms;
 mod web;
 mod wim;
 mod winget;
+mod winupdates;
 mod wu;
 mod windows;
 mod winpe;

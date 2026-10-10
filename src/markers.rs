@@ -71,6 +71,8 @@ const TEXT: &[(&str, &str)] = &[
     ("UPD", "Applying"),
     ("UPD-OK", "Applied"),
     ("UPD-FAIL", "Failed"),
+    ("UPD-SKIP", "Not applicable, skipped"),
+    ("STOPPED", "Stopped after a required step failed"),
     ("CLEANUP", "Cleaning up image"),
     ("HEALTH", "Scanning the component store"),
     ("COMMIT", "Saving image"),

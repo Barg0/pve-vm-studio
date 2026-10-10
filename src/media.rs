@@ -297,35 +297,6 @@ pub(crate) async fn update_targets(agg: &Path) -> UpdateInfo {
     out
 }
 
-/// The updates to apply, one per KB: the .msu where there is one, the .cab for the dynamic
-/// updates and where no .msu exists. Order as Microsoft's servicing steps: the cumulative
-/// update chain first, oldest first (the checkpoint, then the update built on it), then the
-/// rest in KB order.
-pub(crate) fn pick_updates(files: &[uup::File], info: &UpdateInfo) -> Vec<(uup::File, Target)> {
-    let targets = &info.targets;
-    let mut by_kb: Vec<(String, uup::File, Target)> = Vec::new();
-    for f in files.iter().filter(|f| is_update(&f.name)) {
-        let kb = kb_of(&f.name).unwrap_or_else(|| f.name.clone());
-        let target = targets.get(&kb).copied().unwrap_or(Target::Image);
-        let msu = f.name.to_lowercase().ends_with(".msu");
-        match by_kb.iter_mut().find(|(k, _, _)| *k == kb) {
-            Some(slot) => {
-                let better = if target == Target::Image { msu } else { !msu };
-                if better {
-                    slot.1 = f.clone();
-                }
-            }
-            None => by_kb.push((kb, f.clone(), target)),
-        }
-    }
-    by_kb.sort_by(|a, b| {
-        let n = |k: &str| k.trim_start_matches("KB").parse::<u64>().unwrap_or(u64::MAX);
-        let later = |k: &str| !info.cumulative.iter().any(|c| c == k);
-        later(&a.0).cmp(&later(&b.0)).then(n(&a.0).cmp(&n(&b.0)))
-    });
-    by_kb.into_iter().map(|(_, f, t)| (f, t)).collect()
-}
-
 /// Package CABs held back until an export asks for them. Off: the 26H2 run of 2026-10-04
 /// showed the client export refers to them (Features on Demand preinstalled in the image), so
 /// holding them back only cost a second round of downloads. The fallback in build() stays.
@@ -412,11 +383,23 @@ pub fn studio_ip() -> Result<String> {
 /// succeeded is reported with that step, not counted from a log that lost half the run.
 /// Errors and warnings only (/LogLevel:2): at the default level a cumulative update's log
 /// is 500-800 MB of info lines per image. dism.log keeps the full detail of the last steps.
+/// 0x800F081E (CBS_E_NOT_APPLICABLE) as DISM's exit code: the package has nothing for this
+/// image - a skip, not a failure.
+const NOT_APPLICABLE: &str = "-2146498530";
+
 fn dism_step(s: &mut String, what: &str, log: &str, dism: &str) {
     s.push_str(&format!("echo PVS-UPD {what} > COM1\r\n{dism} /LogPath:W:\\logs\\{log}.log /LogLevel:2 > COM1 2>&1\r\nset RC=!errorlevel!\r\nif \"!RC!\"==\"3010\" set RC=0\r\n"));
     s.push_str(&format!(
-        "if \"!RC!\"==\"0\" (echo PVS-UPD-OK {what} > COM1) else (echo PVS-UPD-FAIL {what} !RC! > COM1 & set ERR=1)\r\n%C% -T W:\\logs\\{log}.log %U%/logs/{log}.log > nul 2>&1\r\n"
+        "if \"!RC!\"==\"{NOT_APPLICABLE}\" (echo PVS-UPD-SKIP {what} > COM1) else if \"!RC!\"==\"0\" (echo PVS-UPD-OK {what} > COM1) else (echo PVS-UPD-FAIL {what} !RC! > COM1 & set ERR=1)\r\n%C% -T W:\\logs\\{log}.log %U%/logs/{log}.log > nul 2>&1\r\n"
     ));
+}
+
+/// A step the image cannot do without - the servicing stack, the cumulative update: its
+/// failure ends this image's servicing (Microsoft: resolve every failure before the next
+/// task, never ship an image of a failed one), and with it the worker.
+fn dism_step_required(s: &mut String, what: &str, log: &str, dism: &str) {
+    dism_step(s, what, log, dism);
+    s.push_str(&format!("if not \"!RC!\"==\"0\" if not \"!RC!\"==\"{NOT_APPLICABLE}\" (echo PVS-STOPPED {what} > COM1 & exit /b 1)\r\n"));
 }
 
 /// What the worker's DISM logs say: dism.log kept whole for reading (it rotates and holds
@@ -635,6 +618,20 @@ pub(crate) struct Extras {
     /// The cumulative update chain for boot.wim (as `image` names them), empty: boot.wim
     /// is not serviced.
     pub boot: Vec<String>,
+    /// Which of `image` are .NET (after the cleanup), by what the package is.
+    #[serde(default)]
+    pub dotnet: Vec<String>,
+    /// Which of `image` stop the image when they fail: the servicing stack and the
+    /// cumulative update.
+    #[serde(default)]
+    pub required: Vec<String>,
+}
+
+impl Extras {
+    /// .NET goes in after the cleanup. A worker planned before the planner knew it by name.
+    fn is_dotnet(&self, u: &str) -> bool {
+        self.dotnet.iter().any(|d| d == u) || u.to_lowercase().contains("-ndp")
+    }
 }
 
 /// A provisioning step (Edge, a framework, an app): its own markers - one line per app is
@@ -693,7 +690,7 @@ fn worker_units(indexes: usize, image: &[String], winre: &[String], ssu: Option<
         let f = file.to_lowercase();
         if f.ends_with(".msu") { 500.0 } else if f.contains("-ndp") { 20.0 } else { 10.0 }
     };
-    let is_net = |u: &&String| u.to_lowercase().contains("-ndp");
+    let is_net = |u: &&String| extra.is_dotnet(u);
     let file = |u: &String| u.rsplit('/').next().unwrap_or(u).to_owned();
     let mut v: Vec<(String, f64)> = vec![("COPY-IN".into(), 60.0)];
     for i in 1..=indexes {
@@ -803,13 +800,14 @@ fn worker_cmd_body(indexes: usize, chain: &[String], image: &[String], winre: &[
     // .NET after the cleanup (Microsoft's media steps: a .NET update leaves operations
     // pending that the cleanup would fail on); the rest - the enablement package first, then
     // the cumulative chain, as the build ordered them - before it.
-    let is_net = |u: &&String| u.to_lowercase().contains("-ndp");
+    let is_net = |u: &&String| extra.is_dotnet(u);
     for u in image.iter().filter(|u| !is_net(u)) {
         // lcu/<target>: the cumulative update chain sits in its own folder, the target named
         // alone - DISM takes the checkpoints in that folder first (Microsoft's checkpoint
         // procedure; naming the checkpoint itself fails with 0x80070228).
         let (file, local) = (u.rsplit('/').next().unwrap_or(u), u.replace('/', "\\"));
-        dism_step(&mut s, &format!("%1 {file}"), &log_name("%1", file), &format!("dism /English /Image:W:\\mount /Add-Package /PackagePath:W:\\upd\\{local} /ScratchDir:W:\\scratch"));
+        let step = if extra.required.iter().any(|r| r == u) { dism_step_required } else { dism_step };
+        step(&mut s, &format!("%1 {file}"), &log_name("%1", file), &format!("dism /English /Image:W:\\mount /Add-Package /PackagePath:W:\\upd\\{local} /ScratchDir:W:\\scratch"));
     }
     // Microsoft's procedure cleans the install image without /ResetBase (the updates stay
     // removable), and only a pending operation (0x800F0806) is a warning, not a failure.
@@ -847,7 +845,7 @@ fn worker_cmd_body(indexes: usize, chain: &[String], image: &[String], winre: &[
         // WinRE takes the servicing stack first (Microsoft: SSU, then the Safe OS update). Since
         // 24H2 it ships inside the cumulative update's .msu - a WIM, which the studio opened.
         if let Some(f) = ssu {
-            dism_step(&mut s, &format!("winre {f}"), "winre-ssu", &format!("dism /English /Image:W:\\mount /Add-Package /PackagePath:W:\\upd\\{f} /ScratchDir:W:\\scratch"));
+            dism_step_required(&mut s, &format!("winre {f}"), "winre-ssu", &format!("dism /English /Image:W:\\mount /Add-Package /PackagePath:W:\\upd\\{f} /ScratchDir:W:\\scratch"));
         }
         for u in winre {
             dism_step(&mut s, &format!("winre {u}"), &log_name("winre", u), &format!("dism /English /Image:W:\\mount /Add-Package /PackagePath:W:\\upd\\{u} /ScratchDir:W:\\scratch"));
@@ -1162,22 +1160,38 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         };
         uup::download_all(web, log, &mut pr, &mut files, &dl, &refresh).await?;
 
-        // Where each update goes, from Microsoft's CompDB names.
+        // What each update is, where it goes and in which order - read from the packages
+        // themselves (winupdates.rs). AggregatedMetadata (24H2 and later) names the checkpoint
+        // chain and cross-checks the reading.
         let info = match files.iter().find(|f| is_aggregated(&f.name)) {
             Some(f) => update_targets(&dl.join(&f.name)).await,
             None => UpdateInfo::default(),
         };
-        let picks = pick_updates(&files, &info);
-        let named = |t: Target| picks.iter().filter(|(_, x)| *x == t).map(|(f, _)| kb_of(&f.name).unwrap_or_else(|| f.name.clone())).collect::<Vec<_>>().join(", ");
-        log.ok(format!(
-            "Updates: install image {}; WinRE (Safe OS) {}; Setup {}",
-            or_none(&named(Target::Image)),
-            or_none(&named(Target::WinRe)),
-            or_none(&named(Target::Setup))
-        ))
-        .await;
-        let updates: Vec<uup::File> = picks.iter().filter(|(_, t)| *t == Target::Image).map(|(f, _)| f.clone()).collect();
-        let winre_updates: Vec<uup::File> = picks.iter().filter(|(_, t)| *t == Target::WinRe).map(|(f, _)| f.clone()).collect();
+        let upd_files: Vec<uup::File> = files.iter().filter(|f| is_update(&f.name)).cloned().collect();
+        let plan = crate::winupdates::plan_set(&dl, &upd_files, &info.cumulative).await;
+        log.run(format!("Update plan, read from each package's own manifest{}", if info.targets.is_empty() && info.cumulative.is_empty() { " (the set has no AggregatedMetadata)" } else { "" })).await;
+        for line in plan.lines() {
+            log.line(line).await;
+        }
+        // Where AggregatedMetadata says otherwise, it is named - the package's own word counts.
+        for k in plan.image.iter().chain(&plan.dotnet).chain(&plan.winre).chain(&plan.setup) {
+            let said = k.kb().and_then(|kb| info.targets.get(&kb).copied());
+            let is = match k.kind {
+                crate::winupdates::Kind::SafeOs => Target::WinRe,
+                crate::winupdates::Kind::Setup => Target::Setup,
+                _ => Target::Image,
+            };
+            if let Some(said) = said
+                && said != is
+            {
+                log.warn(format!("{}: AggregatedMetadata names it for {said:?}, the package itself is a {} - taken as the package says", k.short(), k.kind.label())).await;
+            }
+        }
+        let updates: Vec<uup::File> = plan.image.iter().chain(&plan.dotnet).map(|k| k.file.clone()).collect();
+        let winre_updates: Vec<uup::File> = plan.winre.iter().map(|k| k.file.clone()).collect();
+        let dotnet_files: Vec<String> = plan.dotnet.iter().map(|k| k.file.name.clone()).collect();
+        let required_files: Vec<String> = plan.image.iter().filter(|k| matches!(k.kind, crate::winupdates::Kind::ServicingStack | crate::winupdates::Kind::Cumulative)).map(|k| k.file.name.clone()).collect();
+        let standalone_ssu: Option<String> = plan.ssu.as_ref().map(|k| k.file.name.clone());
 
         // ---- Linux: the media, boot.wim, install.wim ----
         pr.stage(35.0, 42.0, "putting the image together");
@@ -1200,7 +1214,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         pr.part(&parts, p_setup, "the Setup media");
         crate::winpe::run_progress(log, "wimlib-imagex", &["apply", &first_s, "1", &tree.display().to_string(), "--no-acls", "--no-attributes"], |f| pr.within(f, format!("the Setup media · {:.0}%", f * 100.0))).await?;
         // The Setup dynamic update: its files into sources\ - before boot.wim takes Setup from there.
-        for (f, _) in picks.iter().filter(|(_, t)| *t == Target::Setup) {
+        for f in plan.setup.iter().map(|k| &k.file) {
             let x = dir.join("setupdu");
             let _ = tokio::fs::remove_dir_all(&x).await;
             tokio::fs::create_dir_all(&x).await?;
@@ -1427,8 +1441,29 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
 
             // WinRE's servicing stack: SSU-*.cab out of the cumulative update's .msu - since 24H2
             // a WIM (MSWIM header), which wimlib opens and WinPE's expand.exe cannot.
+            // What each name of the worker's list is, from the plan: .NET goes in after the
+            // cleanup, the servicing stack and the cumulative update stop the image if they fail.
+            let base = |n: &str| -> String {
+                let leaf = n.rsplit('/').next().unwrap_or(n);
+                match leaf.split_once('-') {
+                    Some((nn, rest)) if !n.contains('/') && nn.len() == 2 && nn.chars().all(|c| c.is_ascii_digit()) => rest.to_owned(),
+                    _ => leaf.to_owned(),
+                }
+            };
+            extra.dotnet = image_names.iter().filter(|n| dotnet_files.contains(&base(n))).cloned().collect();
+            extra.required = image_names.iter().filter(|n| required_files.contains(&base(n))).cloned().collect();
+            // WinRE takes the servicing stack first: the set's standalone one (Server 2022),
+            // otherwise the one inside the cumulative update's .msu (24H2 and later).
             let mut ssu_name: Option<String> = None;
             if !winre_names.is_empty()
+                && let Some(ssu) = &standalone_ssu
+                && let Some(n) = image_names.iter().find(|n| base(n) == *ssu)
+            {
+                log.line(format!("WinRE's servicing stack: {ssu}")).await;
+                ssu_name = Some(n.clone());
+            }
+            if ssu_name.is_none()
+                && !winre_names.is_empty()
                 // The servicing stack of the newest cumulative update - never a checkpoint's.
                 && let Some(lcu) = image_names
                     .iter()
@@ -1528,6 +1563,12 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             })
             .await?;
             report_dism_logs(log, work, &share, "media", &run_id).await?;
+            // A required step failed: named with DISM's code - the reason the media stops.
+            if let Some(stop) = m.iter().find_map(|l| l.strip_prefix("PVS-STOPPED ")) {
+                let (at, name) = stop.split_once(' ').unwrap_or(("", stop));
+                let code = m.iter().find_map(|l| l.strip_prefix(&format!("PVS-UPD-FAIL {at} {name} "))).map(dism_code).unwrap_or_default();
+                bail!("{} could not be installed into {} ({code}) - it is required, so the media stops here; DISM's log of the step is in the job's DISM logs", update_label(name), where_label(at));
+            }
             if !m.iter().any(|l| l == "PVS-WORKER-OK") {
                 bail!("the worker failed: {}", m.iter().rev().find(|l| l.contains("FAIL") || l.starts_with("PVS-NO")).or(m.last()).map(|l| crate::markers::text(l)).unwrap_or_else(|| "nothing on its serial console".into()));
             }
@@ -1575,6 +1616,11 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                         }
                     }
                     ["PVS-UPD-OK", at, name] => log.ok(format!("{} into {}: installed", update_label(name), where_label(at))).await,
+                    // 0x800F081E: the package has nothing for this image.
+                    ["PVS-UPD-SKIP", at, name] => log.line(format!("{} into {}: not applicable to this image - skipped", update_label(name), where_label(at))).await,
+                    // A required step (servicing stack, cumulative update) failed: the image
+                    // stops there; nothing of it is shipped.
+                    ["PVS-STOPPED", at, name] => log.warn(format!("{} is required - {} was not serviced further", update_label(name), where_label(at))).await,
                     ["PVS-UPD-FAIL", at, name, code] => {
                         let code = dism_code(code);
                         log.warn(format!("{} into {}: DISM failed with {code}", update_label(name), where_label(at))).await;
@@ -1820,9 +1866,6 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
     Ok(iso)
 }
 
-fn or_none(s: &str) -> &str {
-    if s.is_empty() { "none" } else { s }
-}
 
 /// A client set's package CABs become ESDs, so wimlib can refer to them. One converted on an
 /// earlier try (its ESD newer than the CAB) is kept; the CAB stays in the download cache.
@@ -2011,41 +2054,6 @@ mod tests {
         assert!(health_verdict("").is_err());
     }
 
-    fn f(name: &str) -> uup::File {
-        uup::File { name: name.into(), url: String::new(), sha1: String::new(), size: 1 }
-    }
-
-    #[test]
-    fn updates_in_order() {
-        let files = vec![
-            f("Windows11.0-KB5124010-x64.msu"),
-            f("Windows11.0-KB5125758-x64.cab"),
-            f("Windows11.0-KB5125758-x64.msu"),
-            f("Windows11.0-KB5125758-x64-baseless.cab"),
-            f("Windows11.0-KB5043080-x64.msu"),
-            f("Windows11.0-KB5121794-x64.cab"),
-            f("Windows11.0-KB5121794-x64.msu"),
-            f("Windows11.0-KB5127216-x64.cab"),
-            f("Windows11.0-KB5126052-x64-NDP481.cab"),
-        ];
-        let info = UpdateInfo {
-            targets: HashMap::from([("KB5125758".to_owned(), Target::WinRe), ("KB5127216".to_owned(), Target::Setup)]),
-            cumulative: vec!["KB5124010".into(), "KB5043080".into()],
-        };
-        let picked: Vec<(String, Target)> = pick_updates(&files, &info).into_iter().map(|(f, t)| (f.name, t)).collect();
-        assert_eq!(
-            picked,
-            vec![
-                ("Windows11.0-KB5043080-x64.msu".into(), Target::Image),
-                ("Windows11.0-KB5124010-x64.msu".into(), Target::Image),
-                ("Windows11.0-KB5121794-x64.msu".into(), Target::Image),
-                ("Windows11.0-KB5125758-x64.cab".into(), Target::WinRe),
-                ("Windows11.0-KB5126052-x64-NDP481.cab".into(), Target::Image),
-                ("Windows11.0-KB5127216-x64.cab".into(), Target::Setup),
-            ]
-        );
-    }
-
     #[test]
     fn iso_names() {
         let e = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
@@ -2101,6 +2109,26 @@ mod tests {
         assert_eq!(reverse_delta_only(""), None);
     }
 
+    /// The Server 2022 plan as the worker runs it: the servicing stack and the cumulative
+    /// update stop the image when they fail, .NET (known by the package, not its name) waits
+    /// for the cleanup, a package with nothing for the image is a skip.
+    #[test]
+    fn required_steps_and_dotnet_by_kind() {
+        let image = vec!["01-SSU-20348.5614-x64.cab".to_owned(), "02-Windows10.0-KB5007374-x64.cab".to_owned(), "03-Windows10.0-KB5122882-x64.cab".to_owned(), "04-Windows10.0-KB5126999-x64.cab".to_owned()];
+        let extra = Extras { dotnet: vec!["04-Windows10.0-KB5126999-x64.cab".into()], required: vec!["01-SSU-20348.5614-x64.cab".into(), "03-Windows10.0-KB5122882-x64.cab".into()], ..Default::default() };
+        let winre = vec!["re01-Windows10.0-KB5122889-x64.cab".to_owned()];
+        let cmd = worker_cmd_body(1, &[], &image, &winre, Some("01-SSU-20348.5614-x64.cab"), &extra);
+        assert!(cmd.contains("PVS-STOPPED %1 01-SSU-20348.5614-x64.cab"));
+        assert!(cmd.contains("PVS-STOPPED %1 03-Windows10.0-KB5122882-x64.cab"));
+        assert!(!cmd.contains("PVS-STOPPED %1 02-"), "an ordinary package only reports");
+        assert!(cmd.contains("PVS-STOPPED winre 01-SSU-20348.5614-x64.cab"));
+        let at = |n: &str| cmd.find(n).unwrap_or_else(|| panic!("{n} missing"));
+        assert!(at("01-SSU-20348.5614-x64.cab /Scratch") < at("03-Windows10.0-KB5122882-x64.cab /Scratch"));
+        assert!(at("PVS-UPD %1 cleanup") < at("PVS-UPD %1 04-Windows10.0-KB5126999-x64.cab"), ".NET after the cleanup");
+        assert!(at("winre 01-SSU-20348.5614-x64.cab") < at("winre re01-Windows10.0-KB5122889-x64.cab"), "WinRE: servicing stack, then Safe OS");
+        assert!(cmd.contains("PVS-UPD-SKIP"));
+    }
+
     #[test]
     fn worker_units_follow_the_script() {
         let image = vec!["01-Windows11.0-KB5121794-x64.cab".to_owned(), "02-Windows11.0-KB5126052-x64-NDP481.cab".to_owned(), "lcu1/Windows11.0-KB5043080-x64.msu".to_owned(), "lcu2/Windows11.0-KB5129195-x64.msu".to_owned()];
@@ -2111,6 +2139,7 @@ mod tests {
             frameworks: vec!["MSIXFramework\\Microsoft.VCLibs.x64.14.00.appx".into()],
             apps: vec![vec![app("Microsoft.BingNews_8wekyb3d8bbwe"), app("Microsoft.WindowsCalculator_8wekyb3d8bbwe")]],
             boot: vec![],
+            ..Default::default()
         };
         let ssu = Some("SSU-26100.9441-x64.cab");
         let cmd = worker_cmd_body(1, &[], &image, &winre, ssu, &extra);
@@ -2151,6 +2180,7 @@ mod tests {
             frameworks: vec!["MSIXFramework\\Microsoft.VCLibs.x64.14.00.appx".into()],
             apps: vec![vec![crate::apps::App { id: "Microsoft.BingNews_8wekyb3d8bbwe".into(), main: "Microsoft.BingNews_8wekyb3d8bbwe.msixbundle".into(), stub: true }]],
             boot: vec!["lcu1/Windows11.0-KB5043080-x64.msu".into(), "lcu2/Windows11.0-KB5124010-x64.msu".into()],
+            ..Default::default()
         };
         let cmd = worker_cmd_body(1, &[], &image, &[], None, &extra);
         let at = |n: &str| cmd.find(n).unwrap_or_else(|| panic!("{n} missing"));

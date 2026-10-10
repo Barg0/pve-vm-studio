@@ -1182,7 +1182,7 @@ pub(crate) async fn run_pass(
                         // One line per feature, capability or app is detail: the caller sums
                         // them up per Server Manager feature. So is a worker's verdict per
                         // update, which the media build words itself.
-                        if ["PVS-FEATURE-", "PVS-CAP-", "PVS-APP-", "PVS-PROV-", "PVS-UPD-OK", "PVS-UPD-FAIL"].iter().any(|p| part.starts_with(p)) {
+                        if ["PVS-FEATURE-", "PVS-CAP-", "PVS-APP-", "PVS-PROV-", "PVS-UPD-OK", "PVS-UPD-FAIL", "PVS-UPD-SKIP", "PVS-STOPPED"].iter().any(|p| part.starts_with(p)) {
                             log.debug(crate::markers::text(part)).await;
                         } else {
                             log.line(crate::markers::text(part)).await;
@@ -1281,7 +1281,7 @@ pub(crate) fn unit_key(marker: &str) -> Option<String> {
     let (key, args) = rest.split_once(' ').map_or((rest, ""), |(k, a)| (k, a.trim()));
     let first = || args.split_whitespace().next().map(str::to_owned);
     match key {
-        "UPD-OK" | "UPD-FAIL" | "APP-REMOVED" | "APP-FAIL" => None,
+        "UPD-OK" | "UPD-FAIL" | "UPD-SKIP" | "STOPPED" | "APP-REMOVED" | "APP-FAIL" => None,
         "PROV-OK" | "PROV-FAIL" => {
             let mut a = args.split_whitespace();
             Some(format!("PROV {} {}", a.next()?, a.next()?))
