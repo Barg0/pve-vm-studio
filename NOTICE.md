@@ -104,7 +104,9 @@ crate's full license text is in `THIRD-PARTY-LICENSES.html`, which comes with ev
 How a Windows media build tells its updates apart and orders them follows Microsoft's
 [Dynamic Update media steps](https://learn.microsoft.com/en-us/windows/deployment/update/media-dynamic-update)
 and the rules of abbodi1406's W10UI ([BatUtil](https://github.com/abbodi1406/BatUtil), the
-updater behind UUP dump's Windows converter): the logic, re-written in Rust, not its code.
+updater behind UUP dump's Windows converter), and a Windows 11 23H2 cumulative update's .msu
+is put together as that converter (uup-converter-wimlib) does: the logic, re-written in Rust,
+not their code.
 
 The maintenance console's shell page uses [xterm.js](https://github.com/xtermjs/xterm.js) 5.5.0
 and its fit addon 0.10.0 (MIT), served from the binary itself: `web-console/vendor/`, with their

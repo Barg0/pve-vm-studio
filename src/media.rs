@@ -240,7 +240,14 @@ pub fn is_update(name: &str) -> bool {
     if n.contains("-baseless") {
         return false;
     }
-    (n.starts_with("windows1") && n.contains("-kb") && (n.ends_with(".msu") || n.ends_with(".cab"))) || (n.starts_with("ssu-") && n.ends_with(".cab"))
+    (n.starts_with("windows1") && n.contains("-kb") && (n.ends_with(".msu") || n.ends_with(".cab") || n.ends_with(".wim"))) || (n.starts_with("ssu-") && n.ends_with(".cab"))
+}
+
+/// The parts of a PSFX cumulative update's .msu besides its .wim (Windows 11 23H2): its
+/// .psf payload and DesktopDeployment - downloaded for winupdates::build_msu.
+pub fn is_msu_part(name: &str) -> bool {
+    let n = name.to_lowercase();
+    (n.starts_with("windows1") && n.contains("-kb") && n.ends_with(".psf") && !n.contains("-baseless")) || (n.starts_with("desktopdeployment") && n.ends_with(".cab"))
 }
 
 pub(crate) fn is_aggregated(name: &str) -> bool {
@@ -253,48 +260,6 @@ pub(crate) fn kb_of(name: &str) -> Option<String> {
     let at = up.find("-KB")? + 1;
     let digits: String = up[at + 2..].chars().take_while(|c| c.is_ascii_digit()).collect();
     (!digits.is_empty()).then(|| format!("KB{digits}"))
-}
-
-/// Where an update goes, as Microsoft's media servicing steps put it: the install image,
-/// WinRE (the Safe OS dynamic update), or the media's sources\ folder (the Setup dynamic
-/// update - a CAB of files, not a package).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Target {
-    Image,
-    WinRe,
-    Setup,
-}
-
-/// What the build's AggregatedMetadata.cab says about its updates: each one's target
-/// (SafeOSDUCompDB_KB…, SetupDUCompDB_KB…; the rest go into the image), and which are the
-/// cumulative update chain (outer.AggregatedMetadata_KB… - a checkpoint and the target).
-#[derive(Default)]
-pub(crate) struct UpdateInfo {
-    targets: HashMap<String, Target>,
-    pub(crate) cumulative: Vec<String>,
-}
-
-pub(crate) async fn update_targets(agg: &Path) -> UpdateInfo {
-    let mut out = UpdateInfo::default();
-    let Ok(o) = tokio::process::Command::new("cabextract").arg("-l").arg(agg).output().await else { return out };
-    for line in String::from_utf8_lossy(&o.stdout).lines() {
-        let name = line.rsplit('|').next().unwrap_or("").trim();
-        if let Some(rest) = name.strip_prefix("outer.AggregatedMetadata_") {
-            out.cumulative.push(rest.trim_end_matches(".cab").to_owned());
-            continue;
-        }
-        let target = if name.starts_with("SafeOSDUCompDB_") {
-            Target::WinRe
-        } else if name.starts_with("SetupDUCompDB_") {
-            Target::Setup
-        } else {
-            continue;
-        };
-        if let Some(kb) = name.split(['_', '-', '.']).find(|p| p.starts_with("KB")) {
-            out.targets.insert(kb.to_owned(), target);
-        }
-    }
-    out
 }
 
 /// Package CABs held back until an export asks for them. Off: the 26H2 run of 2026-10-04
@@ -343,6 +308,10 @@ fn is_metadata(name: &str, edition: &str, lang: &str) -> bool {
 pub fn wanted(kind: Kind, f: &uup::File, editions: &[String], lang: &str) -> bool {
     let n = f.name.to_lowercase();
     if editions.iter().any(|e| is_metadata(&f.name, e, lang)) || is_update(&f.name) || is_aggregated(&f.name) {
+        return true;
+    }
+    // The .psf only beside its .wim: a set whose cumulative update comes as .wim + .psf.
+    if is_msu_part(&f.name) {
         return true;
     }
     if kind == Kind::Server {
@@ -1160,33 +1129,39 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         };
         uup::download_all(web, log, &mut pr, &mut files, &dl, &refresh).await?;
 
-        // What each update is, where it goes and in which order - read from the packages
-        // themselves (winupdates.rs). AggregatedMetadata (24H2 and later) names the checkpoint
-        // chain and cross-checks the reading.
-        let info = match files.iter().find(|f| is_aggregated(&f.name)) {
-            Some(f) => update_targets(&dl.join(&f.name)).await,
-            None => UpdateInfo::default(),
+        // What each update is, where it goes and in which order (winupdates.rs): Microsoft's
+        // metadata names each one where the set has it (24H2 and later, Windows 11 23H2) and
+        // links the cumulative chain by its builds; each package's own update.mum says the rest.
+        let meta = match files.iter().find(|f| is_aggregated(&f.name)) {
+            Some(f) => crate::winupdates::read_meta(&dl.join(&f.name), &dir.join("meta")).await,
+            None => crate::winupdates::Meta::default(),
         };
         let upd_files: Vec<uup::File> = files.iter().filter(|f| is_update(&f.name)).cloned().collect();
-        let plan = crate::winupdates::plan_set(&dl, &upd_files, &info.cumulative).await;
-        log.run(format!("Update plan, read from each package's own manifest{}", if info.targets.is_empty() && info.cumulative.is_empty() { " (the set has no AggregatedMetadata)" } else { "" })).await;
+        let mut plan = crate::winupdates::plan_set(&dl, &upd_files, &meta).await;
+        log.run(if meta.present {
+            "Update plan, from Microsoft's metadata and each package's own manifest".to_owned()
+        } else {
+            "Update plan, from each package's own manifest (the set has no AggregatedMetadata)".to_owned()
+        })
+        .await;
         for line in plan.lines() {
             log.line(line).await;
         }
-        // Where AggregatedMetadata says otherwise, it is named - the package's own word counts.
-        for k in plan.image.iter().chain(&plan.dotnet).chain(&plan.winre).chain(&plan.setup) {
-            let said = k.kb().and_then(|kb| info.targets.get(&kb).copied());
-            let is = match k.kind {
-                crate::winupdates::Kind::SafeOs => Target::WinRe,
-                crate::winupdates::Kind::Setup => Target::Setup,
-                _ => Target::Image,
-            };
-            if let Some(said) = said
-                && said != is
-            {
-                log.warn(format!("{}: AggregatedMetadata names it for {said:?}, the package itself is a {} - taken as the package says", k.short(), k.kind.label())).await;
-            }
+        if !plan.blocking.is_empty() {
+            bail!(
+                "the studio cannot tell what {} is - {}; nothing is left out on a guess",
+                plan.blocking.iter().map(|(k, _)| k.file.name.as_str()).collect::<Vec<_>>().join(", "),
+                plan.blocking[0].1
+            );
         }
+        // A cumulative update as .wim + .psf (Windows 11 23H2): its .msu, put together here.
+        for k in plan.image.iter_mut().filter(|k| k.is_psfx()) {
+            let msu = crate::winupdates::build_msu(&dl, k, &meta).await.with_context(|| format!("putting the .msu of {} together", k.short()))?;
+            log.ok(format!("{}: put together from {} and its .psf ({:.1} GB)", msu.name, k.file.name, msu.size as f64 / 1e9)).await;
+            files.push(msu.clone());
+            k.file = msu;
+        }
+        let plan_chain = plan.chain.clone();
         let updates: Vec<uup::File> = plan.image.iter().chain(&plan.dotnet).map(|k| k.file.clone()).collect();
         let winre_updates: Vec<uup::File> = plan.winre.iter().map(|k| k.file.clone()).collect();
         let dotnet_files: Vec<String> = plan.dotnet.iter().map(|k| k.file.name.clone()).collect();
@@ -1198,7 +1173,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         let first_meta = files.iter().find(|f| is_metadata(&f.name, &base[0], &req.lang)).map(|f| dl.join(&f.name)).unwrap();
         let first_s = first_meta.display().to_string();
         log.run(format!("Putting the image together: Setup media, boot.wim, install.wim ({})", base.join(", "))).await;
-        let cabs: Vec<PathBuf> = files.iter().filter(|f| f.name.to_lowercase().ends_with(".cab") && !is_update(&f.name) && !is_aggregated(&f.name)).map(|f| dl.join(&f.name)).collect();
+        let cabs: Vec<PathBuf> = files.iter().filter(|f| f.name.to_lowercase().ends_with(".cab") && !is_update(&f.name) && !is_aggregated(&f.name) && !is_msu_part(&f.name)).map(|f| dl.join(&f.name)).collect();
         // The stage's steps, weighted by what they took on the studio (2026-10-05..07): the
         // package CABs 50 s, the Setup media 1-2, WinRE 45, boot.wim 5, each edition 3-4 min,
         // the inbox apps' download and layout 5 min. wimlib's own percentage fills each.
@@ -1358,9 +1333,10 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             move_file(&install, &share.join("install.wim")).await?;
             // The cumulative chain (checkpoints and the target .msu): one folder, the target
             // named; everything else one by one, in order.
-            let in_chain = |u: &uup::File| u.name.to_lowercase().ends_with(".msu") && kb_of(&u.name).is_some_and(|k| info.cumulative.contains(&k));
+            // The chain as the plan linked it (oldest first, the target last).
+            let in_chain = |u: &uup::File| u.name.to_lowercase().ends_with(".msu") && kb_of(&u.name).is_some_and(|k| plan_chain.contains(&k));
             let chain: Vec<&uup::File> = updates.iter().filter(|u| in_chain(u)).collect();
-            let target = chain.iter().max_by_key(|u| kb_of(&u.name).and_then(|k| k[2..].parse::<u64>().ok()).unwrap_or(0)).map(|u| u.name.clone());
+            let target = chain.last().map(|u| u.name.clone());
             let mut chain_names = Vec::new();
             let mut image_names = Vec::new();
             // The rest first, the enablement package among them (uup-converter's order: it goes
@@ -1378,8 +1354,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                 // the checkpoint Staged and the target's forward deltas found no base for the
                 // client's own components - 72 corrupt files in 25H2 26200.9539 (2026-10-06),
                 // the image healthy right before. Each .msu sits alone in its own folder.
-                let mut ordered = chain.clone();
-                ordered.sort_by_key(|u| kb_of(&u.name).and_then(|k| k[2..].parse::<u64>().ok()).unwrap_or(0));
+                let ordered = chain.clone();
                 for (i, u) in ordered.iter().enumerate() {
                     let dir = format!("lcu{}", i + 1);
                     tokio::fs::create_dir_all(share.join("upd").join(&dir)).await?;
@@ -1464,11 +1439,11 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             }
             if ssu_name.is_none()
                 && !winre_names.is_empty()
-                // The servicing stack of the newest cumulative update - never a checkpoint's.
+                // The servicing stack of the target cumulative update - never a checkpoint's.
                 && let Some(lcu) = image_names
                     .iter()
                     .filter(|n| n.to_lowercase().ends_with(".msu"))
-                    .max_by_key(|n| kb_of(n).and_then(|k| k[2..].parse::<u64>().ok()).unwrap_or(0))
+                    .find(|n| kb_of(n).is_some_and(|k| plan_chain.last() == Some(&k)))
             {
                 let msu = share.join("upd").join(lcu.replace('/', std::path::MAIN_SEPARATOR_STR));
                 if let Some(name) = extract_ssu(log, &msu, &share.join("upd")).await? {
