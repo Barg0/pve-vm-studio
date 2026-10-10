@@ -58,6 +58,12 @@ pub fn valid_cert_name(name: &str, dns01: bool) -> bool {
     n.len() <= 253 && n.contains('.') && n.split('.').all(label_ok)
 }
 
+/// A fully qualified DNS name: two labels at least, each 1-63 letters, digits and inner dashes.
+pub fn valid_fqdn(f: &str) -> bool {
+    let label_ok = |l: &str| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    f.contains('.') && f.split('.').all(label_ok)
+}
+
 /// The name the studio is reached by. Everything else follows it: the certificate, the
 /// link in the PVE notes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

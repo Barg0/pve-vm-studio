@@ -658,7 +658,9 @@ fn worker_head(what: &str, url: &str, pin: &str) -> String {
     // -k because the certificate names the studio's DNS name, not its address - the pin is
     // what is checked: a server without the studio's key gets no byte.
     let pin = if pin.is_empty() { String::new() } else { format!(" -k --pinnedpubkey sha256//{pin}") };
-    s += &format!("set C=X:\\curl.exe -sS -f --retry 5 --retry-delay 3 --retry-all-errors{pin}\r\nset U={url}\r\nset /a n=0\r\n");
+    // Options only an old curl knows: it comes out of the image, and Server 2022 at build
+    // 20348.1 has no --retry-all-errors (7.71+). The :net loop does the retrying instead.
+    s += &format!("set C=X:\\curl.exe -sS -f --retry 5 --retry-delay 3{pin}\r\nset U={url}\r\nset /a n=0\r\n");
     s += ":net\r\n%C% -o X:\\ping.txt %U%/ping > nul 2>&1 && goto :online\r\nset /a n+=1\r\nif !n! lss 40 (ping -n 4 127.0.0.1 > nul & goto :net)\r\n";
     s += "echo PVS-NO-STUDIO > COM1\r\n%C% -o X:\\ping.txt %U%/ping > COM1 2>&1\r\ngoto :fail\r\n:online\r\necho PVS-ONLINE > COM1\r\n";
     // The scratch disk: the SATA disk without a volume (the seed disk is SATA too, with FAT).

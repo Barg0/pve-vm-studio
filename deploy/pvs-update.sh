@@ -34,3 +34,5 @@ mv -f /usr/local/bin/pve-vm-studio.next /usr/local/bin/pve-vm-studio
 rm -f "$D/pve-vm-studio.new" "$D/request.taken"
 status ok "Now running ${VERSION:-$TAG} (the previous binary is kept as /usr/local/bin/pve-vm-studio.prev)"
 systemctl restart pve-vm-studio
+# The maintenance console is the same binary: it follows.
+systemctl try-restart pve-vm-studio-console 2>/dev/null

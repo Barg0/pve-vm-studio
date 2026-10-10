@@ -60,6 +60,9 @@ const DEFS = {
   "identity.svg": ["ident", '<g fill="@H"><circle cx="9" cy="5.6" r="3.4"/><path d="M2.6 16.4c0-3.6 2.9-5.7 6.4-5.7s6.4 2.1 6.4 5.7z"/></g>'],
   "users.svg": ["ident", '<g fill="@H"><circle cx="6.6" cy="5.8" r="3.2"/><path d="M1 16.4c0-3.4 2.5-5.3 5.6-5.3s5.6 1.9 5.6 5.3z"/><circle cx="13.4" cy="6.4" r="2.3"/><path d="M12 11.6c2.9-.5 5 1.3 5 4.8h-3.6z"/></g>'],
   "key.svg": ["ident", '<g fill="@H"><circle cx="6.2" cy="6.2" r="4.2"/><path d="M8.8 8.8l6.2 6.2-1.6 1.6-1.2-1.2-1.1 1.1-1.3-1.3 1.1-1.1-2-2z"/></g>' + S + '<circle cx="6.2" cy="6.2" r="1.5"/></g>'],
+  /* Passwords: a padlock whose body carries the three masking dots - the key stays with
+     Windows licenses, the pair of keys with SSH. */
+  "password.svg": ["ident", '<g fill="@H"><rect x="2.6" y="7.6" width="12.8" height="8.8" rx="1.6"/></g><g fill="none" stroke="@H" stroke-width="1.8" stroke-linecap="round"><path d="M5.6 7.6V5.4a3.4 3.4 0 0 1 6.8 0v2.2"/></g><g fill="@S"><circle cx="6" cy="12" r="1.05"/><circle cx="9" cy="12" r="1.05"/><circle cx="12" cy="12" r="1.05"/></g>'],
   "keys.svg": ["ident", '<g fill="@H"><circle cx="5.6" cy="6.4" r="3.7"/><path d="M7.9 8.7l5.9 5.9-1.5 1.5-1.1-1.1-1 1-1.2-1.2 1-1-1.9-1.9z"/><circle cx="12.4" cy="4" r="2.4"/></g>' + S + '<circle cx="5.6" cy="6.4" r="1.4"/><circle cx="12.4" cy="4" r=".9"/></g>'],
   "security.svg": ["ident", '<g fill="@H"><path d="M9 1.4l6.4 2.4v5.4c0 3.6-2.8 6.2-6.4 7.4-3.6-1.2-6.4-3.8-6.4-7.4V3.8z"/></g>' + S + '<path d="M6 8.8l2.3 2.3 4-4.3"/></g>'],
   "certificate.svg": ["ident", '<g fill="@H"><rect x="2.4" y="1.4" width="13.2" height="9.6" rx="1.2"/><circle cx="6.2" cy="12.6" r="3.2"/></g>' + S + '<path d="M5 4.4h8M5 7h5.6"/><circle cx="6.2" cy="12.6" r="1.2"/></g>'],
@@ -382,11 +385,12 @@ const BLADES = [
   { id: "domainjoin", group: "VMs",           scope: "lab",    label: "Domain Join",        icon: "identity.svg",   desc: "Join accounts defined once, then attached to VMs — one per tier or OU, with a target OU per machine." },
   { id: "azurearc",   group: "VMs",           scope: "lab",    label: "Azure Arc",          icon: "arc.svg",        desc: "Arc landing zones — subscription, tenant, resource group, region, credentials." },
   { id: "deploy",     group: "VMs",           scope: "lab",    subhead: "Build", label: "Deploy",             icon: "deploy.svg",     desc: "Preflight, then build: every check, the design against what exists, and what gets built.", server: true },
-  { id: "access",     group: "VMs",           scope: "lab",    label: "Connect",            icon: "vm-overview.svg", desc: "Every VM's address, sign-in and connect commands, its live state, and the passwords and SSH keys." },
+  { id: "access",     group: "VMs",           scope: "lab",    subhead: "Connect", label: "Machines",         icon: "vm-overview.svg", desc: "Every VM's address, sign-in and connect commands, and its live state." },
+  { id: "passwords",  group: "VMs",           scope: "lab",    label: "Passwords",          icon: "password.svg",   desc: "The local account passwords and SSH keys of every VM - reveal, copy, export." },
   { id: "jobs",       group: "Activity",      scope: "studio", label: "Jobs",               icon: "update.svg",     desc: "Every bake and build, with its log and progress.", server: true },
 ];
 /* Blades that were merged or renamed - old links and saved states land on their new home. */
-const BLADE_ALIASES = { overview: "dashboard", cluster: "dashboard", review: "deploy", vmoverview: "access", passwords: "access", export: "deploy" };
+const BLADE_ALIASES = { overview: "dashboard", cluster: "dashboard", review: "deploy", vmoverview: "access", export: "deploy" };
 function resolveBladeId(id) {
   const to = BLADE_ALIASES[id] || id;
   return BLADES.some(b => b.id === to) ? to : "dashboard";
@@ -5029,7 +5033,7 @@ function navBadge(id) {
     const errors = reviewErrorCount();
     return errors ? `<span class="nav-badge err">${errors}</span>` : state.servers.length ? `<span class="nav-badge ok is-word">OK</span>` : "";
   }
-  if (id === "access") {
+  if (id === "passwords") {
     const missing = credentialRows().filter(r => !r.value).length;
     return missing ? `<span class="nav-badge err" title="${missing} account(s) without a password">${missing}</span>` : "";
   }
@@ -8210,7 +8214,7 @@ function renderPasswords() {
 
   return `
     <div class="blade-toolbar">
-      ${bladeTitle("access")}
+      ${bladeTitle("passwords")}
       <div class="row">
         <button class="btn" type="button" id="pwExport"${rows.length ? "" : " disabled"} title="Every VM's address, user, password and SSH command in one CSV">${downloadIcon()} Export CSV</button>
         <button class="btn" type="button" id="sshDownloadAll"${sshRows.some(r => r.priv) ? "" : " disabled"}
@@ -8218,7 +8222,6 @@ function renderPasswords() {
         <button class="btn" type="button" id="pwToggleAll"${rows.length ? "" : " disabled"}>${anyHidden ? eyeIcon() + " Reveal all" : eyeOffIcon() + " Hide all"}</button>
       </div>
     </div>
-    ${accessTabs("passwords")}
     <div class="chips">
       <span class="pill">${rows.length} account(s)${infoTip("Passwords",
         `Generated passwords are ${passwordLength()} characters (set in VM settings) with upper case, lower case, a number and a special character, and no ambiguous I/l/1 or O/0. Names and passwords are edited on the Virtual machines blade - this page only reads them back.`)}</span>
@@ -8525,18 +8528,9 @@ function renderOverviewCard(s) {
   </article>`;
 }
 
-/* ---------------------------[ Blade: Access ]---------------------------
-   VM overview and Passwords, one blade with two tabs: how to reach each VM - its address,
-   sign-in, connect lines and, once built, its live state from Proxmox VE - and the secrets
-   to do it with. */
-function accessTabs(active) {
-  const tabs = [["machines", "vm-overview.svg", "Machines"], ["passwords", "key.svg", "Passwords and keys"]];
-  return `<div class="blade-tabs" role="tablist">${tabs.map(([id, icon, label]) =>
-    `<button type="button" role="tab" class="blade-tab${active === id ? " on" : ""}" aria-selected="${active === id}" data-access-tab="${id}"><img src="${iconSrc(icon)}" alt="">${label}</button>`).join("")}</div>`;
-}
-function renderAccess() {
-  return state.accessTab === "passwords" ? renderPasswords() : renderVmOverview();
-}
+/* ---------------------------[ Blades: Machines and Passwords ]---------------------------
+   Under Connect: how to reach each VM - its address, sign-in, connect lines and, once
+   built, its live state from Proxmox VE - and the secrets to do it with. */
 /* What the studio built from this card, as server.js last read it (/vms). A record belongs to
    the card it was built from - a new card with the same name is a name clash, not that VM. */
 function liveVm(s) {
@@ -8600,7 +8594,6 @@ function renderVmOverview() {
         </div>
       </div>
     </div>
-    ${accessTabs("machines")}
     <div class="chips">
       <span class="pill">${servers.length} VM(s)</span>
       ${servers.length - linux ? `<span class="pill"><img src="${iconSrcBand("vm.svg", "work")}" alt="">${servers.length - linux} Windows</span>` : ""}
@@ -8707,9 +8700,6 @@ function noDefaultLinkedClones() {
 
 function render() {
   noDefaultLinkedClones();
-  /* Merged blades: an old id lands on its new home, on the matching tab. */
-  if (state.blade === "passwords") state.accessTab = "passwords";
-  else if (state.blade === "vmoverview") state.accessTab = "machines";
   state.blade = resolveBladeId(state.blade);
   const focusSnapshot = captureFocus();
   hideFloatingTip();
@@ -8732,7 +8722,8 @@ function renderBlade() {
   else if (state.blade === "azurearc") main.innerHTML = renderAzureArcBlade();
   else if (state.blade === "licenses") main.innerHTML = renderLicensesBlade();
   else if (state.blade === "servers") main.innerHTML = renderServers();
-  else if (state.blade === "access") main.innerHTML = renderAccess();
+  else if (state.blade === "access") main.innerHTML = renderVmOverview();
+  else if (state.blade === "passwords") main.innerHTML = renderPasswords();
 }
 
 function addAvailableSwitchFromInput() {
@@ -9668,8 +9659,7 @@ document.getElementById("main").addEventListener("click", e => {
   const ovPw = e.target.closest("[data-ov-pw]");
   if (ovPw) {
     const sid = ovPw.getAttribute("data-ov-pw");
-    state.blade = "access";
-    state.accessTab = "passwords";
+    state.blade = "passwords";
     render();
     const row = document.querySelector(`[data-pw-row="${CSS.escape(sid)}"]`);
     if (row) {
@@ -9684,12 +9674,6 @@ document.getElementById("main").addEventListener("click", e => {
   if (ovCollapse) {
     const sid = ovCollapse.getAttribute("data-ov-collapse");
     ovExpanded[sid] = !ovExpanded[sid];
-    render();
-    return;
-  }
-  const accessTab = e.target.closest("[data-access-tab]");
-  if (accessTab) {
-    state.accessTab = accessTab.getAttribute("data-access-tab");
     render();
     return;
   }

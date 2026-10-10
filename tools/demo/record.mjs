@@ -389,7 +389,7 @@ const SCENES = {
   // Connect: every VM's address, user and password - and the CSV.
   "passwords": {
     blade: "access",
-    async stage(page) { await page.evaluate(() => { state.blade = "access"; state.accessTab = "passwords"; render(); }); await page.waitForTimeout(1000);
+    async stage(page) { await page.evaluate(() => { state.blade = "passwords"; render(); }); await page.waitForTimeout(1000);
       return [".blade-toolbar", ".pw-list"]; },
     async act(page, h) {
       await h.click("#pwToggleAll"); await h.pause(1400);

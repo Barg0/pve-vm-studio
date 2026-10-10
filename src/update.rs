@@ -195,20 +195,61 @@ async fn sha256_hex(path: &Path) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).split_whitespace().next().unwrap_or("").to_lowercase())
 }
 
-/// The update job: waits for the other jobs, stages and checks the binary, hands over to the
-/// root helper - which restarts the studio, so a successful job ends in the next process.
-pub async fn run(web: reqwest::Client, data: PathBuf, log: JobLog, jobs: crate::jobs::Jobs, job_id: String, tag: String) -> Result<()> {
-    let st = status(&web, true, tag == DEVELOPMENT).await;
+/// The release a tag names (a version tag, or DEVELOPMENT), and what to call it.
+pub async fn find(web: &reqwest::Client, tag: &str) -> Result<(Release, String)> {
+    let st = status(web, true, tag == DEVELOPMENT).await;
     let found = if tag == DEVELOPMENT {
         Some(st["development"]["release"].clone()).filter(|r| !r.is_null())
     } else {
-        st["releases"].as_array().and_then(|a| a.iter().find(|r| r["tag"].as_str() == Some(&tag))).cloned()
+        st["releases"].as_array().and_then(|a| a.iter().find(|r| r["tag"].as_str() == Some(tag))).cloned()
     };
     let rel: Release = serde_json::from_value(found.context("GitHub does not list that release")?)?;
     if rel.asset_url.is_empty() || rel.sums_url.is_empty() {
         bail!("release {tag} has no {ASSET} or no {SUMS} asset");
     }
     let target = if tag == DEVELOPMENT { format!("development build {}", st["development"]["commit"].as_str().unwrap_or("")) } else { rel.version.clone() };
+    Ok((rel, target))
+}
+
+/// Downloads the release's binary into <data>/update/ and checks it against its SHA256SUMS;
+/// the SHA-256 it has.
+pub async fn download_checked(web: &reqwest::Client, data: &Path, rel: &Release) -> Result<String> {
+    let d = dir(data);
+    tokio::fs::create_dir_all(&d).await?;
+    let staged = d.join("pve-vm-studio.new");
+    let bytes = web.get(&rel.asset_url).send().await?.error_for_status()?.bytes().await?;
+    tokio::fs::write(&staged, &bytes).await?;
+    let sums = web.get(&rel.sums_url).send().await?.error_for_status()?.text().await?;
+    let want = sums
+        .lines()
+        .find_map(|l| {
+            let mut p = l.split_whitespace();
+            let (h, f) = (p.next()?, p.next()?);
+            (f.trim_start_matches('*') == ASSET).then(|| h.to_lowercase())
+        })
+        .context("SHA256SUMS does not list the binary")?;
+    let have = sha256_hex(&staged).await?;
+    if have != want {
+        let _ = tokio::fs::remove_file(&staged).await;
+        bail!("the download does not match the release's SHA-256 ({have} vs {want}) - nothing installed");
+    }
+    Ok(want)
+}
+
+/// The request the root helper acts on (key=value, read by a shell script). `job` is empty
+/// when no studio job waits for the result (the maintenance console).
+pub async fn hand_over(data: &Path, tag: &str, target: &str, job: &str, sha: &str) -> Result<()> {
+    let d = dir(data);
+    let req = format!("TAG={tag}\nVERSION={target}\nJOB={job}\nSHA256={sha}\n");
+    tokio::fs::write(d.join("request.tmp"), req).await?;
+    tokio::fs::rename(d.join("request.tmp"), d.join("request")).await?;
+    Ok(())
+}
+
+/// The update job: waits for the other jobs, stages and checks the binary, hands over to the
+/// root helper - which restarts the studio, so a successful job ends in the next process.
+pub async fn run(web: reqwest::Client, data: PathBuf, log: JobLog, jobs: crate::jobs::Jobs, job_id: String, tag: String) -> Result<()> {
+    let (rel, target) = find(&web, &tag).await?;
     log.run(format!("Update to {target} - from {} ({})", env!("CARGO_PKG_VERSION"), env!("STUDIO_COMMIT"))).await;
     // What it is doing, never a percentage: a few seconds each, except the wait.
     log.progress("Studio update", None, "checking");
@@ -227,35 +268,15 @@ pub async fn run(web: reqwest::Client, data: PathBuf, log: JobLog, jobs: crate::
         }
         tokio::time::sleep(Duration::from_secs(15)).await;
     }
-    let d = dir(&data);
-    tokio::fs::create_dir_all(&d).await?;
-    let staged = d.join("pve-vm-studio.new");
     log.get(format!("Downloading {ASSET} ({:.1} MB)", rel.asset_size as f64 / 1e6)).await;
     log.progress("Studio update", None, "downloading");
-    let bytes = web.get(&rel.asset_url).send().await?.error_for_status()?.bytes().await?;
-    tokio::fs::write(&staged, &bytes).await?;
-    let sums = web.get(&rel.sums_url).send().await?.error_for_status()?.text().await?;
-    let want = sums
-        .lines()
-        .find_map(|l| {
-            let mut p = l.split_whitespace();
-            let (h, f) = (p.next()?, p.next()?);
-            (f.trim_start_matches('*') == ASSET).then(|| h.to_lowercase())
-        })
-        .context("SHA256SUMS does not list the binary")?;
-    let have = sha256_hex(&staged).await?;
-    if have != want {
-        let _ = tokio::fs::remove_file(&staged).await;
-        bail!("the download does not match the release's SHA-256 ({have} vs {want}) - nothing installed");
-    }
+    let want = download_checked(&web, &data, &rel).await?;
     log.ok(format!("SHA-256 matches the release ({}…)", &want[..12])).await;
-    // The request the root helper acts on. Key=value, read by a shell script.
-    let req = format!("TAG={tag}\nVERSION={target}\nJOB={job_id}\nSHA256={want}\n");
-    tokio::fs::write(d.join("request.tmp"), req).await?;
-    tokio::fs::rename(d.join("request.tmp"), d.join("request")).await?;
+    hand_over(&data, &tag, &target, &job_id, &want).await?;
     log.run("Handing over to the updater - the studio restarts into the new version").await;
     log.progress("Studio update", None, "restarting");
     // The helper restarts the service; this job ends in the next process (finish_pending).
+    let d = dir(&data);
     for _ in 0..24 {
         log.check_abort()?;
         tokio::time::sleep(Duration::from_secs(5)).await;

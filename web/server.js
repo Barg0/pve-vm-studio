@@ -95,7 +95,12 @@ $id("loginForm").addEventListener("submit", async e => {
   if (!user.includes("@")) user += "@" + $id("loginRealm").value;
   $id("loginBtn").disabled = true;
   try { signedIn(await api("POST", "/session", { username: user, password: $id("loginPass").value })); }
-  catch (ex) { err.textContent = ex.message === "login failed" ? "Login failed. Check user name, password and realm." : ex.message; err.hidden = false; }
+  catch (ex) {
+    // PVE's certificate not trusted: the answer names the maintenance console - as a link.
+    const m = ex.message === "login failed" ? "Login failed. Check user name, password and realm." : ex.message;
+    err.innerHTML = esc(m).replace(/https:\/\/[^\s<]+/, u => `<a href="${u}">${u}</a>`);
+    err.hidden = false;
+  }
   finally { $id("loginBtn").disabled = false; }
 });
 
@@ -224,7 +229,7 @@ async function openLab(id, fresh) {
 /* Called by studio.js after every render: a changed state is saved a second later. */
 function studioChanged() {
   // Every blade gets its own history entry, so Back goes to the blade before. An alias of
-  // the same blade (#/passwords is Connect) and the first load replace instead.
+  // the same blade (#/vmoverview is Machines) and the first load replace instead.
   const cur = location.hash.replace(/^#\/?/, "").split("/")[0];
   if (cur !== state.blade) {
     if (!cur || resolveBladeId(cur) === state.blade) history.replaceState(null, "", "#/" + state.blade);
@@ -2845,6 +2850,15 @@ function versionCard(v) {
   return gsCard("gs-version", "update.svg", "Version", meta, body, "", true, state);
 }
 
+/* The maintenance console: its own service, port and local user (maint), for when the
+   studio cannot be signed in to. On by default; off here, on again on the node. */
+function consoleCard(con, fqdn) {
+  const url = `https://${fqdn || location.hostname}:${con.port}`;
+  return gsCard("gs-console", "powershell.svg", `Maintenance console ${infoTip("Maintenance console", `Its own page on port ${con.port} with a local user, maint, whose password install.sh showed once: PVE connection and its certificates, network, certificate, version, debug tools, the studio's service and log, a root shell in the container. For when nobody can sign in here - PVE's certificate not trusted, the studio not starting. Switched off, it refuses everything until "pct exec <ct> -- pve-vm-studio console-enable" on the node.`)}`, con.enabled ? `on · port ${con.port}` : "off", `
+    <div class="toggle-grid" style="grid-template-columns:1fr">${toggle('id="conOn"', "Maintenance console on", !!con.enabled)}</div>
+    ${actions(con.enabled ? `<a class="btn" href="${esc(url)}" target="_blank" rel="noopener"><img src="${iconSrc("powershell.svg")}" alt=""> Open ${esc(url.replace("https://", ""))}</a>` : "")}`, "", false);
+}
+
 /* Troubleshooting tools - only with debug_tools = true in the studio's config.toml, so an
    install never shows them and nobody switches them on from the browser. */
 function debugCard(worker) {
@@ -3169,11 +3183,11 @@ function wireNotify(main, n) {
 }
 
 async function bladeStudio(main, stale) {
-  const [server, t, worker, ver, maint, mail, notif, history, netRaw, cas, tz, cat] = await Promise.all([api("GET", "/settings/server"), api("GET", "/tls"),
+  const [server, t, worker, ver, maint, mail, notif, history, netRaw, cas, tz, cat, con] = await Promise.all([api("GET", "/settings/server"), api("GET", "/tls"),
     api("GET", "/settings/worker").catch(() => ({ memory_mb: 4096, cores: 4 })), api("GET", "/studio/version").catch(() => null),
     api("GET", "/settings/maintenance").catch(() => null), api("GET", "/settings/mail").catch(() => null), api("GET", "/settings/notify").catch(() => null),
     api("GET", "/notifications?limit=500").catch(() => []), api("GET", "/settings/network").catch(e => ({ error: e.message })), api("GET", "/settings/cas").catch(() => null),
-    api("GET", "/settings/timezone").catch(() => null), catalogCache || api("GET", "/catalog")]);
+    api("GET", "/settings/timezone").catch(() => null), catalogCache || api("GET", "/catalog"), api("GET", "/settings/console").catch(() => null)]);
   catalogCache = cat;
   const net = netRaw && !netRaw.error ? netRaw : null;
   if (net && !netForm) netForm = netFormFrom(net);
@@ -3233,6 +3247,7 @@ async function bladeStudio(main, stale) {
     ${mail ? mailCard(mail, notif) : ""}
     ${notif ? notifyCard(notif, mail && mail.settings, history) : ""}
     ${versionCard(ver)}
+    ${con ? consoleCard(con, server.settings.fqdn) : ""}
     ${worker.debug_tools ? debugCard(worker) : ""}`;
   wireMaint(main); wireMail(main, mail); wireNotify(main, notif);
   if (acmeForm.challenge === "dns-01" && acmeForm.dns_provider && $id("leHelp")) {
@@ -3296,6 +3311,10 @@ async function bladeStudio(main, stale) {
   }));
   on("stFqdnSave", "click", async () => { try { await api("PUT", "/settings/server", { ...server.settings, fqdn: $id("stFqdn").value }); toast("Saved"); render(); } catch (e) { toast(e.message, true); } });
   Object.keys(CONFIRM_KINDS).forEach(k => on("cf_" + k, "change", e => { setSkipConfirm(k, !e.target.checked); toast(e.target.checked ? "Asks again" : "Won't ask"); }));
+  on("conOn", "change", async e => {
+    try { await api("PUT", "/settings/console", { enabled: e.target.checked }); toast(e.target.checked ? "Maintenance console on" : "Maintenance console off"); renderServerBlade("studio", main); }
+    catch (err) { e.target.checked = !e.target.checked; toast(err.message, true); }
+  });
   on("dbgSave", "click", async () => {
     try {
       await api("PUT", "/settings/worker", { memory_mb: worker.memory_mb, cores: worker.cores, keep_downloads: $id("dbgKeep").checked, parallel: worker.parallel || 1 });

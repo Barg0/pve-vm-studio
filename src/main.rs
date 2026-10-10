@@ -10,6 +10,7 @@ mod autoupdate;
 mod cas;
 mod catalog;
 mod config;
+mod console;
 mod error;
 mod cis;
 mod fod;
@@ -19,6 +20,7 @@ mod hardware;
 mod jobs;
 mod labs;
 mod linux;
+mod logging;
 mod mail;
 mod maintenance;
 mod markers;
@@ -58,7 +60,6 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
     SqlitePool,
 };
-use tracing_subscriber::EnvFilter;
 
 use crate::{auth::Sessions, config::Config, jobs::Jobs, pve::Pve};
 
@@ -88,15 +89,22 @@ impl AppState {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,sqlx=warn".into()))
-        .init();
+    logging::init();
 
     // Two crypto back-ends end up linked (ring and aws-lc-rs, through different crates);
     // rustls then needs to be told which one serves the process.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let config = Config::load()?;
+
+    // The maintenance console and its user: `console` is the service of its own
+    // (pve-vm-studio-console.service), the rest are run by hand or by the installer.
+    match std::env::args().nth(1).as_deref() {
+        Some("console") => return console::run(config).await,
+        Some("console-password") => return console::password_command(&config, std::env::args().skip(2).collect()),
+        Some("console-enable") => return console::enable_command(&config),
+        _ => {}
+    }
 
     // `pve-vm-studio serial <node> <vmid> [seconds]`: print a VM's serial console - what
     // the Windows bake reads WinPE's markers through - for checking that path by hand.
@@ -120,16 +128,7 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("creating {}", config.data_dir.display()))?;
 
-    let db = SqlitePoolOptions::new()
-        .max_connections(8)
-        .connect_with(
-            SqliteConnectOptions::new()
-                .filename(config.data_dir.join("studio.db"))
-                .create_if_missing(true)
-                .journal_mode(SqliteJournalMode::Wal),
-        )
-        .await?;
-    sqlx::migrate!().run(&db).await?;
+    let db = open_db(&config.data_dir).await?;
     tokio::fs::create_dir_all(config.data_dir.join("work")).await?;
     // Debug tools off: none of them stays on from a time they were.
     if !config.debug_tools {
@@ -192,6 +191,9 @@ async fn main() -> Result<()> {
     if let Err(e) = state.pve.set_extra_cas(&added) {
         tracing::warn!("trusting the added CAs: {e:#}");
     }
+    // And the node certificates trusted as they are (maintenance console).
+    state.pve.set_pins(cas::pin_digests(&cas::read_pins(&state.config.data_dir)));
+    tokio::spawn(console::studio_watch(state.clone()));
 
     // ISO builds at a time, as Image settings has it.
     let worker: media::WorkerSettings = settings::load(&state.db, "worker").await.unwrap_or_default();
@@ -256,6 +258,22 @@ async fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The studio's database, its schema up to date - the studio's and the console's.
+pub async fn open_db(data_dir: &std::path::Path) -> Result<SqlitePool> {
+    let db = SqlitePoolOptions::new()
+        .max_connections(8)
+        .connect_with(
+            SqliteConnectOptions::new()
+                .filename(data_dir.join("studio.db"))
+                .create_if_missing(true)
+                .journal_mode(SqliteJournalMode::Wal)
+                .busy_timeout(std::time::Duration::from_secs(10)),
+        )
+        .await?;
+    sqlx::migrate!().run(&db).await?;
+    Ok(db)
 }
 
 /// A file certbot put into the webroot for Let's Encrypt to fetch.

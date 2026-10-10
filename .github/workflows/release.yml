@@ -26,7 +26,8 @@ jobs:
           cargo about generate about.hbs -o dist/THIRD-PARTY-LICENSES.html
           cp target/release/pve-vm-studio dist/pve-vm-studio-x86_64
           cp deploy/install.sh deploy/update-lxc.sh deploy/pve-vm-studio.service deploy/pvs-update.sh \
-             deploy/pve-vm-studio-update.path deploy/pve-vm-studio-update.service dist/
+             deploy/pve-vm-studio-update.path deploy/pve-vm-studio-update.service \
+             deploy/pve-vm-studio-console.service dist/
           (cd dist && sha256sum * > SHA256SUMS)
       - name: Publish
         env:

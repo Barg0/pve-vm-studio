@@ -73,7 +73,7 @@ On any node of the cluster, as root:
 ```sh
 mkdir -p /root/pve-vm-studio && cd /root/pve-vm-studio
 base=https://github.com/Barg0/pve-vm-studio/releases/download/development
-for f in install.sh pve-vm-studio.service pvs-update.sh pve-vm-studio-update.path pve-vm-studio-update.service; do
+for f in install.sh pve-vm-studio.service pve-vm-studio-console.service pvs-update.sh pve-vm-studio-update.path pve-vm-studio-update.service; do
   curl -fsSLO "$base/$f"
 done
 bash install.sh
@@ -94,6 +94,7 @@ What it does:
    volume for bakes and media builds.
 3. Installs the studio as a service on port 443, with a self-signed certificate to begin with.
 4. Puts a link to the studio into **Datacenter → Notes**.
+5. Starts the maintenance console on port 8443 and shows its user's password once, at the end.
 
 The studio reaches the PVE API through the node it was installed on, by its address. In a
 cluster it learns the other nodes and continues through one of them when that node is down.
@@ -105,6 +106,32 @@ Then open `https://<the container's address or DNS name>` and sign in with your 
 (`root@pam` works, any other PVE user too).
 
 The full install log is in `/var/log/pve-vm-studio-install.log`.
+
+### <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/powershell-dark.png"><img src=".github/assets/icons/powershell-light.png" width="18" alt="" align="absmiddle"></picture> Maintenance console
+
+`https://<the studio>:8443` — a plain page of its own, with its own user `maint`. It is for
+the moments when nobody can sign in to the studio: PVE's certificate comes from a CA the
+studio does not know yet (an AD CS certificate on the nodes, say), the studio does not start,
+its network or certificate needs fixing.
+
+- **PVE connection** — the certificate chain each node sends, compared with PVE → *node* →
+  System → Certificates; trust its issuing CA, upload the root, or trust that one certificate.
+  The studio takes the change within seconds.
+- **Network**, **DNS name & certificate** (a `.pfx` from AD CS, PEM, or self-signed),
+  **Trusted CAs**, **Time**, **Version** (Stable or Development), **Debug tools** (log level,
+  kept downloads, rebuilds, a support bundle), **Service** (restart, the log), a root
+  **Shell** in the container (every session recorded), **Console password**.
+
+The installer shows the password once — write it down. `maint` never signs in to the studio,
+and no PVE account signs in here. Lost the password:
+
+```sh
+pct exec <ct> -- pve-vm-studio console-password --reset
+```
+
+It runs as its own service (`pve-vm-studio-console`), so it answers while the studio itself
+is down. **Studio settings → Maintenance console** switches it off; on the node,
+`pct exec <ct> -- pve-vm-studio console-enable` switches it on again.
 
 ### <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/certificate-dark.png"><img src=".github/assets/icons/certificate-light.png" width="18" alt="" align="absmiddle"></picture> First things in the studio
 
@@ -227,7 +254,8 @@ same one.
 | <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/identity-dark.png"><img src=".github/assets/icons/identity-light.png" width="18" alt="" align="absmiddle"></picture> **Domain Join** | Accounts that join Windows and Linux VMs to Active Directory at first boot |
 | <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/arc-dark.png"><img src=".github/assets/icons/arc-light.png" width="18" alt="" align="absmiddle"></picture> **Azure Arc** | Service principals that onboard VMs to Azure Arc at first boot |
 | <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/deploy-dark.png"><img src=".github/assets/icons/deploy-light.png" width="18" alt="" align="absmiddle"></picture> **Deploy** | Preflight checks, then build: everything, a selection, or one VM |
-| <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/vm-overview-dark.png"><img src=".github/assets/icons/vm-overview-light.png" width="18" alt="" align="absmiddle"></picture> **Connect** | Addresses, consoles, users and passwords of the built VMs |
+| <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/vm-overview-dark.png"><img src=".github/assets/icons/vm-overview-light.png" width="18" alt="" align="absmiddle"></picture> **Machines** | Addresses, consoles and live state of the built VMs (under Connect) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/password-dark.png"><img src=".github/assets/icons/password-light.png" width="18" alt="" align="absmiddle"></picture> **Passwords** | Local account passwords and SSH keys: reveal, copy, export CSV (under Connect) |
 
 A deploy clones the gold, sets the hardware, attaches a seed disk with the VM's own settings and
 boots it once. Windows runs a short WinPE pass (roles, features, Features on Demand, the answer
@@ -240,10 +268,10 @@ the VM starts for real.
 
 <p><img src=".github/assets/video/deploy.webp" alt="Deploy: preflight OK, four VMs built, one to build"></p>
 
-### <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/key-dark.png"><img src=".github/assets/icons/key-light.png" width="18" alt="" align="absmiddle"></picture> Passwords
+### <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/password-dark.png"><img src=".github/assets/icons/password-light.png" width="18" alt="" align="absmiddle"></picture> Passwords
 
 Every VM gets a generated password (16, 32 or 64 characters, set in VM settings).
-**Connect → Passwords and keys** shows them. **Export CSV** downloads `vm-passwords.csv`, one row
+**Connect → Passwords** shows them. **Export CSV** downloads `vm-passwords.csv`, one row
 per VM:
 
 | VM | OS | Address | User | Password | SSH |
@@ -255,7 +283,7 @@ The address is the static one, or what the guest agent reported for a VM on DHCP
 are the design's — if you regenerate one after its VM was built, the VM still has the old one.
 The file holds every password in plain text; keep it in a password manager, not on a share.
 
-<p><img src=".github/assets/video/passwords.webp" alt="Connect → Passwords and keys: reveal, copy, export CSV"></p>
+<p><img src=".github/assets/video/passwords.webp" alt="Connect → Passwords: reveal, copy, export CSV"></p>
 
 ## <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/users-dark.png"><img src=".github/assets/icons/users-light.png" width="22" alt="" align="absmiddle"></picture> Notifications
 
@@ -322,6 +350,7 @@ is not affiliated with, endorsed by or certified by the Center for Internet Secu
 | What | Where |
 |---|---|
 | The studio | `/usr/local/bin/pve-vm-studio` in its container, service `pve-vm-studio` |
+| The maintenance console | The same binary, service `pve-vm-studio-console` (root), port 8443; shell sessions recorded in `/var/log/pve-vm-studio/console-shell` |
 | Its data (design, settings, job logs, CIS reports) | `/var/lib/pve-vm-studio` in the container — the database is `studio.db` |
 | Bakes and media builds in progress | The container's work volume, emptied when nothing runs |
 | Golds | PVE templates in the pool `vm-studio`, tagged `gold` |
@@ -348,6 +377,7 @@ pvesh delete /pools/vm-studio        # only once it is empty
 | Domain join and Arc credentials | The design | Use least-privilege accounts |
 | The API token | The container's config, readable by the studio only | It is the ceiling of what the studio can do — keep its roles as installed |
 | DNS provider credentials (Let's Encrypt) | The container, `0600` | — |
+| The maintenance console's password | A PBKDF2 hash in `/etc/pve-vm-studio/console.pw`, root only; shown once by the installer | Write it down; five wrong tries lock it for five minutes; switch the console off in Studio settings if you never want it |
 
 ### <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/search-dark.png"><img src=".github/assets/icons/search-light.png" width="18" alt="" align="absmiddle"></picture> Troubleshooting
 

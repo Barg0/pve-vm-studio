@@ -67,6 +67,7 @@ pub fn router() -> Router<AppState> {
         .route("/settings/timezone", get(get_timezone).put(put_timezone))
         .route("/settings/cas", get(get_cas).post(post_cas))
         .route("/settings/cas/{fingerprint}", axum::routing::delete(delete_cas))
+        .route("/settings/console", get(get_console).put(put_console))
         .route("/settings/region", get(get_region).put(put_region))
         .route("/pools", get(list_pools).post(create_pool))
         .route("/tags", get(list_tag_colours))
@@ -153,16 +154,32 @@ struct LoginForm {
 async fn login(
     State(app): State<AppState>,
     jar: CookieJar,
+    headers: axum::http::HeaderMap,
+    uri: axum::http::Uri,
     Json(form): Json<LoginForm>,
 ) -> ApiResult<impl IntoResponse> {
     if !form.username.contains('@') {
         return Err(ApiError::bad_request("the user name needs its realm, e.g. root@pam"));
     }
-    let ticket = app
-        .pve
-        .login(&form.username, &form.password)
-        .await
-        .map_err(|_| ApiError::new(StatusCode::UNAUTHORIZED, "login failed"))?;
+    let ticket = app.pve.login(&form.username, &form.password).await.map_err(|e| {
+        let msg = format!("{e:#}");
+        if msg.starts_with(crate::pve::LOGIN_REFUSED) {
+            return ApiError::new(StatusCode::UNAUTHORIZED, "login failed");
+        }
+        // Nobody can sign in while PVE is not reached or not trusted - say where that is fixed.
+        // HTTP/1.1 names the host in Host, HTTP/2 in the request's own authority.
+        let host = uri.host().map(str::to_owned).or_else(|| headers.get(axum::http::header::HOST).and_then(|h| h.to_str().ok()).map(|h| h.rsplit_once(':').filter(|(_, p)| p.chars().all(|c| c.is_ascii_digit())).map(|(h, _)| h).unwrap_or(h).to_owned())).unwrap_or_else(|| "<studio>".into());
+        let console = format!("https://{host}:{}", app.config.console_listen.port());
+        tracing::warn!("sign-in of {} failed - PVE not reached: {msg}", form.username);
+        ApiError::new(
+            StatusCode::BAD_GATEWAY,
+            if crate::console::cert_problem(&msg) {
+                format!("PVE's certificate is not trusted, so nobody can sign in. Trust it in the maintenance console: {console}")
+            } else {
+                format!("PVE cannot be reached, so nobody can sign in. The maintenance console shows why: {console}")
+            },
+        )
+    })?;
     let (id, s) = app.sessions.create(ticket).await;
     tracing::info!("{} logged in", s.user);
     let jar = jar.add(session_cookie(id, !app.config.plain_http));
@@ -369,6 +386,32 @@ async fn retry_job(State(app): State<AppState>, user: User, Path(id): Path<Strin
         other => return Err(ApiError::bad_request(format!("a {other} job is retried from its own page"))),
     };
     Ok(r)
+}
+
+/// The maintenance console's "Rebuild last WinPE / Windows media" (a request file the
+/// studio picks up, console::take_requests): the newest build of that kind again, with its
+/// own parameters. Only builds from Microsoft's files - a WinPE from an ISO is retried in
+/// the studio.
+pub async fn rebuild_last(app: &AppState, kind: &str, by: &str) -> ApiResult<String> {
+    let row: Option<(String, String)> = sqlx::query_as("SELECT id, params FROM jobs WHERE kind = ? ORDER BY created_at DESC LIMIT 1")
+        .bind(kind)
+        .fetch_optional(&app.db)
+        .await?;
+    let (id, params) = row.ok_or_else(|| ApiError::bad_request(format!("no {kind} build to repeat yet")))?;
+    if app.jobs.is_running(&id).await {
+        return Err(ApiError::bad_request("that build is still running"));
+    }
+    let p: serde_json::Value = serde_json::from_str(&params).unwrap_or_default();
+    let s = |k: &str| p[k].as_str().unwrap_or_default().to_owned();
+    match kind {
+        "media" => {
+            let editions = p["editions"].as_array().into_iter().flatten().filter_map(|e| e.as_str().map(str::to_owned)).collect();
+            spawn_media_build(app, by, MediaBuild { product: s("media"), uuid: s("uuid"), build: s("build"), lang: s("lang"), editions }, json!({})).await
+        }
+        "winpe" if !s("uup").is_empty() => spawn_winpe_uup(app, by, &s("uup"), &s("lang"), &s("build")).await,
+        "winpe" => Err(ApiError::bad_request("the last WinPE was built from an ISO - repeat it in the studio (Jobs → Retry)")),
+        other => Err(ApiError::bad_request(format!("{other} builds are not repeated from the console"))),
+    }
 }
 
 /// What the nodes' processors are, and what "auto" makes of them (VM settings → Hardware
@@ -1120,6 +1163,33 @@ async fn delete_cas(State(app): State<AppState>, user: User, Path(fp): Path<Stri
     Ok(Json(json!({ "added": all })))
 }
 
+/// The maintenance console (its own service, port and user): on, or switched off by a flag
+/// file it reads - turned on again on the node with `pve-vm-studio console-enable`.
+async fn get_console(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    Ok(Json(json!({ "enabled": !crate::console::off_flag(&app.config.data_dir).exists(), "port": app.config.console_listen.port() })))
+}
+
+#[derive(Deserialize)]
+struct ConsoleSwitch {
+    enabled: bool,
+}
+
+async fn put_console(State(app): State<AppState>, user: User, Json(c): Json<ConsoleSwitch>) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    let flag = crate::console::off_flag(&app.config.data_dir);
+    if c.enabled {
+        match tokio::fs::remove_file(&flag).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(ApiError::from(anyhow::anyhow!("switching the console on: {e}"))),
+        }
+    } else {
+        tokio::fs::write(&flag, format!("switched off by {} at {}\n", user.session.user, chrono::Utc::now().to_rfc3339())).await.map_err(|e| ApiError::from(anyhow::anyhow!("switching the console off: {e}")))?;
+    }
+    tracing::info!("maintenance console switched {} by {}", if c.enabled { "on" } else { "off" }, user.session.user);
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// The studio's own address, gateway and DNS servers - its container's, in PVE.
 async fn get_network(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
     Ok(Json(selfnet::read(&app.pve).await?))
@@ -1197,11 +1267,7 @@ async fn put_worker(State(app): State<AppState>, user: User, Json(mut s): Json<m
 async fn put_server(State(app): State<AppState>, user: User, Json(s): Json<ServerSettings>) -> ApiResult<impl IntoResponse> {
     require_admin(&app, &user).await?;
     let f = s.fqdn.trim().trim_end_matches('.').to_lowercase();
-    let label_ok = |l: &str| {
-        !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-')
-            && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-    };
-    if !f.is_empty() && (!f.contains('.') || !f.split('.').all(label_ok)) {
+    if !f.is_empty() && !tls::valid_fqdn(&f) {
         return Err(ApiError::bad_request(format!("'{f}' is not a fully qualified DNS name")));
     }
     if !matches!(s.clock.as_str(), "" | "12h" | "24h") {

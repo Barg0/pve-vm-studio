@@ -38,6 +38,17 @@ pub struct Config {
     /// whoever runs the box - never switchable in the studio, off in every install.
     #[serde(default)]
     pub debug_tools: bool,
+    /// The maintenance console (`pve-vm-studio console`, its own service): its own port,
+    /// its own local user, for when the studio cannot be reached or signed in to.
+    #[serde(default = "default_console_listen")]
+    pub console_listen: SocketAddr,
+    /// The file this was read from - the console edits it.
+    #[serde(skip)]
+    pub path: PathBuf,
+}
+
+fn default_console_listen() -> SocketAddr {
+    "0.0.0.0:8443".parse().unwrap()
 }
 
 fn default_iso_root() -> PathBuf {
@@ -83,11 +94,22 @@ impl Config {
         let path = std::env::var_os("PVS_CONFIG")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("/etc/pve-vm-studio/config.toml"));
+        Self::load_from(&path)
+    }
+
+    pub fn load_from(path: &std::path::Path) -> Result<Self> {
+        let path = path.to_path_buf();
         let text = std::fs::read_to_string(&path)
             .with_context(|| format!("reading {}", path.display()))?;
-        let cfg: Config =
+        let mut cfg: Config =
             toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        cfg.path = path;
         Ok(cfg)
+    }
+
+    /// The console user's password hash, beside config.toml (root only).
+    pub fn console_password_file(&self) -> PathBuf {
+        self.path.with_file_name("console.pw")
     }
 
     pub fn jobs_dir(&self) -> PathBuf {

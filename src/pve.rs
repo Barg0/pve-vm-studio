@@ -13,6 +13,10 @@ use serde_json::Value;
 
 use crate::config::PveConfig;
 
+/// How a login PVE answered with a refusal (wrong password, unknown user) begins - against
+/// one that never reached PVE.
+pub const LOGIN_REFUSED: &str = "PVE refused the login";
+
 #[derive(Clone)]
 pub struct Pve {
     /// The nodes the API is reached through: the configured one first, then the cluster's
@@ -162,6 +166,15 @@ impl Pve {
         self.endpoints.read().unwrap().len()
     }
 
+    /// The names a node certificate may carry (NodeEndpoint::names) without adding ways in -
+    /// for checking one node on its own, as the maintenance console does.
+    pub fn learn_names(&self, mut names: Vec<String>) {
+        names.iter_mut().for_each(|n| *n = n.to_ascii_lowercase());
+        names.sort();
+        names.dedup();
+        *self.names.write().unwrap() = names;
+    }
+
     /// The cluster's other nodes as further ways to the API, behind the configured one.
     /// The configured node itself (by its address) is not added twice.
     pub fn set_nodes(&self, nodes: &[NodeEndpoint]) {
@@ -235,7 +248,7 @@ impl Pve {
         let ep = self.endpoint();
         let resp = ep.http.post(format!("{}/access/ticket", ep.base)).form(&form).send().await?;
         if !resp.status().is_success() {
-            return Err(anyhow!("PVE refused the login ({})", resp.status()));
+            return Err(anyhow!("{LOGIN_REFUSED} ({})", resp.status()));
         }
         Ok(resp.json::<Envelope<Ticket>>().await?.data)
     }
@@ -635,7 +648,7 @@ fn tls_config(cfg: &PveConfig, names: std::sync::Arc<std::sync::RwLock<Vec<Strin
         }
     }
     let inner = rustls::client::WebPkiServerVerifier::builder_with_provider(std::sync::Arc::new(roots.clone()), provider.clone()).build()?;
-    let v = std::sync::Arc::new(LearnedNames { inner: std::sync::RwLock::new(inner), names, base: roots, provider });
+    let v = std::sync::Arc::new(LearnedNames { inner: std::sync::RwLock::new(inner), names, base: roots, provider, pins: Default::default() });
     Ok((builder.dangerous().with_custom_certificate_verifier(v.clone()).with_no_client_auth(), Some(v)))
 }
 
@@ -649,6 +662,9 @@ struct LearnedNames {
     /// The system's roots and the configured CA - what the added CAs go on top of.
     base: rustls::RootCertStore,
     provider: std::sync::Arc<rustls::crypto::CryptoProvider>,
+    /// SHA-256 of node certificates trusted as they are (cas::Pin): one of them passes
+    /// whatever its CA - and only that exact certificate.
+    pins: std::sync::RwLock<Vec<Vec<u8>>>,
 }
 
 impl LearnedNames {
@@ -679,6 +695,17 @@ impl Pve {
         }
     }
 
+    /// Trusts these node certificates (SHA-256 of the DER) as they are, replacing the list before.
+    pub fn set_pins(&self, digests: Vec<Vec<u8>>) {
+        if let Some(v) = &self.verifier {
+            *v.pins.write().unwrap() = digests;
+        }
+    }
+
+    pub fn config(&self) -> &PveConfig {
+        &self.cfg
+    }
+
     pub fn ca_file(&self) -> Option<&Path> {
         self.cfg.ca_file.as_deref()
     }
@@ -695,7 +722,7 @@ impl rustls::client::danger::ServerCertVerifier for LearnedNames {
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
         use rustls::{CertificateError::*, Error::InvalidCertificate};
         let inner = self.inner();
-        match inner.verify_server_cert(end, inter, name, ocsp, now) {
+        let checked = match inner.verify_server_cert(end, inter, name, ocsp, now) {
             Err(e @ InvalidCertificate(NotValidForName | NotValidForNameContext { .. })) => {
                 let names = self.names.read().unwrap().clone();
                 names
@@ -705,6 +732,17 @@ impl rustls::client::danger::ServerCertVerifier for LearnedNames {
                     .ok_or(e)
             }
             r => r,
+        };
+        match checked {
+            Err(e) => {
+                let digest = ring::digest::digest(&ring::digest::SHA256, end.as_ref());
+                if self.pins.read().unwrap().iter().any(|p| p.as_slice() == digest.as_ref()) {
+                    Ok(rustls::client::danger::ServerCertVerified::assertion())
+                } else {
+                    Err(e)
+                }
+            }
+            ok => ok,
         }
     }
     fn verify_tls12_signature(
@@ -949,7 +987,7 @@ mod name_tests {
         let mut roots = rustls::RootCertStore::empty();
         roots.add(trusted.der().clone()).unwrap();
         let names: std::sync::Arc<std::sync::RwLock<Vec<String>>> = Default::default();
-        let v = LearnedNames { inner: std::sync::RwLock::new(rustls::client::WebPkiServerVerifier::builder_with_provider(std::sync::Arc::new(roots.clone()), provider.clone()).build().unwrap()), names: names.clone(), base: rustls::RootCertStore::empty(), provider };
+        let v = LearnedNames { inner: std::sync::RwLock::new(rustls::client::WebPkiServerVerifier::builder_with_provider(std::sync::Arc::new(roots.clone()), provider.clone()).build().unwrap()), names: names.clone(), base: rustls::RootCertStore::empty(), provider, pins: Default::default() };
         let ip = ServerName::try_from("10.10.0.10").unwrap();
         let check = |c: &rcgen::Certificate| v.verify_server_cert(c.der(), &[], &ip, &[], UnixTime::now()).is_ok();
         let good = leaf("pve-01.migolf.io", &issuer);

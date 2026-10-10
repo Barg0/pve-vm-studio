@@ -1,0 +1,15 @@
+[Unit]
+Description=PVE VM Studio maintenance console
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Root on purpose: it restarts the studio, edits config.toml and offers a shell in this
+# container - behind its own user (maint) and password. It never signs anyone in to the studio.
+Environment=PVS_CONFIG=/etc/pve-vm-studio/config.toml
+ExecStart=/usr/local/bin/pve-vm-studio console
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

@@ -85,6 +85,7 @@ pct exec "$VMID" -- bash -c '
 ((work_new)) && pct exec "$VMID" -- bash -c "chown pve-vm-studio:pve-vm-studio $WORK && chmod 0750 $WORK"
 pct push "$VMID" "$HERE/pve-vm-studio" /usr/local/bin/pve-vm-studio.new --perms 0755
 [[ -f $HERE/pve-vm-studio.service ]] && pct push "$VMID" "$HERE/pve-vm-studio.service" /etc/systemd/system/pve-vm-studio.service
+[[ -f $HERE/pve-vm-studio-console.service ]] && pct push "$VMID" "$HERE/pve-vm-studio-console.service" /etc/systemd/system/pve-vm-studio-console.service
 # Tag colours (datacenter tag-style map) take Sys.Modify on /: on / alone, not inherited.
 if pveum user list --output-format json | grep -q '"userid":"pve-vm-studio@pve"'; then
     pveum role list --output-format json | grep -q '"roleid":"VmStudioTagStyle"' ||
@@ -103,5 +104,17 @@ pct exec "$VMID" -- bash -c 'mv -f /usr/local/bin/pve-vm-studio.new /usr/local/b
 sleep 2
 # Space the container's volumes freed (deleted files) goes back to a thin storage.
 pct fstrim "$VMID" &>/dev/null || true
-pct exec "$VMID" -- systemctl is-active --quiet pve-vm-studio && echo "updated and running" ||
+pct exec "$VMID" -- systemctl is-active --quiet pve-vm-studio ||
     { echo "the service did not come back - pct exec $VMID -- journalctl -u pve-vm-studio" >&2; exit 1; }
+# The maintenance console (its own service on 8443). A studio from before it gets its
+# user's password now - shown here once, as install.sh shows it.
+if pct exec "$VMID" -- test -f /etc/systemd/system/pve-vm-studio-console.service; then
+    pw=$(pct exec "$VMID" -- env PVS_CONFIG=/etc/pve-vm-studio/config.toml /usr/local/bin/pve-vm-studio console-password --init --quiet)
+    pct exec "$VMID" -- bash -c 'systemctl enable pve-vm-studio-console &>/dev/null; systemctl restart pve-vm-studio-console'
+    if [[ -n $pw ]]; then
+        ip=$(pct exec "$VMID" -- hostname -I | awk '{print $1}')
+        printf '\n  Maintenance console   https://%s:8443\n  User                  maint\n  Password              %s\n\n' "$ip" "$pw"
+        printf '  Write the password down now - it is shown only this once.\n  Lost it: pct exec %s -- pve-vm-studio console-password --reset\n\n' "$VMID"
+    fi
+fi
+echo "updated and running"

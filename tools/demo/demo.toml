@@ -2,6 +2,8 @@
 # data in /tmp/pvs-demo. Sign in with root@pam and any password.
 listen = "127.0.0.1:8443"
 plain_http = true
+# The maintenance console (pve-vm-studio console): beside it, as plain HTTP too.
+console_listen = "127.0.0.1:8444"
 data_dir = "/tmp/pvs-demo"
 iso_root = "/tmp/pvs-demo/iso"
 

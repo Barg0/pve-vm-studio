@@ -10,3 +10,4 @@
 # The demo recorder's packages.
 /tools/demo/node_modules/
 /tools/demo/package-lock.json
+/tools/demo/console.pw

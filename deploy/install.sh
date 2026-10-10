@@ -467,6 +467,8 @@ install() {
         install -d -g pve-vm-studio -m 0750 /etc/pve-vm-studio' >>"$LOG_FILE" 2>&1
     pct push "$VMID" "$bin" /usr/local/bin/pve-vm-studio --perms 0755
     pct push "$VMID" "$HERE/pve-vm-studio.service" /etc/systemd/system/pve-vm-studio.service
+    [[ -f $HERE/pve-vm-studio-console.service ]] &&
+        pct push "$VMID" "$HERE/pve-vm-studio-console.service" /etc/systemd/system/pve-vm-studio-console.service
     if [[ -f $HERE/pvs-update.sh ]]; then
         pct exec "$VMID" -- mkdir -p /usr/local/lib/pve-vm-studio
         pct push "$VMID" "$HERE/pvs-update.sh" /usr/local/lib/pve-vm-studio/pvs-update.sh --perms 0755
@@ -491,6 +493,8 @@ install() {
 
 listen = "0.0.0.0:443"
 http_listen = "0.0.0.0:80"
+# The maintenance console (its own service and user, maint): https://<studio>:8443
+console_listen = "0.0.0.0:8443"
 data_dir = "/var/lib/pve-vm-studio"
 fqdn = "$FQDN"
 
@@ -509,6 +513,18 @@ CFG
     pct exec "$VMID" -- systemctl is-active --quiet pve-vm-studio ||
         die "the service did not start - pct exec $VMID -- journalctl -u pve-vm-studio"
     log ok "Service running"
+
+    # ---- the maintenance console: its own service and user, its password shown once ----
+    local console_pw=""
+    if pct exec "$VMID" -- test -f /etc/systemd/system/pve-vm-studio-console.service; then
+        # Straight into the variable - never into the install log.
+        console_pw=$(pct exec "$VMID" -- env PVS_CONFIG=/etc/pve-vm-studio/config.toml /usr/local/bin/pve-vm-studio console-password --init --quiet 2>>"$LOG_FILE")
+        pct exec "$VMID" -- systemctl enable --now pve-vm-studio-console >>"$LOG_FILE" 2>&1 &&
+            log ok "Maintenance console running on port 8443" ||
+            log warn "the maintenance console did not start - pct exec $VMID -- journalctl -u pve-vm-studio-console"
+    else
+        log warn "pve-vm-studio-console.service was not next to install.sh - no maintenance console"
+    fi
 
     # ---- the way in from the PVE UI ----
     local ip url note
@@ -529,6 +545,18 @@ CFG
     getent hosts "$FQDN" >/dev/null ||
         log warn "$FQDN does not resolve yet - create an A record for $ip, then set it in the studio's Settings"
     log end "Done: $url  - sign in with any PVE account; Let's Encrypt is under Settings"
+    [[ -n $console_pw ]] && console_block "https://$ip:8443" "$console_pw" "$VMID"
+}
+
+# The maintenance console's user and password, on the screen only (not in the log).
+console_block() { # url password vmid
+    printf '\n'
+    printf '  %sMaintenance console%s   %s\n' "$C_BOLD" "$C_RESET" "$1"
+    printf '  User                  maint\n'
+    printf '  Password              %s%s%s\n' "$C_BOLD$C_WARN" "$2" "$C_RESET"
+    printf '\n'
+    printf '  %sWrite the password down now - it is shown only this once.%s\n' "$C_WARN" "$C_RESET"
+    printf '  %sLost it: pct exec %s -- pve-vm-studio console-password --reset%s\n\n' "$C_DIM" "$3" "$C_RESET"
 }
 
 # ---------------------------------------------------------------------------------

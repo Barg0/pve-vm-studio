@@ -37,7 +37,7 @@ fn cn(name: &x509_parser::x509::X509Name) -> String {
     name.iter_common_name().next().and_then(|c| c.as_str().ok()).map(str::to_owned).unwrap_or_else(|| name.to_string())
 }
 
-fn fingerprint(der: &[u8]) -> String {
+pub fn fingerprint(der: &[u8]) -> String {
     ring::digest::digest(&ring::digest::SHA256, der).as_ref().iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":")
 }
 
@@ -151,6 +151,108 @@ fn write(data_dir: &Path, all: &[CaInfo]) -> Result<()> {
     std::fs::write(&tmp, to_pem(all))?;
     std::fs::rename(&tmp, &p)?;
     Ok(())
+}
+
+// ---- single certificates, trusted by fingerprint ----
+
+/// A node certificate trusted as it is (the maintenance console's "Trust this certificate
+/// only"): no CA behind it the studio knows. It stops working when the node renews it.
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct Pin {
+    pub node: String,
+    pub subject: String,
+    pub not_after: String,
+    /// SHA-256 of the DER, as `fingerprint` writes it.
+    pub fingerprint: String,
+    pub added_by: String,
+    pub added_at: String,
+}
+
+pub fn pins_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("pinned-certs.json")
+}
+
+pub fn read_pins(data_dir: &Path) -> Vec<Pin> {
+    std::fs::read(pins_path(data_dir)).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+/// The fingerprints as raw SHA-256, what the PVE client compares a certificate with.
+pub fn pin_digests(pins: &[Pin]) -> Vec<Vec<u8>> {
+    pins.iter()
+        .filter_map(|p| p.fingerprint.split(':').map(|h| u8::from_str_radix(h, 16).ok()).collect::<Option<Vec<u8>>>())
+        .filter(|d| d.len() == 32)
+        .collect()
+}
+
+pub fn write_pins(data_dir: &Path, pins: &[Pin]) -> Result<()> {
+    let p = pins_path(data_dir);
+    let tmp = p.with_extension("json.new");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(pins)?)?;
+    std::fs::rename(&tmp, &p)?;
+    Ok(())
+}
+
+/// One certificate of a chain as the console shows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct CertSummary {
+    pub subject: String,
+    pub issuer: String,
+    pub names: Vec<String>,
+    pub not_before: String,
+    pub not_after: String,
+    pub is_ca: bool,
+    pub self_signed: bool,
+    pub fingerprint: String,
+    /// Where its issuer is published (AIA caIssuers): ldap:// and http:// URLs.
+    pub aia: Vec<String>,
+}
+
+pub fn summary(der: &[u8]) -> Result<CertSummary> {
+    let (_, c) = x509_parser::parse_x509_certificate(der).context("not a certificate")?;
+    let mut names = Vec::new();
+    let mut aia = Vec::new();
+    for ext in c.extensions() {
+        match ext.parsed_extension() {
+            x509_parser::extensions::ParsedExtension::SubjectAlternativeName(san) => {
+                for n in &san.general_names {
+                    match n {
+                        x509_parser::extensions::GeneralName::DNSName(d) => names.push(format!("DNS:{d}")),
+                        x509_parser::extensions::GeneralName::IPAddress(ip) => {
+                            let s = match ip.len() {
+                                4 => std::net::Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3]).to_string(),
+                                16 => <[u8; 16]>::try_from(*ip).map(|b| std::net::Ipv6Addr::from(b).to_string()).unwrap_or_default(),
+                                _ => String::new(),
+                            };
+                            names.push(format!("IP:{s}"));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            x509_parser::extensions::ParsedExtension::AuthorityInfoAccess(a) => {
+                for d in &a.accessdescs {
+                    if d.access_method.to_id_string() == "1.3.6.1.5.5.7.48.2"
+                        && let x509_parser::extensions::GeneralName::URI(u) = &d.access_location
+                    {
+                        aia.push((*u).to_owned());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let day = |t: x509_parser::time::ASN1Time| t.to_datetime().date().to_string();
+    Ok(CertSummary {
+        subject: c.subject().to_string(),
+        issuer: c.issuer().to_string(),
+        names,
+        not_before: day(c.validity().not_before),
+        not_after: day(c.validity().not_after),
+        is_ca: c.is_ca(),
+        self_signed: c.subject() == c.issuer(),
+        fingerprint: fingerprint(der),
+        aia,
+    })
 }
 
 #[cfg(test)]
