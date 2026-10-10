@@ -318,6 +318,29 @@ fn forbidden(e: &anyhow::Error) -> bool {
     e.chain().any(|c| c.downcast_ref::<reqwest::Error>().and_then(|r| r.status()) == Some(reqwest::StatusCode::FORBIDDEN))
 }
 
+/// A body that ended before the catalog's size.
+#[derive(Debug)]
+struct Short;
+
+impl std::fmt::Display for Short {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the connection ended early")
+    }
+}
+
+impl std::error::Error for Short {}
+
+/// A cut connection, a stall or a server hiccup: the next try continues the part where
+/// this one stopped.
+fn cut(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        c.downcast_ref::<Short>().is_some()
+            || c.downcast_ref::<reqwest::Error>().is_some_and(|r| {
+                r.is_body() || r.is_decode() || r.is_timeout() || r.is_connect() || r.is_request() || r.status().is_some_and(|s| s.is_server_error())
+            })
+    })
+}
+
 /// Whether `dest` is this file already - same size, same SHA-1 (a retry after a failed
 /// build skips what it has).
 async fn have(file: &File, dest: &Path) -> bool {
@@ -350,7 +373,7 @@ where
             pr.within(before as f64 / total as f64, format!("file {} of {count} · already here", i + 1));
             continue;
         }
-        let mut attempt = 0;
+        let (mut attempt, mut cuts) = (0, 0);
         loop {
             // A link that runs out within two minutes is asked again first.
             if link_expires(&files[i].url).is_some_and(|t| t < chrono::Utc::now().timestamp() + 120) || attempt > 0 {
@@ -373,6 +396,13 @@ where
                 Err(e) if forbidden(&e) && attempt < 2 => {
                     attempt += 1;
                     log.warn(format!("{}: the link expired - asking the catalog for a fresh one", files[i].name)).await;
+                }
+                Err(e) if cut(&e) && cuts < 5 => {
+                    cuts += 1;
+                    log.debug(format!("{e:#}")).await;
+                    log.warn(format!("{}: the connection broke - continuing where it stopped (try {} of 6)", files[i].name, cuts + 1)).await;
+                    tokio::time::sleep(std::time::Duration::from_secs(5 * cuts)).await;
+                    log.check_abort()?;
                 }
                 Err(e) => return Err(e),
             }
@@ -455,8 +485,9 @@ async fn download_with(web: &reqwest::Client, log: &JobLog, file: &File, dest: &
         // More than the catalog's size: the part is not this file's - the next try starts over.
         if got > file.size {
             let _ = tokio::fs::remove_file(&part).await;
+            bail!("{}: got {got} bytes, the catalog says {}", file.name, file.size);
         }
-        bail!("{}: got {got} bytes, the catalog says {}", file.name, file.size);
+        return Err(anyhow::Error::new(Short).context(format!("{}: got {got} of {} bytes", file.name, file.size)));
     }
     if loud {
         log.debug(format!("Checking {} against the catalog's SHA-1", file.name)).await;
