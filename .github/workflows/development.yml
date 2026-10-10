@@ -15,6 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # The tests read back what the studio writes with the tools its container has (cabextract).
+      - run: sudo apt-get update -q && sudo apt-get install -y -q cabextract
       - run: cargo test --release
       - run: cargo build --release
       - uses: taiki-e/install-action@v2
