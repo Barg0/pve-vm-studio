@@ -32,7 +32,16 @@ cp -f /usr/local/bin/pve-vm-studio /usr/local/bin/pve-vm-studio.prev 2>/dev/null
 install -m 0755 -o root -g root "$D/pve-vm-studio.new" /usr/local/bin/pve-vm-studio.next || fail "could not install the binary"
 mv -f /usr/local/bin/pve-vm-studio.next /usr/local/bin/pve-vm-studio
 rm -f "$D/pve-vm-studio.new" "$D/request.taken"
+# The new version's units and this script, from the new binary (the maintenance console
+# came this way to studios that update themselves).
+# A binary without the command (older than the console) would not know the word and start a
+# second studio as root - it is looked for first, and that console is switched off instead.
+if grep -qa install-units /usr/local/bin/pve-vm-studio; then
+    /usr/local/bin/pve-vm-studio install-units >/dev/null 2>&1 || true
+else
+    systemctl disable --now pve-vm-studio-console 2>/dev/null
+fi
 status ok "Now running ${VERSION:-$TAG} (the previous binary is kept as /usr/local/bin/pve-vm-studio.prev)"
 systemctl restart pve-vm-studio
 # The maintenance console is the same binary: it follows.
-systemctl try-restart pve-vm-studio-console 2>/dev/null
+systemctl is-enabled -q pve-vm-studio-console 2>/dev/null && systemctl restart pve-vm-studio-console

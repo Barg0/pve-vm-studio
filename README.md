@@ -126,12 +126,12 @@ The installer shows the password once — write it down. `maint` never signs in 
 and no PVE account signs in here. Lost the password:
 
 ```sh
-pct exec <ct> -- pve-vm-studio console-password --reset
+pct exec <ct> -- /usr/local/bin/pve-vm-studio console-password --reset
 ```
 
 It runs as its own service (`pve-vm-studio-console`), so it answers while the studio itself
 is down. **Studio settings → Maintenance console** switches it off; on the node,
-`pct exec <ct> -- pve-vm-studio console-enable` switches it on again.
+`pct exec <ct> -- /usr/local/bin/pve-vm-studio console-enable` switches it on again.
 
 ### <picture><source media="(prefers-color-scheme: dark)" srcset=".github/assets/icons/certificate-dark.png"><img src=".github/assets/icons/certificate-light.png" width="18" alt="" align="absmiddle"></picture> First things in the studio
 

@@ -1166,7 +1166,16 @@ async fn delete_cas(State(app): State<AppState>, user: User, Path(fp): Path<Stri
 /// The maintenance console (its own service, port and user): on, or switched off by a flag
 /// file it reads - turned on again on the node with `pve-vm-studio console-enable`.
 async fn get_console(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
-    Ok(Json(json!({ "enabled": !crate::console::off_flag(&app.config.data_dir).exists(), "port": app.config.console_listen.port() })))
+    // What runs, as systemd sees it (is-active needs no privileges); the password file can be
+    // seen in its folder, though not read.
+    let active = tokio::process::Command::new("systemctl").args(["is-active", "pve-vm-studio-console"]).output().await.ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()).unwrap_or_default();
+    Ok(Json(json!({
+        "enabled": !crate::console::off_flag(&app.config.data_dir).exists(),
+        "port": app.config.console_listen.port(),
+        "installed": std::path::Path::new("/etc/systemd/system/pve-vm-studio-console.service").exists(),
+        "active": active,
+        "password_set": app.config.console_password_file().exists(),
+    })))
 }
 
 #[derive(Deserialize)]

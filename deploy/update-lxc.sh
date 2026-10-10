@@ -114,7 +114,7 @@ if pct exec "$VMID" -- test -f /etc/systemd/system/pve-vm-studio-console.service
     if [[ -n $pw ]]; then
         ip=$(pct exec "$VMID" -- hostname -I | awk '{print $1}')
         printf '\n  Maintenance console   https://%s:8443\n  User                  maint\n  Password              %s\n\n' "$ip" "$pw"
-        printf '  Write the password down now - it is shown only this once.\n  Lost it: pct exec %s -- pve-vm-studio console-password --reset\n\n' "$VMID"
+        printf '  Write the password down now - it is shown only this once.\n  Lost it: pct exec %s -- /usr/local/bin/pve-vm-studio console-password --reset\n\n' "$VMID"
     fi
 fi
 echo "updated and running"

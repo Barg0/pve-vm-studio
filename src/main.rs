@@ -33,6 +33,7 @@ mod serial;
 mod settings;
 mod tags;
 mod tls;
+mod units;
 mod uup;
 mod virtio;
 mod vms;
@@ -103,7 +104,11 @@ async fn main() -> Result<()> {
         Some("console") => return console::run(config).await,
         Some("console-password") => return console::password_command(&config, std::env::args().skip(2).collect()),
         Some("console-enable") => return console::enable_command(&config),
-        _ => {}
+        Some("install-units") => return units::install(),
+        // The studio itself takes no arguments: a word it does not know is a mistake (or a
+        // command of a newer version), never a reason to start a second studio.
+        Some("serial") | None => {}
+        Some(other) => anyhow::bail!("unknown command '{other}' - pve-vm-studio [console | console-password | console-enable | install-units | serial]"),
     }
 
     // `pve-vm-studio serial <node> <vmid> [seconds]`: print a VM's serial console - what

@@ -556,7 +556,7 @@ console_block() { # url password vmid
     printf '  Password              %s%s%s\n' "$C_BOLD$C_WARN" "$2" "$C_RESET"
     printf '\n'
     printf '  %sWrite the password down now - it is shown only this once.%s\n' "$C_WARN" "$C_RESET"
-    printf '  %sLost it: pct exec %s -- pve-vm-studio console-password --reset%s\n\n' "$C_DIM" "$3" "$C_RESET"
+    printf '  %sLost it: pct exec %s -- /usr/local/bin/pve-vm-studio console-password --reset%s\n\n' "$C_DIM" "$3" "$C_RESET"
 }
 
 # ---------------------------------------------------------------------------------

@@ -654,7 +654,9 @@ fn worker_head(what: &str, url: &str, pin: &str) -> String {
     s += "setlocal enabledelayedexpansion\r\nset ERR=0\r\necho PVS-WORKER-START > COM1\r\n";
     // NetKVM first, when WinPE carries it (the worker's NIC is virtio then).
     s += "for %%v in (2k25 w11) do if exist X:\\pvs\\drivers\\netkvm\\%%v\\amd64\\netkvm.inf (drvload X:\\pvs\\drivers\\netkvm\\%%v\\amd64\\netkvm.inf > nul 2>&1 & goto :nic)\r\n:nic\r\nwpeutil InitializeNetwork > nul 2>&1\r\n";
-    s += "copy /y %1\\pvs\\curl.exe X:\\curl.exe > nul || (echo PVS-NO-CURL > COM1 & goto :fail)\r\n";
+    // WinPE's own curl (from a newer install image, put in when WinPE was built) before the
+    // serviced image's: the curl of Server 2022's base image cannot pin the studio's key.
+    s += "if exist X:\\Windows\\System32\\curl.exe (copy /y X:\\Windows\\System32\\curl.exe X:\\curl.exe > nul) else (copy /y %1\\pvs\\curl.exe X:\\curl.exe > nul || (echo PVS-NO-CURL > COM1 & goto :fail))\r\n";
     // -k because the certificate names the studio's DNS name, not its address - the pin is
     // what is checked: a server without the studio's key gets no byte.
     let pin = if pin.is_empty() { String::new() } else { format!(" -k --pinnedpubkey sha256//{pin}") };
@@ -662,7 +664,8 @@ fn worker_head(what: &str, url: &str, pin: &str) -> String {
     // 20348.1 has no --retry-all-errors (7.71+). The :net loop does the retrying instead.
     s += &format!("set C=X:\\curl.exe -sS -f --retry 5 --retry-delay 3{pin}\r\nset U={url}\r\nset /a n=0\r\n");
     s += ":net\r\n%C% -o X:\\ping.txt %U%/ping > nul 2>&1 && goto :online\r\nset /a n+=1\r\nif !n! lss 40 (ping -n 4 127.0.0.1 > nul & goto :net)\r\n";
-    s += "echo PVS-NO-STUDIO > COM1\r\n%C% -o X:\\ping.txt %U%/ping > COM1 2>&1\r\ngoto :fail\r\n:online\r\necho PVS-ONLINE > COM1\r\n";
+    // Which curl it was, beside its error: an old one says "(4) ... not found built-in".
+    s += "echo PVS-NO-STUDIO > COM1\r\nX:\\curl.exe -V 2>&1 | findstr /b curl > COM1\r\n%C% -o X:\\ping.txt %U%/ping > COM1 2>&1\r\ngoto :fail\r\n:online\r\necho PVS-ONLINE > COM1\r\n";
     // The scratch disk: the SATA disk without a volume (the seed disk is SATA too, with FAT).
     s += "set OSDISK=\r\nfor /l %%n in (0,1,7) do (\r\n  (echo select disk %%n& echo detail disk) > X:\\dd.txt\r\n  diskpart /s X:\\dd.txt > X:\\dd%%n.txt 2>&1\r\n";
     s += "  for /f \"usebackq tokens=1,2 delims=: \" %%a in (\"X:\\dd%%n.txt\") do (\r\n    if /i \"%%a\"==\"Type\" set T%%n=%%b\r\n    if /i \"%%a\"==\"Volume\" if not \"%%b\"==\"###\" set V%%n=1\r\n  )\r\n)\r\n";
@@ -1328,6 +1331,9 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             let pe: winpe::WinPe = settings::load(db, "winpe").await?;
             if pe.volid.is_empty() {
                 bail!("the worker boots the studio's WinPE - build it under Media first");
+            }
+            if pe.curl.is_empty() {
+                log.warn(format!("WinPE {} carries no curl of its own - the worker uses this image's, and an old image's (Server 2022 and older) cannot pin the studio's key. Build WinPE again under Media (from Microsoft's files) if the worker cannot reach the studio.", pe.build)).await;
             }
             // curl.exe from the image itself (its DLLs are all in WinPE), for the seed disk.
             run(log, "wimlib-imagex", &["extract", &install_s, "1", "/Windows/System32/curl.exe", &format!("--dest-dir={}", dir.display()), "--no-acls"]).await

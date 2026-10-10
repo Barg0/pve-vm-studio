@@ -51,6 +51,10 @@ pub struct WinPe {
     /// "" for a WinPE built before - its worker keeps an e1000 NIC.
     #[serde(default)]
     pub netkvm: String,
+    /// The build of the install image whose curl.exe is inside (X:\Windows\System32): the
+    /// media worker's, newer than an old image's own; "" for a WinPE without one.
+    #[serde(default)]
+    pub curl: String,
 }
 
 const STARTNET: &str = r#"@echo off
@@ -165,6 +169,8 @@ struct Staged {
     root: PathBuf,
     pe: PathBuf,
     build: String,
+    /// curl.exe out of the install image beside WinRE (UUP), and that image's build.
+    curl: Option<(PathBuf, String)>,
 }
 
 /// The full build number of a WIM image: Build plus Service Pack Build, 26100.1.
@@ -200,7 +206,7 @@ async fn stage_iso(log: &JobLog, pr: &mut Progress, dir: &Path, source_volid: &s
     let pe = dir.join("pe.wim");
     run(log, "wimlib-imagex", &["export", &wim.display().to_string(), "2", &pe.display().to_string(), "--boot"]).await?;
     tokio::fs::remove_file(&wim).await?;
-    Ok(Staged { root, pe, build })
+    Ok(Staged { root, pe, build, curl: None })
 }
 
 /// What Setup's boot.wim index 2 carries in X:\sources beyond WinRE - Setup and its own
@@ -277,7 +283,18 @@ async fn stage_esd(log: &JobLog, pr: &mut Progress, dir: &Path, esd: &Path) -> R
     wim_update(&pe, &cmds).await?;
     log.ok(format!("Setup environment built: WinRE {build} with {n} Setup files in X:\\sources (DISM among them)")).await;
     let _ = tokio::fs::remove_dir_all(&media).await;
-    Ok(Staged { root, pe, build })
+    // The install image's curl.exe (its DLLs are all in WinPE): the media worker fetches with
+    // it whatever image it services - the curl of an older image (Server 2022's 20348.1)
+    // cannot pin the studio's key.
+    let cdir = dir.join("curl");
+    let curl = match run(log, "wimlib-imagex", &["extract", &esd_s, "3", "/Windows/System32/curl.exe", &format!("--dest-dir={}", cdir.display()), "--no-acls"]).await {
+        Ok(_) if cdir.join("curl.exe").exists() => Some((cdir.join("curl.exe"), image_build(log, esd, "3").await.unwrap_or_default())),
+        _ => {
+            log.warn("the install image has no curl.exe - the media worker takes the curl of the image it services").await;
+            None
+        }
+    };
+    Ok(Staged { root, pe, build, curl })
 }
 
 /// The wimlib update commands that put Setup's files into a Setup environment: X:\sources
@@ -373,7 +390,7 @@ async fn finish(
 ) -> Result<WinPe> {
     let at = |f: f64| span.0 + (span.1 - span.0) * f;
     pr.stage(at(0.0), at(0.4), "startnet.cmd into the Setup environment");
-    let (embedded, netkvm) = make_ours(log, dir, &st.pe, virtio).await?;
+    let (embedded, netkvm) = make_ours(log, dir, &st.pe, virtio, st.curl.as_ref().map(|c| c.0.as_path())).await?;
     tokio::fs::create_dir_all(st.root.join("sources")).await?;
     tokio::fs::rename(&st.pe, st.root.join("sources/boot.wim")).await?;
     log.ok("startnet.cmd and winpeshl.ini are in; WinPE runs our passes instead of Setup").await;
@@ -399,6 +416,7 @@ async fn finish(
         build: st.build,
         vioscsi: embedded,
         netkvm,
+        curl: st.curl.map(|c| c.1).unwrap_or_default(),
     };
     settings::save(db, "winpe", &pe).await?;
     Ok(pe)
@@ -407,7 +425,7 @@ async fn finish(
 /// Our part of a Setup environment image: startnet.cmd and winpeshl.ini (WinPE runs our
 /// passes, not Setup) and vioscsi and NetKVM from virtio-win. Returns the virtio-win release
 /// of each driver in it ("" for one that is not).
-async fn make_ours(log: &JobLog, dir: &Path, wim: &Path, virtio: Option<(&str, &Path)>) -> Result<(String, String)> {
+async fn make_ours(log: &JobLog, dir: &Path, wim: &Path, virtio: Option<(&str, &Path)>, curl: Option<&Path>) -> Result<(String, String)> {
     let files = dir.join("files");
     tokio::fs::create_dir_all(&files).await?;
     tokio::fs::write(files.join("startnet.cmd"), crlf(STARTNET)).await?;
@@ -440,6 +458,10 @@ async fn make_ours(log: &JobLog, dir: &Path, wim: &Path, virtio: Option<(&str, &
         } else {
             log.warn(format!("virtio-win {release} has no NetKVM for 2k25/w11 - the media worker needs WinPE's own e1000 driver")).await;
         }
+    }
+    if let Some(c) = curl {
+        cmds += &format!("add {} /Windows/System32/curl.exe\n", c.display());
+        log.ok("curl.exe from the install image goes into WinPE (the media worker's)").await;
     }
     wim_update(wim, &cmds).await?;
     Ok((embedded, netkvm))

@@ -2854,9 +2854,17 @@ function versionCard(v) {
    studio cannot be signed in to. On by default; off here, on again on the node. */
 function consoleCard(con, fqdn) {
   const url = `https://${fqdn || location.hostname}:${con.port}`;
-  return gsCard("gs-console", "powershell.svg", `Maintenance console ${infoTip("Maintenance console", `Its own page on port ${con.port} with a local user, maint, whose password install.sh showed once: PVE connection and its certificates, network, certificate, version, debug tools, the studio's service and log, a root shell in the container. For when nobody can sign in here - PVE's certificate not trusted, the studio not starting. Switched off, it refuses everything until "pct exec <ct> -- pve-vm-studio console-enable" on the node.`)}`, con.enabled ? `on · port ${con.port}` : "off", `
-    <div class="toggle-grid" style="grid-template-columns:1fr">${toggle('id="conOn"', "Maintenance console on", !!con.enabled)}</div>
-    ${actions(con.enabled ? `<a class="btn" href="${esc(url)}" target="_blank" rel="noopener"><img src="${iconSrc("powershell.svg")}" alt=""> Open ${esc(url.replace("https://", ""))}</a>` : "")}`, "", false);
+  const bin = "/usr/local/bin/pve-vm-studio";
+  // What is wrong, and the one command on the node that fixes it.
+  const [meta, fix] = !con.installed ? ["not installed", `cd <the folder with the release files> && ./update-lxc.sh <ct>`]
+    : con.active !== "active" ? [`not running (${con.active || "unknown"})`, `pct exec <ct> -- systemctl enable --now pve-vm-studio-console`]
+    : !con.password_set ? ["no password yet", `pct exec <ct> -- ${bin} console-password --reset`]
+    : !con.enabled ? ["switched off", ""] : [`running · port ${con.port}`, ""];
+  const tone = fix ? "warn" : con.enabled ? "ok" : "";
+  return gsCard("gs-console", "powershell.svg", `Maintenance console ${infoTip("Maintenance console", `Its own page on port ${con.port} with a local user, maint, whose password install.sh showed once: PVE connection and its certificates, network, certificate, version, debug tools, the studio's service and log, a root shell in the container. For when nobody can sign in here - PVE's certificate not trusted, the studio not starting. Switched off, it refuses everything until "pct exec <ct> -- ${bin} console-enable" on the node.`)}`, meta, `
+    ${fix ? `<div class="kv-grid"><div>State</div><div class="kv-val"><span class="pill status ${tone}">${esc(cap(meta))}</span></div><div>On the node</div><div class="kv-val"><code>${esc(fix)}</code></div></div>` : ""}
+    <div class="toggle-grid" style="grid-template-columns:1fr${fix ? ";margin-top:12px" : ""}">${toggle('id="conOn"', "Maintenance console on", !!con.enabled)}</div>
+    ${con.enabled && !fix ? actions(`<a class="btn" href="${esc(url)}" target="_blank" rel="noopener"><img src="${iconSrc("powershell.svg")}" alt=""> Open ${esc(url.replace("https://", ""))}</a>`) : ""}`, "", !!fix);
 }
 
 /* Troubleshooting tools - only with debug_tools = true in the studio's config.toml, so an

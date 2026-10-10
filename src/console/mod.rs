@@ -159,7 +159,7 @@ pub async fn run(config: Config) -> Result<()> {
         pve_ok: Default::default(),
     }));
     if password::read(&config.console_password_file())?.is_none() {
-        tracing::warn!("console: no password set yet - on the node: pct exec <ct> -- pve-vm-studio console-password --reset");
+        tracing::warn!("console: no password set yet - on the node: pct exec <ct> -- /usr/local/bin/pve-vm-studio console-password --reset");
     }
     let app = routes::router(console.clone()).fallback(static_file);
     tokio::spawn(console_watch(console.clone()));
@@ -283,7 +283,7 @@ fn not_signed_in() -> ApiError {
 }
 
 fn switched_off() -> ApiError {
-    ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "the maintenance console is switched off (Studio settings) - on the node: pct exec <ct> -- pve-vm-studio console-enable")
+    ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "the maintenance console is switched off (Studio settings) - on the node: pct exec <ct> -- /usr/local/bin/pve-vm-studio console-enable")
 }
 
 /// One line per sign-in attempt, the newest last; kept to the last 500.
@@ -328,7 +328,7 @@ pub async fn sign_in(c: &Console, from: IpAddr, pw: String) -> Result<String, Ap
     let file = c.boot.console_password_file();
     let stored = password::read(&file).map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))?;
     let Some(stored) = stored else {
-        return Err(ApiError::new(StatusCode::CONFLICT, "no console password is set - on the node: pct exec <ct> -- pve-vm-studio console-password --reset"));
+        return Err(ApiError::new(StatusCode::CONFLICT, "no console password is set - on the node: pct exec <ct> -- /usr/local/bin/pve-vm-studio console-password --reset"));
     };
     // PBKDF2 at 600,000 rounds: off the async threads.
     let ok = tokio::task::spawn_blocking(move || password::verify(&stored, &pw)).await.unwrap_or(false);

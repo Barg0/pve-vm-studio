@@ -107,7 +107,7 @@ async function boot() {
   paintBar();
   const wrap = $("wrap");
   if (ui.session.off) {
-    wrap.innerHTML = `<div class="signin"><form><h1>Switched off</h1><div>The maintenance console is switched off in the studio (Studio settings → Maintenance console).</div><div class="muted">On the node:<br><span class="mono" style="color:var(--fg)">pct exec &lt;ct&gt; -- pve-vm-studio console-enable</span></div></form></div>`;
+    wrap.innerHTML = `<div class="signin"><form><h1>Switched off</h1><div>The maintenance console is switched off in the studio (Studio settings → Maintenance console).</div><div class="muted">On the node:<br><span class="mono" style="color:var(--fg)">pct exec &lt;ct&gt; -- /usr/local/bin/pve-vm-studio console-enable</span></div></form></div>`;
     return;
   }
   if (!ui.session.signed_in) return signInPage();
@@ -125,7 +125,7 @@ function signInPage() {
     <div class="field"><label for="p">Password</label><input id="p" type="password" autocomplete="current-password" autofocus></div>
     <div class="bad" id="signinErr" hidden></div>
     <button type="submit" class="btn pri">Sign in</button>
-    <div class="muted" style="border-top:1px solid var(--line);padding-top:10px">${s.password_set === false ? "No password is set yet." : "Lost the password?"} On the node:<br><span class="mono" style="color:var(--fg)">pct exec &lt;ct&gt; -- pve-vm-studio console-password --reset</span></div>
+    <div class="muted" style="border-top:1px solid var(--line);padding-top:10px">${s.password_set === false ? "No password is set yet." : "Lost the password?"} On the node:<br><span class="mono" style="color:var(--fg)">pct exec &lt;ct&gt; -- /usr/local/bin/pve-vm-studio console-password --reset</span></div>
   </form></div>`;
   $("signin").onsubmit = async e => {
     e.preventDefault();
@@ -613,7 +613,7 @@ PAGES.password = async () => {
     <div class="box"><table class="grid"><thead><tr><th>When</th><th>From</th><th>Result</th></tr></thead><tbody>
       ${d.signins.map(s => `<tr><td>${esc(day(s.at))}</td><td class="mono">${esc(s.from)}</td><td class="${s.ok ? "ok" : "bad"}">${esc(s.what)}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">None yet.</td></tr>`}
     </tbody></table></div>
-    <div class="muted">5 wrong passwords lock the console for 5 minutes. Lost it: <span class="mono" style="color:var(--fg)">pct exec &lt;ct&gt; -- pve-vm-studio console-password --reset</span> on the node. The console is switched off in the studio's Studio settings.</div>`);
+    <div class="muted">5 wrong passwords lock the console for 5 minutes. Lost it: <span class="mono" style="color:var(--fg)">pct exec &lt;ct&gt; -- /usr/local/bin/pve-vm-studio console-password --reset</span> on the node. The console is switched off in the studio's Studio settings.</div>`);
   void b;
   on("pGen", "click", () => {
     const A = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
