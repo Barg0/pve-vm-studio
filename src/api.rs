@@ -46,6 +46,8 @@ pub fn router() -> Router<AppState> {
         .route("/inventory", get(inventory))
         .route("/jobs", get(list_jobs).delete(delete_jobs))
         .route("/jobs/cluster-check", post(start_cluster_check))
+        .route("/jobs/queue", get(get_queue).put(put_queue_order))
+        .route("/settings/queue", get(get_queue_settings).put(put_queue_settings))
         .route("/jobs/{id}", get(get_job))
         .route("/jobs/{id}/retry", post(retry_job))
         .route("/hardware/cluster", get(hardware_cluster))
@@ -357,6 +359,38 @@ async fn already_running(app: &AppState, kind: &str, key: &str, value: &str) -> 
     Ok(())
 }
 
+/// The queue now: the limit, why it holds, each queued job's place and reason.
+async fn get_queue(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    Ok(Json(app.jobs.queue()))
+}
+
+#[derive(Deserialize)]
+struct QueueOrder {
+    order: Vec<String>,
+}
+
+/// A new order for the queued jobs (Jobs → Queue, dragged).
+async fn put_queue_order(State(app): State<AppState>, user: User, Json(q): Json<QueueOrder>) -> ApiResult<impl IntoResponse> {
+    user.require(&app, "/vms", "VM.Allocate").await?;
+    app.jobs.reorder(&q.order).await?;
+    Ok(Json(app.jobs.queue()))
+}
+
+async fn get_queue_settings(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    let s: crate::jobs::QueueSettings = settings::load(&app.db, "queue").await?;
+    Ok(Json(s))
+}
+
+async fn put_queue_settings(State(app): State<AppState>, user: User, Json(s): Json<crate::jobs::QueueSettings>) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    if s.limit > 64 {
+        return Err(ApiError::bad_request("at most 64 jobs at a time"));
+    }
+    settings::save(&app.db, "queue", &s).await?;
+    app.jobs.set_limit(s.limit as usize);
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// Asks a running job to stop: it ends at its next check and cleans up like a failed one.
 async fn abort_job(State(app): State<AppState>, user: User, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
     user.require(&app, "/vms", "VM.Allocate").await?;
@@ -381,7 +415,7 @@ async fn retry_job(State(app): State<AppState>, user: User, Path(id): Path<Strin
         "winpe" if !s("uup").is_empty() => build_winpe_uup(State(app), user, Json(UupWinPe { uuid: s("uup"), lang: s("lang"), build: s("build") })).await?.into_response(),
         "winpe" => build_winpe(State(app), user, Json(IsoQuery { volid: s("iso") })).await?.into_response(),
         "virtio" => fetch_virtio(State(app), user).await?.into_response(),
-        "fod" => build_fod(State(app), user, Json(FodBuild { slot: s("fod"), lang: s("lang") })).await?.into_response(),
+        "fod" => build_fod(State(app), user, Json(FodBuild { slot: s("fod") })).await?.into_response(),
         "cluster-check" => start_cluster_check(State(app), user).await?.into_response(),
         other => return Err(ApiError::bad_request(format!("a {other} job is retried from its own page"))),
     };
@@ -570,69 +604,72 @@ async fn start_cluster_check(State(app): State<AppState>, user: User) -> ApiResu
     let pve = app.pve.clone();
     let id = app
         .jobs
-        .spawn("cluster-check", "Cluster check", &user.session.user, json!({}), move |log| async move {
-            let v = pve.version().await?;
-            log.line(format!("Proxmox VE {}-{}, reached with the studio's token", v.version, v.release)).await;
-
-            let status = pve.cluster_status().await?;
-            match status.iter().find(|s| s.kind == "cluster") {
-                Some(c) => {
-                    log.line(format!(
-                        "Cluster {}: {} node(s), {}",
-                        c.name,
-                        c.nodes.unwrap_or(0),
-                        if c.quorate == Some(1) { "quorate" } else { "NOT quorate" }
-                    ))
-                    .await
-                }
-                None => log.line("Single node, no cluster").await,
-            }
-
-            let resources = pve.resources().await?;
-            for n in resources.iter().filter(|r| r.kind == "node") {
-                let name = n.node.as_deref().unwrap_or("?");
-                if n.status.as_deref() != Some("online") {
-                    log.line(format!("Node {name}: offline")).await;
-                    continue;
-                }
-                log.line(format!(
-                    "Node {name}: {} CPUs, {} of {} GiB RAM in use",
-                    n.maxcpu.unwrap_or(0.0),
-                    gib(n.mem),
-                    gib(n.maxmem)
-                ))
-                .await;
-                for b in pve.bridges(name).await? {
-                    log.line(format!("  bridge {}{}", b.iface, b.cidr.map(|c| format!(" ({c})")).unwrap_or_default()))
-                        .await;
-                }
-                for s in resources.iter().filter(|r| r.kind == "storage" && r.node.as_deref() == Some(name)) {
-                    let content = s.content.as_deref().unwrap_or("");
-                    log.line(format!(
-                        "  storage {} [{}]: {} of {} GiB free, holds {}{}",
-                        s.storage.as_deref().unwrap_or("?"),
-                        s.plugintype.as_deref().unwrap_or("?"),
-                        gib(s.maxdisk.zip(s.disk).map(|(m, d)| m.saturating_sub(d))),
-                        gib(s.maxdisk),
-                        content,
-                        if s.shared == Some(1) { ", shared" } else { "" }
-                    ))
-                    .await;
-                }
-                tokio::time::sleep(Duration::from_millis(300)).await;
-            }
-
-            let vnets = pve.vnets().await;
-            log.line(format!("{} SDN VNet(s)", vnets.len())).await;
-
-            let templates = resources.iter().filter(|r| r.kind == "qemu" && r.template == Some(1)).count();
-            let vms = resources.iter().filter(|r| r.kind == "qemu" && r.template != Some(1)).count();
-            log.line(format!("{vms} VM(s), {templates} template(s)")).await;
-            log.line("Cluster check done").await;
-            Ok(())
-        })
+        .spawn("cluster-check", "Cluster check", &user.session.user, json!({}), move |log| cluster_check(pve, log))
         .await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "id": id }))))
+}
+
+/// The cluster check's work - also what a queued one runs after a restart.
+pub(crate) async fn cluster_check(pve: crate::pve::Pve, log: crate::jobs::JobLog) -> anyhow::Result<()> {
+    let v = pve.version().await?;
+    log.line(format!("Proxmox VE {}-{}, reached with the studio's token", v.version, v.release)).await;
+
+    let status = pve.cluster_status().await?;
+    match status.iter().find(|s| s.kind == "cluster") {
+        Some(c) => {
+            log.line(format!(
+                "Cluster {}: {} node(s), {}",
+                c.name,
+                c.nodes.unwrap_or(0),
+                if c.quorate == Some(1) { "quorate" } else { "NOT quorate" }
+            ))
+            .await
+        }
+        None => log.line("Single node, no cluster").await,
+    }
+
+    let resources = pve.resources().await?;
+    for n in resources.iter().filter(|r| r.kind == "node") {
+        let name = n.node.as_deref().unwrap_or("?");
+        if n.status.as_deref() != Some("online") {
+            log.line(format!("Node {name}: offline")).await;
+            continue;
+        }
+        log.line(format!(
+            "Node {name}: {} CPUs, {} of {} GiB RAM in use",
+            n.maxcpu.unwrap_or(0.0),
+            gib(n.mem),
+            gib(n.maxmem)
+        ))
+        .await;
+        for b in pve.bridges(name).await? {
+            log.line(format!("  bridge {}{}", b.iface, b.cidr.map(|c| format!(" ({c})")).unwrap_or_default()))
+                .await;
+        }
+        for s in resources.iter().filter(|r| r.kind == "storage" && r.node.as_deref() == Some(name)) {
+            let content = s.content.as_deref().unwrap_or("");
+            log.line(format!(
+                "  storage {} [{}]: {} of {} GiB free, holds {}{}",
+                s.storage.as_deref().unwrap_or("?"),
+                s.plugintype.as_deref().unwrap_or("?"),
+                gib(s.maxdisk.zip(s.disk).map(|(m, d)| m.saturating_sub(d))),
+                gib(s.maxdisk),
+                content,
+                if s.shared == Some(1) { ", shared" } else { "" }
+            ))
+            .await;
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+
+    let vnets = pve.vnets().await;
+    log.line(format!("{} SDN VNet(s)", vnets.len())).await;
+
+    let templates = resources.iter().filter(|r| r.kind == "qemu" && r.template == Some(1)).count();
+    let vms = resources.iter().filter(|r| r.kind == "qemu" && r.template != Some(1)).count();
+    log.line(format!("{vms} VM(s), {templates} template(s)")).await;
+    log.line("Cluster check done").await;
+    Ok(())
 }
 
 fn gib(bytes: Option<u64>) -> String {
@@ -982,13 +1019,16 @@ async fn remove_gold(State(app): State<AppState>, user: User, Path(id): Path<Str
     let title = format!("Remove {}", gold.name);
     let job = app
         .jobs
-        .spawn("remove-gold", &title, &user.session.user, json!({ "gold": id }), move |log| async move {
-            golds::remove(&pve, &db, &gold, &log).await?;
-            cis::remove(&data, &gold.id).await;
-            Ok(())
-        })
+        .spawn("remove-gold", &title, &user.session.user, json!({ "gold": id }), move |log| remove_gold_job(pve, db, data, gold, log))
         .await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
+}
+
+/// Removes a gold: the job's work, also after a restart.
+pub(crate) async fn remove_gold_job(pve: crate::pve::Pve, db: sqlx::SqlitePool, data: std::path::PathBuf, gold: golds::GoldRow, log: crate::jobs::JobLog) -> anyhow::Result<()> {
+    golds::remove(&pve, &db, &gold, &log).await?;
+    cis::remove(&data, &gold.id).await;
+    Ok(())
 }
 
 // ---- VMs ----
@@ -1062,7 +1102,18 @@ async fn start_deploy(State(app): State<AppState>, user: User, Json(spec): Json<
         })
         .await?;
     sqlx::query("UPDATE vms SET job_id = ? WHERE id = ?").bind(&job).bind(&id).execute(&app.db).await?;
+    keep_deploy_secrets(&app, &job, &spec).await;
     Ok((StatusCode::ACCEPTED, Json(json!({ "id": job, "vm": id }))))
+}
+
+/// A deploy that waits in the queue keeps its passwords where a restart finds them (a file
+/// only the studio reads); one that started has them in memory and needs no file.
+async fn keep_deploy_secrets(app: &AppState, job: &str, spec: &VmSpec) {
+    if app.jobs.queued_ids().await.iter().any(|q| q == job)
+        && let Err(e) = app.jobs.keep_secret(job, &spec.secrets()).await
+    {
+        tracing::warn!("keeping the queued deploy's passwords for a restart: {e:#}");
+    }
 }
 
 /// Clears a VM from the studio's view: the record is set aside ("cleared"), the VM in
@@ -1316,6 +1367,22 @@ struct AcmeRequest {
     credentials: Option<String>,
 }
 
+/// A Let's Encrypt certificate for the studio's name - also what a queued request runs
+/// after a restart.
+pub(crate) async fn certificate_job(app: AppState, log: crate::jobs::JobLog, fqdn: String, acme: AcmeSettings) -> anyhow::Result<()> {
+    let paths = tls::Paths::new(&app.config.data_dir);
+    let result = tls::acme_issue(&paths, app.tls.as_ref(), &fqdn, &acme, &log).await;
+    let mut s: TlsSettings = settings::load(&app.db, "tls").await.unwrap_or_default();
+    s.last_check = Some(chrono::Utc::now().to_rfc3339());
+    s.last_error = result.as_ref().err().map(|e| format!("{e:#}"));
+    if result.is_ok() {
+        s.mode = "acme".into();
+        s.acme = acme;
+    }
+    settings::save(&app.db, "tls", &s).await?;
+    result.map(|_| ())
+}
+
 async fn provider_help(_user: User, Path(code): Path<String>) -> ApiResult<impl IntoResponse> {
     let help = tls::provider_help(&code).await.map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
     Ok(Json(json!({ "help": help })))
@@ -1349,20 +1416,11 @@ async fn start_acme(State(app): State<AppState>, user: User, Json(req): Json<Acm
         return Err(ApiError::bad_request("HTTP-01 needs the port-80 listener (http_listen in config.toml) - or use DNS-01"));
     }
     let server: ServerSettings = settings::load(&app.db, "server").await?;
-    let (db, live) = (app.db.clone(), app.tls.clone());
+    let a = app.clone();
     let job = app
         .jobs
-        .spawn("certificate", "Let's Encrypt certificate", &user.session.user, json!({ "fqdn": server.fqdn, "extra": acme.extra_names }), move |log| async move {
-            let result = tls::acme_issue(&paths, live.as_ref(), &server.fqdn, &acme, &log).await;
-            let mut s: TlsSettings = settings::load(&db, "tls").await.unwrap_or_default();
-            s.last_check = Some(chrono::Utc::now().to_rfc3339());
-            s.last_error = result.as_ref().err().map(|e| format!("{e:#}"));
-            if result.is_ok() {
-                s.mode = "acme".into();
-                s.acme = acme;
-            }
-            settings::save(&db, "tls", &s).await?;
-            result.map(|_| ())
+        .spawn("certificate", "Let's Encrypt certificate", &user.session.user, json!({ "fqdn": server.fqdn, "extra": acme.extra_names, "acme": acme }), move |log| {
+            certificate_job(a, log, server.fqdn, acme)
         })
         .await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
@@ -1477,7 +1535,6 @@ async fn get_fod(State(app): State<AppState>, _user: User) -> ApiResult<impl Int
 #[derive(Deserialize)]
 struct FodBuild {
     slot: String,
-    lang: String,
 }
 
 /// Builds a release's FoD ISO from Microsoft's update servers and sets it for that release.
@@ -1485,30 +1542,33 @@ async fn build_fod(State(app): State<AppState>, user: User, Json(q): Json<FodBui
     user.require(&app, "/vms", "VM.Allocate").await?;
     let src = fod::source(&q.slot).ok_or_else(|| ApiError::bad_request("no such release"))?;
     already_running(&app, "fod", "fod", src.key).await?;
-    let lang = q.lang.trim().to_owned();
-    if lang.is_empty() || lang.len() > 16 || !lang.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        return Err(ApiError::bad_request("not a language tag"));
-    }
+    let job = spawn_fod(&app, &user.session.user, src.key).await?;
+    Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
+}
+
+/// Starts a release's FoD ISO build: the Media page's, and the maintenance window's.
+pub async fn spawn_fod(app: &AppState, by: &str, key: &str) -> ApiResult<String> {
+    let src = fod::source(key).ok_or_else(|| ApiError::bad_request("no such release"))?;
+    let title = format!("Build {} Features on Demand", src.name);
+    let (a, key) = (app.clone(), src.key.to_owned());
+    Ok(app.jobs.spawn("fod", &title, by, json!({ "fod": src.key }), move |log| fod_job(a, log, key)).await?)
+}
+
+/// Builds a release's FoD ISO and sets it - also what a queued build runs after a restart.
+pub(crate) async fn fod_job(app: AppState, log: crate::jobs::JobLog, key: String) -> anyhow::Result<()> {
+    let src = fod::source(&key).ok_or_else(|| anyhow::anyhow!("no FoD release {key}"))?;
     let bake: BakeSettings = settings::load(&app.db, "bake").await?;
     let win: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
-    let (pve, db, web, work) = (app.pve.clone(), app.db.clone(), app.web.clone(), app.config.data_dir.join("work"));
-    let title = format!("Build {} Features on Demand ({lang})", src.name);
-    let job = app
-        .jobs
-        .spawn("fod", &title, &user.session.user, json!({ "fod": src.key, "lang": lang }), move |log| async move {
-            let p = bake.resolve(&pve).await?;
-            let storage = if win.iso_storage.is_empty() { p.iso_storage.clone() } else { win.iso_storage.clone() };
-            let built = fod::build_uup(&pve, &log, &web, &work, &p.node, &storage, src, &lang).await?;
-            let mut s: fod::FodSettings = settings::load(&db, "fod").await?;
-            if let Some(slot) = s.slot_mut(src.key) {
-                *slot = built.volid.clone();
-            }
-            settings::save(&db, "fod", &s).await?;
-            log.ok(format!("{} VMs use {} now ({} packages, {} satellites)", src.name, built.volid, built.packages, built.satellites)).await;
-            Ok(())
-        })
-        .await?;
-    Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
+    let p = bake.resolve(&app.pve).await?;
+    let storage = if win.iso_storage.is_empty() { p.iso_storage.clone() } else { win.iso_storage.clone() };
+    let built = fod::build_uup(&app.pve, &log, &app.web, &app.config.data_dir.join("work"), &p.node, &storage, src).await?;
+    let mut s: fod::FodSettings = settings::load(&app.db, "fod").await?;
+    if let Some(slot) = s.slot_mut(src.key) {
+        *slot = built.volid.clone();
+    }
+    settings::save(&app.db, "fod", &s).await?;
+    log.ok(format!("{} VMs use {} now ({} packages, {} satellites)", src.name, built.volid, built.packages, built.satellites)).await;
+    Ok(())
 }
 
 async fn put_fod(State(app): State<AppState>, user: User, Json(s): Json<fod::FodSettings>) -> ApiResult<impl IntoResponse> {
@@ -1534,19 +1594,23 @@ async fn fetch_virtio(State(app): State<AppState>, user: User) -> ApiResult<impl
 pub async fn spawn_virtio(app: &AppState, by: &str) -> ApiResult<String> {
     let s: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
     let release_now = virtio::resolve(&s.virtio).await.unwrap_or_default();
-    let bake: BakeSettings = settings::load(&app.db, "bake").await?;
-    let pve = app.pve.clone();
+    let a = app.clone();
     let job = app
         .jobs
-        .spawn("virtio", "virtio-win drivers", by, json!({ "virtio": s.virtio, "release": release_now }), move |log| async move {
-            let p = bake.resolve(&pve).await?;
-            let release = virtio::resolve(&s.virtio).await?;
-            log.line(format!("virtio-win {} resolves to {release}", s.virtio)).await;
-            let storage = if s.iso_storage.is_empty() { p.iso_storage.clone() } else { s.iso_storage.clone() };
-            virtio::fetch(&pve, &log, &p.node, &storage, &release).await.map(|_| ())
-        })
+        .spawn("virtio", "virtio-win drivers", by, json!({ "virtio": s.virtio, "release": release_now }), move |log| virtio_job(a, log))
         .await?;
     Ok(job)
+}
+
+/// virtio-win into PVE, the release the setting stands for when the job starts.
+pub(crate) async fn virtio_job(app: AppState, log: crate::jobs::JobLog) -> anyhow::Result<()> {
+    let s: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
+    let bake: BakeSettings = settings::load(&app.db, "bake").await?;
+    let p = bake.resolve(&app.pve).await?;
+    let release = virtio::resolve(&s.virtio).await?;
+    log.line(format!("virtio-win {} resolves to {release}", s.virtio)).await;
+    let storage = if s.iso_storage.is_empty() { p.iso_storage.clone() } else { s.iso_storage.clone() };
+    virtio::fetch(&app.pve, &log, &p.node, &storage, &release).await.map(|_| ())
 }
 
 // ---- Windows golds ----
@@ -1696,7 +1760,9 @@ async fn start_windows_bake(
 
 /// Starts a Windows bake: the form's, and the auto-update's (`extra` goes into the job's
 /// params). Returns (job, gold).
-pub async fn spawn_windows_bake(app: &AppState, by: &str, mut opt: windows::WinBakeOptions, extra: serde_json::Value) -> ApiResult<(String, String)> {
+/// A Windows bake's checks and its gold record ("baking"): the image on the ISO, the
+/// policies, WinPE. Returns (gold, image, ISO path) - the bake form's, the window's.
+pub async fn prepare_windows_bake(app: &AppState, opt: &mut windows::WinBakeOptions) -> ApiResult<(String, wim::WimImage, std::path::PathBuf)> {
     opt.upgrade();
     let path = iso_path(&app, &opt.iso).ok_or_else(|| ApiError::bad_request("not an ISO volume"))?;
     let images = wim::inspect(&path, &app.config.data_dir.join("wim-cache.json"))
@@ -1709,8 +1775,6 @@ pub async fn spawn_windows_bake(app: &AppState, by: &str, mut opt: windows::WinB
     if let Some(bad) = opt.features.iter().find(|f| !windows::WIN_FEATURES.iter().any(|w| w.id == f.as_str())) {
         return Err(ApiError::bad_request(format!("unknown policy {bad}")));
     }
-    let bake: BakeSettings = settings::load(&app.db, "bake").await?;
-    let win: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
     let pe: winpe::WinPe = settings::load(&app.db, "winpe").await?;
     if pe.volid.is_empty() {
         return Err(ApiError::bad_request("no WinPE yet - build it under Settings → Windows first"));
@@ -1737,8 +1801,11 @@ pub async fn spawn_windows_bake(app: &AppState, by: &str, mut opt: windows::WinB
     .execute(&app.db)
     .await?;
 
-    let (pve, db, work) = (app.pve.clone(), app.db.clone(), app.config.data_dir.join("work"));
-    let sha_cache = app.config.data_dir.join("iso-sha256-cache.json");
+    Ok((gold_id, img, path))
+}
+
+pub async fn spawn_windows_bake(app: &AppState, by: &str, mut opt: windows::WinBakeOptions, extra: serde_json::Value) -> ApiResult<(String, String)> {
+    let (gold_id, img, path) = prepare_windows_bake(app, &mut opt).await?;
     let gid = gold_id.clone();
     let title = format!(
         "Bake {} ({})",
@@ -1749,57 +1816,64 @@ pub async fn spawn_windows_bake(app: &AppState, by: &str, mut opt: windows::WinB
     if let (Some(p), Some(e)) = (params.as_object_mut(), extra.as_object()) {
         p.extend(e.clone());
     }
-    let job = app
-        .jobs
-        .spawn("bake", &title, by, params, move |log| async move {
-            let result = async {
-                let p = bake.resolve(&pve).await?.with_disk_storage(&pve, opt.disk_storage.as_deref()).await?;
-                sqlx::query("UPDATE golds SET node = ?, storage = ? WHERE id = ?")
-                    .bind(&p.node)
-                    .bind(&p.disk_storage)
-                    .bind(&gid)
-                    .execute(&db)
-                    .await?;
-                log.run(format!(
-                    "Baking {} (index {} of {}) on {}: disk on {}",
-                    img.name, img.index, opt.iso, p.node, p.disk_storage
-                ))
-                .await;
-                log.run(format!("Hashing {} (SHA-256)", opt.iso)).await;
-                let clock = std::time::Instant::now();
-                let iso_sha256 = golds::iso_sha256(&path, &sha_cache).await?;
-                log.ok(format!("SHA-256 {iso_sha256} ({}s)", clock.elapsed().as_secs())).await;
-                let release = virtio::resolve(&win.virtio).await?;
-                let iso_storage = if win.iso_storage.is_empty() { p.iso_storage.clone() } else { win.iso_storage.clone() };
-                let virtio_volid = virtio::fetch(&pve, &log, &p.node, &iso_storage, &release).await?;
-                if pe.node != p.node {
-                    anyhow::bail!("the WinPE was built on {}, the bake runs on {} - rebuild it there under Settings", pe.node, p.node);
-                }
-                windows::bake(
-                    windows::WinBake { pve: &pve, db: &db, log: &log, work: &work },
-                    &gid,
-                    &p,
-                    &img,
-                    &opt,
-                    &pe.volid,
-                    &virtio_volid,
-                    &release,
-                    &iso_sha256,
-                )
-                .await
-            }
-            .await;
-            if result.is_err() {
-                let _ = sqlx::query("UPDATE golds SET status = 'failed' WHERE id = ? AND status = 'baking'")
-                    .bind(&gid)
-                    .execute(&db)
-                    .await;
-            }
-            result
-        })
-        .await?;
+    let a = app.clone();
+    let job = app.jobs.spawn("bake", &title, by, params, move |log| windows_bake_job(a, log, gid, opt, img, path)).await?;
     sqlx::query("UPDATE golds SET job_id = ? WHERE id = ?").bind(&job).bind(&gold_id).execute(&app.db).await?;
     Ok((job, gold_id))
+}
+
+/// A Windows bake's work, settings read when it starts - also what a queued bake runs
+/// after a restart.
+pub(crate) async fn windows_bake_job(app: AppState, log: crate::jobs::JobLog, gid: String, opt: windows::WinBakeOptions, img: wim::WimImage, path: std::path::PathBuf) -> anyhow::Result<()> {
+    let bake: BakeSettings = settings::load(&app.db, "bake").await?;
+    let win: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
+    let pe: winpe::WinPe = settings::load(&app.db, "winpe").await?;
+    let (pve, db, work) = (app.pve.clone(), app.db.clone(), app.config.data_dir.join("work"));
+    let sha_cache = app.config.data_dir.join("iso-sha256-cache.json");
+    let result = async {
+        let p = bake.resolve(&pve).await?.with_disk_storage(&pve, opt.disk_storage.as_deref()).await?;
+        sqlx::query("UPDATE golds SET node = ?, storage = ? WHERE id = ?")
+            .bind(&p.node)
+            .bind(&p.disk_storage)
+            .bind(&gid)
+            .execute(&db)
+            .await?;
+        log.run(format!(
+            "Baking {} (index {} of {}) on {}: disk on {}",
+            img.name, img.index, opt.iso, p.node, p.disk_storage
+        ))
+        .await;
+        log.run(format!("Hashing {} (SHA-256)", opt.iso)).await;
+        let clock = std::time::Instant::now();
+        let iso_sha256 = golds::iso_sha256(&path, &sha_cache).await?;
+        log.ok(format!("SHA-256 {iso_sha256} ({}s)", clock.elapsed().as_secs())).await;
+        let release = virtio::resolve(&win.virtio).await?;
+        let iso_storage = if win.iso_storage.is_empty() { p.iso_storage.clone() } else { win.iso_storage.clone() };
+        let virtio_volid = virtio::fetch(&pve, &log, &p.node, &iso_storage, &release).await?;
+        if pe.node != p.node {
+            anyhow::bail!("the WinPE was built on {}, the bake runs on {} - rebuild it there under Settings", pe.node, p.node);
+        }
+        windows::bake(
+            windows::WinBake { pve: &pve, db: &db, log: &log, work: &work },
+            &gid,
+            &p,
+            &img,
+            &opt,
+            &pe.volid,
+            &virtio_volid,
+            &release,
+            &iso_sha256,
+        )
+        .await
+    }
+    .await;
+    if result.is_err() {
+        let _ = sqlx::query("UPDATE golds SET status = 'failed' WHERE id = ? AND status = 'baking'")
+            .bind(&gid)
+            .execute(&db)
+            .await;
+    }
+    result
 }
 
 // ---- WinPE ----
@@ -1815,29 +1889,51 @@ async fn build_winpe(State(app): State<AppState>, user: User, Json(q): Json<IsoQ
     if !path.exists() {
         return Err(ApiError::bad_request(format!("the studio cannot read {}", q.volid)));
     }
-    let bake: BakeSettings = settings::load(&app.db, "bake").await?;
-    let win: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
-    let (pve, db, work) = (app.pve.clone(), app.db.clone(), app.config.data_dir.join("work"));
-    let iso_root = app.config.iso_root.clone();
-    let volid = q.volid.clone();
+    let (a, volid) = (app.clone(), q.volid.clone());
     let job = app
         .jobs
-        .spawn("winpe", "Build WinPE", &user.session.user, json!({ "iso": q.volid }), move |log| async move {
-            let p = bake.resolve(&pve).await?;
-            let storage = if win.iso_storage.is_empty() { p.iso_storage.clone() } else { win.iso_storage.clone() };
-            // The virtio ISO, for the vioscsi driver WinPE carries from now on.
-            let release = virtio::resolve(&win.virtio).await?;
-            let vio_volid = virtio::fetch(&pve, &log, &p.node, &storage, &release).await?;
-            let vio_path = iso_root.join(storage.as_str()).join(virtio::iso_name(&release));
-            let vio = vio_path.exists().then_some((release.as_str(), vio_path.as_path()));
-            // vioscsi is not optional: every pass reaches its virtio-scsi disk through it.
-            if vio.is_none() {
-                anyhow::bail!("{vio_volid} is not readable through the studio's ISO mount, and WinPE is never built without vioscsi{}", iso_unreadable_why(&iso_root, &vio_volid));
-            }
-            winpe::build(&pve, &db, &log, &work, &volid, &path, &p.node, &storage, vio).await.map(|_| ())
-        })
+        .spawn("winpe", "Build WinPE", &user.session.user, json!({ "iso": q.volid }), move |log| winpe_iso_job(a, log, volid))
         .await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
+}
+
+/// The virtio-win ISO WinPE carries its vioscsi from, fetched into PVE and readable here.
+async fn winpe_virtio(app: &AppState, log: &crate::jobs::JobLog, node: &str, storage: &str) -> anyhow::Result<(String, std::path::PathBuf)> {
+    let win: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
+    let release = virtio::resolve(&win.virtio).await?;
+    let vio_volid = virtio::fetch(&app.pve, log, node, storage, &release).await?;
+    let vio_path = app.config.iso_root.join(storage).join(virtio::iso_name(&release));
+    // vioscsi is not optional: every pass reaches its virtio-scsi disk through it.
+    if !vio_path.exists() {
+        anyhow::bail!("{vio_volid} is not readable through the studio's ISO mount, and WinPE is never built without vioscsi{}", iso_unreadable_why(&app.config.iso_root, &vio_volid));
+    }
+    Ok((release, vio_path))
+}
+
+/// Where WinPE is built: the bake node and the Windows ISO storage.
+async fn winpe_place(app: &AppState) -> anyhow::Result<(String, String)> {
+    let bake: BakeSettings = settings::load(&app.db, "bake").await?;
+    let win: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
+    let p = bake.resolve(&app.pve).await?;
+    let storage = if win.iso_storage.is_empty() { p.iso_storage.clone() } else { win.iso_storage.clone() };
+    Ok((p.node, storage))
+}
+
+/// WinPE from a Windows ISO - also what a queued build runs after a restart.
+pub(crate) async fn winpe_iso_job(app: AppState, log: crate::jobs::JobLog, volid: String) -> anyhow::Result<()> {
+    let path = iso_path(&app, &volid).ok_or_else(|| anyhow::anyhow!("{volid} is not an ISO volume"))?;
+    let (node, storage) = winpe_place(&app).await?;
+    let (release, vio_path) = winpe_virtio(&app, &log, &node, &storage).await?;
+    let work = app.config.data_dir.join("work");
+    winpe::build(&app.pve, &app.db, &log, &work, &volid, &path, &node, &storage, Some((release.as_str(), vio_path.as_path()))).await.map(|_| ())
+}
+
+/// WinPE from Microsoft's files (a UUP set) - also what a queued build runs after a restart.
+pub(crate) async fn winpe_uup_job(app: AppState, log: crate::jobs::JobLog, uuid: String, lang: String) -> anyhow::Result<()> {
+    let (node, storage) = winpe_place(&app).await?;
+    let (release, vio_path) = winpe_virtio(&app, &log, &node, &storage).await?;
+    let work = app.config.data_dir.join("work");
+    winpe::build_uup(&app.pve, &app.db, &log, &app.web, &work, &uuid, &lang, &node, &storage, Some((release.as_str(), vio_path.as_path()))).await.map(|_| ())
 }
 
 #[derive(Deserialize)]
@@ -1901,27 +1997,11 @@ pub async fn spawn_winpe_uup(app: &AppState, by: &str, uuid: &str, lang: &str, b
         return Err(ApiError::bad_request("not a UUP build id and language"));
     }
     already_running(app, "winpe", "uup", uuid).await?;
-    let bake: BakeSettings = settings::load(&app.db, "bake").await?;
-    let win: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
-    let (pve, db, web, work) = (app.pve.clone(), app.db.clone(), app.web.clone(), app.config.data_dir.join("work"));
-    let iso_root = app.config.iso_root.clone();
-    let (uuid, lang, build) = (uuid.to_owned(), lang.to_owned(), build.to_owned());
+    let (a, uuid, lang, build) = (app.clone(), uuid.to_owned(), lang.to_owned(), build.to_owned());
     let title = if build.is_empty() { "Build WinPE from Microsoft".to_owned() } else { format!("Build WinPE {} from Microsoft", build) };
     let job = app
         .jobs
-        .spawn("winpe", &title, by, json!({ "uup": uuid, "lang": lang, "build": build }), move |log| async move {
-            let p = bake.resolve(&pve).await?;
-            let storage = if win.iso_storage.is_empty() { p.iso_storage.clone() } else { win.iso_storage.clone() };
-            let release = virtio::resolve(&win.virtio).await?;
-            let vio_volid = virtio::fetch(&pve, &log, &p.node, &storage, &release).await?;
-            let vio_path = iso_root.join(storage.as_str()).join(virtio::iso_name(&release));
-            let vio = vio_path.exists().then_some((release.as_str(), vio_path.as_path()));
-            // vioscsi is not optional: every pass reaches its virtio-scsi disk through it.
-            if vio.is_none() {
-                anyhow::bail!("{vio_volid} is not readable through the studio's ISO mount, and WinPE is never built without vioscsi{}", iso_unreadable_why(&iso_root, &vio_volid));
-            }
-            winpe::build_uup(&pve, &db, &log, &web, &work, &uuid, &lang, &p.node, &storage, vio).await.map(|_| ())
-        })
+        .spawn("winpe", &title, by, json!({ "uup": uuid, "lang": lang, "build": build }), move |log| winpe_uup_job(a, log, uuid, lang))
         .await?;
     Ok(job)
 }
@@ -2115,9 +2195,7 @@ pub async fn spawn_media_build(app: &AppState, by: &str, q: MediaBuild, extra: s
         return Err(ApiError::bad_request("pick a build, a language and at least one edition"));
     }
     already_running(app, "media", "uuid", &q.uuid).await?;
-    let bake: BakeSettings = settings::load(&app.db, "bake").await?;
-    let (pve, db, web, work) = (app.pve.clone(), app.db.clone(), app.web.clone(), app.config.data_dir.join("work"));
-    let link = worker_link(app).await?;
+    worker_link(app).await?;
     let title = format!("Build {} {} media ({})", p.name, q.build, uup::lang_tag(&q.lang));
     // The run's work folder: a new one, or the interrupted run's when it is continued.
     let run = extra["run"].as_str().filter(|r| r.starts_with("run-") && r[4..].chars().all(|c| c.is_ascii_hexdigit())).map(str::to_owned)
@@ -2127,17 +2205,25 @@ pub async fn spawn_media_build(app: &AppState, by: &str, q: MediaBuild, extra: s
         o.extend(e.clone());
     }
     params["run"] = json!(run);
+    let a = app.clone();
     let job = app
         .jobs
         // ISO builds as many at a time as Image settings allows (1 by default): each needs
         // about three times its download (some 26 GB) on the work volume while it runs.
-        .spawn_in_lane("media", "media", &title, by, params, move |log| async move {
-            let pl = bake.resolve(&pve).await?;
-            let req = media::Request { product: p, uuid: q.uuid, build: q.build, lang: q.lang, editions: q.editions, run };
-            media::build(&pve, &db, &log, &web, &work, &pl, link, req).await.map(|_| ())
-        })
+        .spawn_in_lane("media", "media", &title, by, params, move |log| media_job(a, log, q, run))
         .await?;
     Ok(job)
+}
+
+/// A Windows media build's work, its worker link and placement read when it starts - also
+/// what a queued build runs after a restart.
+pub(crate) async fn media_job(app: AppState, log: crate::jobs::JobLog, q: MediaBuild, run: String) -> anyhow::Result<()> {
+    let p = uup::product(&q.product).ok_or_else(|| anyhow::anyhow!("no product {}", q.product))?;
+    let bake: BakeSettings = settings::load(&app.db, "bake").await?;
+    let link = worker_link(&app).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let pl = bake.resolve(&app.pve).await?;
+    let req = media::Request { product: p, uuid: q.uuid, build: q.build, lang: q.lang, editions: q.editions, run };
+    media::build(&app.pve, &app.db, &log, &app.web, &app.config.data_dir.join("work"), &pl, link, req).await.map(|_| ())
 }
 
 // ---- the studio's own version and updates ----
@@ -2164,7 +2250,7 @@ struct UpdateBody {
 /// Installs a release: an admin action, one at a time.
 async fn studio_update(State(app): State<AppState>, user: User, Json(q): Json<UpdateBody>) -> ApiResult<impl IntoResponse> {
     require_admin(&app, &user).await?;
-    let busy: Option<(String,)> = sqlx::query_as("SELECT title FROM jobs WHERE status = 'running' AND kind = 'update'").fetch_optional(&app.db).await?;
+    let busy: Option<(String,)> = sqlx::query_as("SELECT title FROM jobs WHERE status IN ('queued', 'running') AND kind = 'update'").fetch_optional(&app.db).await?;
     if let Some((t,)) = busy {
         return Err(ApiError::new(StatusCode::CONFLICT, format!("{t} is running already")));
     }
@@ -2173,19 +2259,15 @@ async fn studio_update(State(app): State<AppState>, user: User, Json(q): Json<Up
 }
 
 pub async fn start_update(app: &AppState, tag: &str, by: &str) -> anyhow::Result<String> {
-    let (web, data, jobs, tag) = (app.web.clone(), app.config.data_dir.clone(), app.jobs.clone(), tag.to_owned());
     let title = format!("Update the studio to {}", tag.trim_start_matches('v'));
-    let jobs2 = jobs.clone();
-    // The job learns its own id once spawned (it writes it into the helper's request).
-    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-    let id = jobs
-        .spawn("update", &title, by, json!({ "tag": tag }), move |log| async move {
-            let id = rx.await.unwrap_or_default();
-            update::run(web, data, log, jobs2, id, tag).await
-        })
-        .await?;
-    let _ = tx.send(id.clone());
-    Ok(id)
+    let (a, t) = (app.clone(), tag.to_owned());
+    app.jobs.spawn("update", &title, by, json!({ "tag": tag }), move |log| update_job(a, log, t)).await
+}
+
+/// The studio's update - also what a queued one runs after a restart.
+pub(crate) async fn update_job(app: AppState, log: crate::jobs::JobLog, tag: String) -> anyhow::Result<()> {
+    let id = log.id().to_owned();
+    update::run(app.web.clone(), app.config.data_dir.clone(), log, app.jobs.clone(), id, tag).await
 }
 
 async fn get_update_settings(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
@@ -2646,6 +2728,7 @@ async fn deploy_lab(State(app): State<AppState>, user: User, Path(id): Path<Stri
             })
             .await?;
         sqlx::query("UPDATE vms SET job_id = ? WHERE id = ?").bind(&job).bind(&vm_id).execute(&app.db).await?;
+        keep_deploy_secrets(&app, &job, &spec).await;
         jobs.push(json!({ "job": job, "vm": vm_id, "name": spec.name }));
     }
     Ok((StatusCode::ACCEPTED, Json(json!({ "jobs": jobs }))))
@@ -2704,6 +2787,7 @@ async fn get_auto_update(State(app): State<AppState>, _user: User) -> ApiResult<
     let now = chrono::Local::now().naive_local();
     Ok(Json(json!({
         "settings": s, "runs": runs, "golds": golds_out,
+        "plan": autoupdate::plan(&app).await,
         "window_open": w.open_at(now).is_some(),
         "next_window": w.next_open(now).map(|t| t.format("%Y-%m-%dT%H:%M").to_string()),
     })))

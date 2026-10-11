@@ -205,6 +205,29 @@ fn prefix24() -> u8 {
 }
 
 impl VmSpec {
+    /// What the record never keeps - the passwords, the product key, Arc's secret: held for
+    /// a queued deploy until it starts (Jobs::keep_secret), so a restart can start it again.
+    pub fn secrets(&self) -> serde_json::Value {
+        serde_json::json!({
+            "password": self.password,
+            "product_key": self.product_key,
+            "join_password": self.domain_join.as_ref().map(|d| d.password.clone()),
+            "arc_secret": self.arc.as_ref().map(|a| a.secret.clone()),
+        })
+    }
+
+    pub fn put_secrets(&mut self, v: &serde_json::Value) {
+        let s = |k: &str| v[k].as_str().unwrap_or_default().to_owned();
+        self.password = s("password");
+        self.product_key = s("product_key");
+        if let Some(d) = self.domain_join.as_mut() {
+            d.password = s("join_password");
+        }
+        if let Some(a) = self.arc.as_mut() {
+            a.secret = s("arc_secret");
+        }
+    }
+
     /// The checks that need no cluster: the rest happen in the job.
     pub fn validate(&self) -> Result<()> {
         let n = &self.name;

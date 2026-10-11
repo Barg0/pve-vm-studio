@@ -21,6 +21,8 @@ pub static EVENTS: &[(&str, &str, &str, bool)] = &[
     ("update_done", "Windows updates", "Update done", true),
     ("update_failed", "Windows updates", "Update failed", true),
     ("update_stopped", "Windows updates", "Base build changed", true),
+    ("window_report", "Windows updates", "Maintenance window report", true),
+    ("window_skipped", "Windows updates", "Maintenance window skipped", true),
     ("bake_failed", "Golds", "Bake failed", true),
     ("bake_done", "Golds", "Bake done", false),
     ("vm_provisioned", "VMs", "VM provisioned", true),
@@ -37,6 +39,7 @@ pub static EVENTS: &[(&str, &str, &str, bool)] = &[
     ("cert_expiring", "Certificate", "Expires in under 14 days", true),
     ("studio_updated", "Studio", "Studio update installed or failed", true),
     ("jobs_interrupted", "Studio", "Restart interrupted jobs", true),
+    ("queue_waits", "Studio", "Queue waits for PVE", true),
     ("node_offline", "Cluster", "Node offline", true),
     ("storage_high", "Cluster", "Gold or ISO storage over 85 %", true),
 ];
@@ -328,6 +331,10 @@ pub async fn job_ended(app: AppState, id: String) {
     let params: serde_json::Value = serde_json::from_str(&row.params).unwrap_or_default();
     // The auto-update chain's own steps report through the chain, once, as a whole.
     if params["auto_update"].as_str().is_some_and(|s| !s.is_empty()) {
+        return;
+    }
+    // Taken out of the queue before it began: nothing ran, nothing to tell.
+    if row.started_at.is_none() {
         return;
     }
     match row.kind.as_str() {

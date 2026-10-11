@@ -891,3 +891,69 @@ a.btn, a.btn:hover { text-decoration: none; }
   .nav-item { padding-top: 12px; padding-bottom: 12px; }
   .toggle { min-height: 44px; }
 }
+
+/* ---- the job queue ---- */
+/* Running / Queue / History in the job list: a small heading with the count. */
+.rail-sec { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-muted); padding: 12px 14px 4px; }
+.rail-sec .n { font-family: var(--mono); color: var(--fg); letter-spacing: 0; }
+.rail-sec .sp { flex: 1; }
+.rail-sec .lim { font-family: var(--mono); letter-spacing: 0; text-transform: none; font-weight: 400; }
+.job-item.q { grid-template-columns: 14px 20px minmax(0, 1fr); cursor: grab; }
+.job-item.q:active { cursor: grabbing; }
+.job-item.q .job-name { display: flex; gap: 6px; align-items: center; }
+.job-item.q .job-name img { width: 14px; height: 14px; flex: none; }
+.job-item.q:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.q-grip { width: 14px; height: 18px; color: var(--fg-muted); opacity: .7; }
+.job-item.q:hover .q-grip { opacity: 1; color: var(--fg); }
+.job-item.ghost { opacity: .35; }
+.drop-line { height: 2px; margin: 0 12px; background: var(--accent); border-radius: var(--radius); position: relative; }
+.drop-line::before { content: ""; position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+/* A queued job's place: dashed - it holds no slot yet. */
+.q-pos { width: 20px; height: 20px; display: grid; place-items: center; font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--fg-muted);
+  border: 1px dashed var(--border); border-radius: var(--radius); flex: none; }
+.q-banner { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin: 12px 0; border: 1px dashed var(--border); border-radius: var(--radius-lg); background: var(--bg); }
+.q-banner .q-pos { width: 30px; height: 30px; font-size: 14px; }
+.q-banner b { display: block; font-size: 13px; }
+.q-banner .m { font-size: 12px; color: var(--fg-muted); }
+.job-hist i.s-queued { background: transparent; outline: 1px dashed var(--fg-muted); opacity: 1; }
+.job-filter.f-queued:not(.zero) .n { color: var(--fg); }
+/* Dashboard → Running: the queue under the running jobs. */
+.dash-sub { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; padding: 0 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-muted); }
+.dash-sub::after { content: ""; flex: 1; height: 1px; background: var(--divider); }
+.dash-act.queued { grid-template-columns: 22px minmax(0, 1fr) auto auto; }
+.q-slots { display: flex; gap: 3px; align-items: center; }
+.q-slots i { width: 10px; height: 10px; border-radius: 2px; background: var(--run); }
+.q-slots i.free { background: transparent; border: 1px solid var(--border); }
+.q-slots i.q { background: transparent; border: 1px dashed var(--fg-muted); }
+
+/* ---- Windows updates: the next window ---- */
+.plan { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg); padding: 12px 14px 14px; }
+.plan-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.plan-head b { font-size: 13px; }
+.plan-head span { font-size: 12px; color: var(--fg-muted); }
+.plan-scroll { overflow-x: auto; }
+.plan-grid { display: grid; grid-template-columns: 96px minmax(560px, 1fr); row-gap: 6px; column-gap: 12px; align-items: center; padding: 14px 24px 0 0; }
+.plan-lane { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-muted); white-space: nowrap; }
+.plan-axis { position: relative; height: 16px; font-family: var(--mono); font-size: 10.5px; color: var(--fg-muted); }
+.plan-axis i { position: absolute; top: 0; transform: translateX(-50%); font-style: normal; white-space: nowrap; }
+.plan-track { position: relative; height: 30px; }
+.plan-hr { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--divider); }
+.plan-end { position: absolute; top: -4px; bottom: -4px; width: 0; border-left: 2px solid var(--accent); }
+.blk { position: absolute; top: 2px; bottom: 2px; border-radius: var(--radius); padding: 0 8px; display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; color: var(--fg); border: 1px solid var(--border); background: var(--bg-elevated); }
+.blk img { width: 14px; height: 14px; flex: none; }
+.blk.iso, .plan-key .k-iso { border-color: color-mix(in srgb, var(--band-deploy) 60%, var(--border)); background: color-mix(in srgb, var(--band-deploy) 16%, var(--bg-elevated)); }
+.blk.server, .plan-key .k-bake { border-color: color-mix(in srgb, var(--band-work) 55%, var(--border)); background: color-mix(in srgb, var(--band-work) 14%, var(--bg-elevated)); }
+.blk.client { border-color: color-mix(in srgb, var(--band-host) 55%, var(--border)); background: color-mix(in srgb, var(--band-host) 14%, var(--bg-elevated)); }
+.blk.virtio, .blk.winpe { border-style: solid; }
+.blk.guess { border-style: dashed; }
+.blk.cut { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.blk.tail { border-left: 0; border-top-left-radius: 0; border-bottom-left-radius: 0; padding: 0; }
+.blk.over, .plan-key .k-over { background-image: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--fg-muted) 26%, transparent) 5px 7px); }
+.plan-key { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; font-size: 11.5px; color: var(--fg-muted); }
+.plan-key span { display: inline-flex; gap: 6px; align-items: center; }
+.plan-key i { width: 18px; height: 10px; border-radius: 2px; border: 1px solid var(--border); display: inline-block; }
+.job-item.q.dep .job-sub { display: flex; gap: 5px; align-items: center; }
+.q-link { width: 12px; height: 12px; flex: none; color: var(--fg-muted); }
+.job-item.s-skipped .job-name, .job-item.s-skipped .job-sub { color: var(--fg-muted); }
+.job-hist i.s-skipped { background: transparent; outline: 1px dashed var(--fg-muted); opacity: 1; }

@@ -2,7 +2,7 @@
 //! update and the Windows auto-update. A window is days, a start and an end in the studio's
 //! local time; the start lets work begin, the end stops new steps (a running one finishes).
 
-use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,10 +95,6 @@ impl MaintenanceSettings {
                 (at >= open && at < close).then_some(close)
             })
         })
-    }
-
-    pub fn open_now(&self) -> bool {
-        self.open_at(Local::now().naive_local()).is_some()
     }
 
     /// When the next window opens (now, when one is open) - for "builds in the next window".

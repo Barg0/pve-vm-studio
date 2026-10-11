@@ -61,7 +61,7 @@ function meter(used, max) {
 function bladeHead(id, actions = "") {
   return `<div class="blade-toolbar">${bladeTitle(id)}<div class="row">${actions}</div></div>`;
 }
-const JOB_TONE = { running: "run", queued: "idle", succeeded: "ok", failed: "bad", interrupted: "warn" };
+const JOB_TONE = { running: "run", queued: "idle", succeeded: "ok", failed: "bad", interrupted: "warn", skipped: "idle" };
 function jobPill(status) { return `<span class="pill status ${JOB_TONE[status] || "idle"}">${esc(cap(status))}</span>`; }
 
 /* ---------- sign-in ---------- */
@@ -416,9 +416,10 @@ renderBlade = function () {
 let dashPoll = null, dashTls = null, dashTlsAsked = false, dashWin = null, dashFod = null, dashVer = null;
 async function bladeDashboard(main, stale) {
   clearTimeout(dashPoll);
-  const [, jobs, win, fod] = await Promise.all([refreshInventory(true), api("GET", "/jobs"), api("GET", "/settings/windows").catch(() => null),
-    api("GET", "/settings/fod").catch(() => null)]);
+  const [, jobs, win, fod, queue] = await Promise.all([refreshInventory(true), api("GET", "/jobs"), api("GET", "/settings/windows").catch(() => null),
+    api("GET", "/settings/fod").catch(() => null), api("GET", "/jobs/queue").catch(() => null)]);
   if (stale()) return;
+  jobsQueue = queue;
   cluster.jobs = jobs; dashWin = win; dashFod = fod; cluster.winpe = !!(win && win.winpe && win.winpe.volid);
   if (!dashTlsAsked) {
     dashTlsAsked = true;
@@ -431,6 +432,14 @@ async function bladeDashboard(main, stale) {
   dashPoll = setTimeout(() => { if (!stale()) bladeDashboard(main, stale).catch(() => {}); }, busy ? 3000 : 15000);
 }
 document.addEventListener("click", async e => {
+  const qc = e.target.closest("#main [data-q-cancel]");
+  if (qc) {
+    e.stopPropagation();
+    const job = (cluster.jobs || []).find(x => x.id === qc.dataset.qCancel);
+    if (!job || !await confirmDelete("abort", `Take ${job.title} out of the queue?`, "It has not started, so nothing was built. Retry or the form it came from starts it again.", "Take it out", undefined, "Keep it queued")) return;
+    try { await api("POST", `/jobs/${encodeURIComponent(job.id)}/abort`); toast("Taken out of the queue"); } catch (err) { toast(err.message, true); }
+    return;
+  }
   const j = e.target.closest("#main [data-dash-job]");
   if (j) { openJob(j.dataset.dashJob); return; }
   if (e.target.closest("#main [data-cluster-check]")) {
@@ -463,7 +472,7 @@ function paintDashboard(main) {
   const nodesOk = online.length === inv.nodes.length && (!inv.cluster || inv.cluster.quorate);
   const html = bladeHead("dashboard", `<button class="btn" type="button" data-cluster-check><img src="${iconSrc("validate.svg")}" alt=""> Run cluster check</button>`) + `
     <div class="chips">
-      <span class="pill status ${running.length ? "run" : "idle"}">${running.length} running</span>
+      <span class="pill status ${running.length ? "run" : "idle"}">${jobs.filter(j => j.status === "running").length} running${jobs.some(j => j.status === "queued") ? ` · ${jobs.filter(j => j.status === "queued").length} queued` : ""}</span>
       <span class="pill status ${nodesOk ? "ok" : "bad"}">${nodesLine}</span>
       <span class="pill">VMs: ${count("ok")} running of ${state.servers.length} designed</span>
       <span class="pill">Golds: ${ready.length} ready</span>
@@ -487,21 +496,34 @@ function dashJobRow(j) {
   return `<button type="button" class="dash-act" data-dash-job="${esc(j.id)}" title="${esc(sub.what)} - open the log">
     <span class="dash-act-ico"><img src="${sub.band ? iconSrcBand(sub.icon, sub.band) : iconSrc(sub.icon)}" alt=""><span class="dot ${JOB_DOT[j.status] || "idle"}"></span></span>
     <span class="dash-act-main"><span class="dash-act-title">${esc(j.title)}</span>
-      ${live ? `<span class="dash-act-sub">${esc(p ? [p.label, p.detail].filter(Boolean).join(" · ") : "starting")}${pct != null ? ` · <b>${Math.floor(pct)}%</b>` : ""}</span>
+      ${live ? `<span class="dash-act-sub">${esc(p ? [p.label, p.detail].filter(Boolean).join(" · ") : "starting")}${pct != null ? ` · <b>${Math.floor(pct)}%</b>` : ""}${waitsOn(j.id)}</span>
         ${pct != null ? `<span class="dash-act-bar"><i style="width:${pct.toFixed(1)}%"></i></span>` : ""}`
       : `<span class="dash-act-sub">${esc(j.status)} · ${esc(when(j.ended_at || j.created_at))}${err ? ` · <span class="dash-act-err">${esc(err)}</span>` : ""}</span>`}</span>
     <span class="dash-act-took mono">${took(j.started_at, j.ended_at)}</span></button>`;
 }
 
-/* Running: what the studio works on right now, with its measured stage and percentage. It
-   stays on top even when idle - one quiet line then, so "nothing runs" is visible too. */
+/* Running: what the studio works on right now, with its measured stage and percentage, and
+   under it the queue in its order. It stays on top even when idle - one quiet line then, so
+   "nothing runs" is visible too. The squares: busy slots of Jobs at a time, then the queue. */
 function dashRunning(jobs) {
-  const active = jobs.filter(j => j.status === "running" || j.status === "queued");
-  const last = jobs.find(j => !active.includes(j));
-  return gsCard("dash-running", "first-boot.svg", "Running", active.length ? `${active.length} job${active.length === 1 ? "" : "s"}` : "idle", active.length
-    ? `<div class="dash-acts">${active.map(dashJobRow).join("")}</div>`
-    : `<p class="dash-idle">Nothing runs right now.${last ? ` The last job ended ${esc(when(last.ended_at || last.created_at))}.` : ""}</p>`,
-    "", true, active.length ? `<span class="pill status run">Live</span>` : "");
+  const run = jobs.filter(j => j.status === "running"), q = queueOrder(jobs);
+  const last = jobs.find(j => j.status !== "running" && j.status !== "queued");
+  const limit = jobsQueue ? jobsQueue.limit : 0;
+  const slots = limit && (run.length || q.length) ? `<span class="q-slots" title="${run.length} of ${limit} at a time running, ${q.length} queued">${Array.from({ length: limit }, (_, i) => `<i class="${i < run.length ? "" : "free"}"></i>`).join("")}${q.slice(0, 8).map(() => `<i class="q"></i>`).join("")}</span>` : "";
+  const meta = run.length || q.length ? [`${run.length}${limit ? ` of ${limit}` : ""} running`, q.length ? `${q.length} queued` : ""].filter(Boolean).join(" · ") : "idle";
+  const qRow = (j, i) => {
+    const info = queueInfo(j.id);
+    return `<div class="dash-act queued" role="button" tabindex="0" data-dash-job="${esc(j.id)}" title="Open the log">
+      <span class="q-pos">${i + 1}</span>
+      <span class="dash-act-main"><span class="dash-act-title">${esc(j.title)}</span><span class="dash-act-sub">${esc(info ? cap(info.why) : "queued")}</span></span>
+      <button class="btn icon sm ghost" type="button" data-q-cancel="${esc(j.id)}" title="Take it out of the queue" aria-label="Take it out of the queue"><img src="${iconSrcDanger("stop.svg")}" alt=""></button>
+      <span class="dash-act-took mono">${took(j.created_at, null)}</span></div>`;
+  };
+  const body = run.length || q.length
+    ? `${run.length ? `<div class="dash-acts">${run.map(dashJobRow).join("")}</div>` : ""}
+       ${q.length ? `<div class="dash-sub">Queued</div><div class="dash-acts">${q.map(qRow).join("")}</div>` : ""}`
+    : `<p class="dash-idle">Nothing runs right now.${last ? ` The last job ended ${esc(when(last.ended_at || last.created_at))}.` : ""}</p>`;
+  return gsCard("dash-running", "first-boot.svg", "Running", meta, body, "", true, slots || (run.length ? `<span class="pill status run">Live</span>` : ""));
 }
 
 /* Activity: what ran, newest first - failures red with the first line of their reason. */
@@ -785,7 +807,7 @@ function paintWinMedia() {
   const filter = `<div class="card wm-filter">
       <div class="wm-filter-row">
         ${field(fieldLabel("windows-layers.svg", "Product"), `<select id="wmProduct">${groups.map(g => `<optgroup label="${esc(g)}">${prods.filter(p => p.group === g).map(p =>
-          `<option value="${esc(p.id)}" ${p.id === wmUi.product ? "selected" : ""}>${esc(p.name)}${p.newest ? ` - ${esc(p.newest.build)}` : ""}</option>`).join("")}</optgroup>`).join("")}</select>`)}
+          `<option value="${esc(p.id)}" ${p.id === wmUi.product ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</optgroup>`).join("")}</select>`)}
         <div class="field-like">${fieldLabel("update.svg", "Releases")}
           <div class="ov-seg" role="group" aria-label="Releases">${[["b", "Stable"], ["other", prod.insider ? "Insider" : "Preview"], ["all", "All"]].map(([k, l]) =>
             `<button type="button" class="btn${kind === k ? " on" : ""}" data-wm-kind="${k}" aria-pressed="${kind === k}">${l}</button>`).join("")}</div></div>
@@ -1149,7 +1171,7 @@ const FOD_SLOTS = [
   ["server2022", "ws2022-datacenter-desktop", "Windows Server 2022", "Build 20348."],
   ["client", "w11-pro", "Windows 11", "Build 26100 - one set serves 24H2, 25H2 and 26H2."]
 ];
-function fodCard(fod, isos, lang) {
+function fodCard(fod, isos) {
   const s = fod.settings || {}, media = fod.media || {};
   const list = (isos.isos || []).filter(i => i.readable && i.kind !== "winpe");
   const state = key => {
@@ -1162,7 +1184,7 @@ function fodCard(fod, isos, lang) {
   return gsCard("md-fod", "fod.svg", "Features on Demand", `${set} of ${FOD_SLOTS.length} set`, `
     <div class="grid-3" style="align-items:start">${FOD_SLOTS.map(([key, imageId, label, tip]) => `<div class="field-like fod-slot">
       <span class="field-label"><img src="${imageIconSrc(findImage(imageId))}" alt="">${esc(label)}${infoTip(label,
-        `${tip} Build from Microsoft puts every Feature on Demand of the newest build on one ISO - App Compatibility, RSAT, OpenSSH, .NET 3.5 and the rest - with their ${lang} parts, without language features. None installs from Windows Update at first boot.`)}</span>
+        `${tip} Build from Microsoft puts every Feature on Demand of the newest build on one ISO - App Compatibility, RSAT, OpenSSH, .NET 3.5 and the rest - with their parts for every language, as on Microsoft's Languages and Optional Features ISO, without language packs and language features. None installs from Windows Update at first boot.`)}</span>
       <select data-fod-slot="${key}">${opts(list.map(i => [i.volid, i.file]), s[key], "None")}</select>
       <div class="fod-slot-foot">${state(key)}<button class="btn sm" type="button" data-fod-build="${key}"><img src="${iconSrc("download.svg")}" alt=""> Build from Microsoft</button></div>
     </div>`).join("")}</div>
@@ -1769,6 +1791,23 @@ function openJob(id) { jobSelected = id; state.blade = "jobs"; render(); }
 let jobsPoll = null, jobFilter = "all", jobsCache = [];
 const JOB_KIND = { "auto-update": "Windows update", bake: "Linux gold", "windows-bake": "Windows gold", media: "Windows media", fod: "Features on Demand", winpe: "WinPE", virtio: "virtio-win", deploy: "Deploy", "cluster-check": "Cluster check", acme: "Certificate" };
 const JOB_FILTERS = [["all", "All"], ["running", "Running"], ["failed", "Failed"], ["succeeded", "Succeeded"]];
+/* The queue's state (GET /jobs/queue): the limit, why it holds, each queued job's place and
+   reason. queueDrag: the job being dragged - the list is not repainted under the pointer. */
+let jobsQueue = null, queueDrag = null, queueFocus = null;
+const Q_GRIP = `<svg class="q-grip" viewBox="0 0 14 18" fill="currentColor" aria-hidden="true"><circle cx="4" cy="4" r="1.4"/><circle cx="10" cy="4" r="1.4"/><circle cx="4" cy="9" r="1.4"/><circle cx="10" cy="9" r="1.4"/><circle cx="4" cy="14" r="1.4"/><circle cx="10" cy="14" r="1.4"/></svg>`;
+const Q_LINK = `<svg class="q-link" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M6.5 9.5l3-3M7 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M9 11.5l-1 1a2.5 2.5 0 01-3.5-3.5l1-1"/></svg>`;
+/* " · 2 bakes wait for it" on a job others wait for in the queue. */
+function waitsOn(id) {
+  const n = ((jobsQueue && jobsQueue.queued) || []).filter(q => q.after === id).length;
+  return n ? ` · ${n} ${n === 1 ? "job waits" : "jobs wait"} for it` : "";
+}
+function queueInfo(id) { return ((jobsQueue && jobsQueue.queued) || []).find(x => x.id === id) || null; }
+/* The queued jobs in queue order. */
+function queueOrder(jobs) {
+  const at = j => (queueInfo(j.id) || {}).place || 1e9;
+  return jobs.filter(j => j.status === "queued").sort((a, b) => at(a) - at(b) || (a.seq || 0) - (b.seq || 0));
+}
+const ordinal = n => n + (n % 10 === 1 && n % 100 !== 11 ? "st" : n % 10 === 2 && n % 100 !== 12 ? "nd" : n % 10 === 3 && n % 100 !== 13 ? "rd" : "th");
 /* A window's times as a list in quarter hours, written in the studio's time format - the
    browser's own time input follows the OS locale instead (AM/PM on a 24-hour studio). */
 function mwTimeOpts(value) {
@@ -1812,6 +1851,12 @@ function jobSubject(j) {
     return { key: "gold:" + p.gold, name: "Gold " + String(p.gold).replace(/^(pve-|bake-)/, ""), icon: "gold-image.svg",
       band: image ? serverGlyphBand({ imageId: image }) : g && g.os === "linux" ? "linux" : "studio", what: "Gold" };
   }
+  // A window's bake that waits for its ISO: no gold yet - the gold it replaces names it.
+  if (j.kind === "bake" && p.from && !p.gold) {
+    const img = j.image || p.image;
+    const band = img ? serverGlyphBand({ imageId: img }) : "studio";
+    return { key: "next:" + p.from, name: j.title.replace(/^Bake /, ""), icon: "gold-image.svg", band, what: "Gold" };
+  }
   if (j.kind === "fod" && p.fod) return { key: "fod:" + p.fod, name: j.title.replace(/^Build /, ""), icon: "fod.svg", what: "Features on Demand" };
   const k = { winpe: ["WinPE", "os-window.svg"], virtio: ["virtio-win", "disk.svg"], "cluster-check": ["Cluster", "servers.svg"], certificate: ["Certificate", "certificate.svg"] }[j.kind];
   return k ? { key: j.kind, name: k[0], icon: k[1], what: k[0] } : { key: "job:" + j.id, name: j.title, icon: "update.svg", what: JOB_KIND[j.kind] || j.kind };
@@ -1821,7 +1866,36 @@ function jobGroups(jobs) {
   for (const j of jobs) { const sub = jobSubject(j); if (!groups.has(sub.key)) groups.set(sub.key, { sub, runs: [] }); groups.get(sub.key).runs.push(j); }
   return [...groups.values()];
 }
+/* The list: Running and Queue on top - the queue in its order, dragged to change it - then
+   what ran, by day. A filter shows one of them. */
 function jobItems(jobs) {
+  const ico = j => { const s = jobSubject(j); return s.band ? iconSrcBand(s.icon, s.band) : iconSrc(s.icon); };
+  const run = jobs.filter(j => j.status === "running"), q = queueOrder(jobs);
+  const runRow = j => {
+    const p = j.progress, pct = p && typeof p.pct === "number" ? ` · ${Math.floor(p.pct)}%` : "";
+    return `<button type="button" class="job-item s-running ${j.id === jobSelected ? "selected" : ""}" data-job="${esc(j.id)}">
+      <img class="job-ico" src="${ico(j)}" alt=""><span class="job-main"><span class="job-name">${esc(jobSubject(j).name)}</span>
+      <span class="job-sub">${esc(p && p.label ? p.label : "running now")}${pct}${waitsOn(j.id)}</span></span><span class="job-hist"><i class="s-running"></i></span></button>`;
+  };
+  const qRow = (j, i) => {
+    const info = queueInfo(j.id);
+    const dep = info && info.after;
+    return `<div class="job-item q ${dep ? "dep" : ""} ${j.id === jobSelected ? "selected" : ""}" role="listitem" tabindex="0" draggable="true" data-job="${esc(j.id)}" data-qid="${esc(j.id)}" title="Drag to change the order, or Alt+↑ / Alt+↓">
+      ${Q_GRIP}<span class="q-pos">${i + 1}</span><span class="job-main"><span class="job-name"><img src="${ico(j)}" alt="">${esc(jobSubject(j).name)}</span>
+      <span class="job-sub">${dep ? Q_LINK : ""}${esc(info ? info.why : "queued")}</span></span></div>`;
+  };
+  const lim = jobsQueue ? (jobsQueue.limit ? `${jobsQueue.limit} at a time` : "no limit") : "";
+  const runSec = `<div class="rail-sec">Running <span class="n">${run.length}</span><span class="sp"></span><span class="lim">${lim}</span></div>
+    ${run.length ? run.map(runRow).join("") : `<p class="hint job-none">Nothing runs right now.</p>`}`;
+  const qSec = `<div class="rail-sec">Queue <span class="n">${q.length}</span></div>
+    <div class="q-list" role="list" aria-label="Queue - drag to change the order">${q.map(qRow).join("")}</div>`;
+  if (jobFilter === "running") return runSec + (q.length ? qSec : "");
+  if (jobFilter !== "all") return jobHistory(jobs);
+  const done = jobs.filter(j => j.status !== "running" && j.status !== "queued");
+  const head = (run.length || q.length ? runSec : "") + (q.length ? qSec : "");
+  return head + (done.length ? (head ? `<div class="rail-sec">History</div>` : "") + jobHistory(done) : head ? "" : `<p class="hint job-none">No jobs.</p>`);
+}
+function jobHistory(jobs) {
   const sel = jobs.find(j => j.id === jobSelected), selKey = sel && jobSubject(sel).key;
   const shown = jobGroups(jobs).filter(g => jobFilter === "all" || g.runs[0].status === jobFilter);
   if (!shown.length) return `<p class="hint job-none">No ${esc(jobFilter)} jobs.</p>`;
@@ -1847,13 +1921,17 @@ function jobAttempts(jobs, job) {
     <span class="job-dot"></span>#${runs.length - i}<small>${esc(clock(r.started_at || r.created_at))} · ${took(r.started_at, r.ended_at)}</small></button>`).join("");
 }
 function jobMeta(j) {
-  return `<span>${esc(JOB_KIND[j.kind] || j.kind)}</span><span>started ${esc(when(j.started_at || j.created_at))}</span>` +
+  const kind = j.kind === "bake" && (/^w/.test(j.image || "") || /"iso"|"from"/.test(j.params || "")) ? "Windows gold" : JOB_KIND[j.kind] || j.kind;
+  if (j.status === "skipped") return `<span>${esc(kind)}</span><span>asked ${esc(when(j.created_at))}</span><span>skipped ${esc(when(j.ended_at || j.created_at))}</span><span>by ${esc(j.created_by)}</span>`;
+  if (j.status === "queued") return `<span>${esc(kind)}</span><span>asked ${esc(when(j.created_at))}</span><span>waiting for ${took(j.created_at, null)}</span><span>by ${esc(j.created_by)}</span>`;
+  return `<span>${esc(kind)}</span><span>started ${esc(when(j.started_at || j.created_at))}</span>` +
     `<span>${j.ended_at ? "took" : "running for"} ${took(j.started_at, j.ended_at)}</span><span>by ${esc(j.created_by)}</span>`;
 }
 
 async function bladeJobs(main, stale) {
   clearTimeout(jobsPoll);
-  const jobs = await api("GET", "/jobs");
+  const [jobs, queue] = await Promise.all([api("GET", "/jobs"), api("GET", "/jobs/queue").catch(() => null)]);
+  jobsQueue = queue;
   if (stale()) return;
   jobsCache = jobs; cluster.jobs = jobs; renderNav();
   if (!jobSelected && jobs.length) jobSelected = jobs[0].id;
@@ -1921,9 +1999,12 @@ async function bladeJobs(main, stale) {
         catch (e) { toast(e.message, true); }
       });
       $id("jobAbort").addEventListener("click", async () => {
-        const j = jobsCache.find(x => x.id === jobSelected); if (!j || j.status !== "running") return;
-        if (!await confirmDelete("abort", `Cancel ${j.title}?`,
-          "It stops at its next safe point - a download chunk, a status check - and then cleans up as a failed job does: its bake or worker VM is removed. Retry starts it again.", "Cancel the job", undefined, "Keep running")) return;
+        const j = jobsCache.find(x => x.id === jobSelected); if (!j || (j.status !== "running" && j.status !== "queued")) return;
+        const waiting = j.status === "queued";
+        if (!await confirmDelete("abort", waiting ? `Take ${j.title} out of the queue?` : `Cancel ${j.title}?`,
+          waiting ? "It has not started, so nothing was built. Retry or the form it came from starts it again."
+            : "It stops at its next safe point - a download chunk, a status check - and then cleans up as a failed job does: its bake or worker VM is removed. Retry starts it again.",
+          waiting ? "Take it out" : "Cancel the job", undefined, waiting ? "Keep it queued" : "Keep running")) return;
         try { await api("POST", `/jobs/${encodeURIComponent(j.id)}/abort`); toast("Cancel requested"); renderServerBlade("jobs", main); }
         catch (e) { toast(e.message, true); }
       });
@@ -1948,6 +2029,7 @@ async function bladeJobs(main, stale) {
         renderServerBlade("jobs", main);
       });
       $id("jobList").addEventListener("click", pick);
+      wireQueueDrag($id("jobList"), main);
       $id("jobAttempts").addEventListener("click", pick);
       $id("jobBar").addEventListener("click", e => {
         const seg = e.target.closest("[data-step]"); if (!seg) return;
@@ -1987,13 +2069,17 @@ async function bladeJobs(main, stale) {
       });
     }
     setHtml($id("jobFilters"), jobFilterHtml(jobs));
-    setHtml($id("jobList"), jobItems(jobs));
+    if (!queueDrag) setHtml($id("jobList"), jobItems(jobs));
+    if (queueFocus) { const el = $id("jobList").querySelector(`[data-qid="${CSS.escape(queueFocus)}"]`); if (el) el.focus(); queueFocus = null; }
     if (job) {
       followLog(job);
       setHtml($id("jobMeta"), jobMeta(job));
       setHtml($id("jobStatus"), jobPill(job.status));
       setHtml($id("jobAttempts"), jobAttempts(jobs, job));
-      setHtml($id("jobError"), job.error ? warnBanner(esc(job.error)) : "");
+      const qi = job.status === "queued" ? queueInfo(job.id) : null;
+      $id("jobBar").hidden = job.status === "queued";
+      setHtml($id("jobError"), qi ? `<div class="q-banner"><span class="q-pos">${qi.place}</span><div><b>${ordinal(qi.place)} in the queue${qi.after ? " · waits for another job" : ""}</b><span class="m">${esc(cap(qi.why))}${qi.after ? ". It starts only when that one succeeds; if it fails, this one is skipped." : ""}</span></div></div>`
+        : job.error ? warnBanner(esc(job.error)) : "");
       paintJobDelete(jobs.filter(j => jobSubject(j).key === jobSubject(job).key));
       // Retry: a failed or interrupted job that is the newest of its subject (an older one
       // was retried already).
@@ -2002,7 +2088,7 @@ async function bladeJobs(main, stale) {
       if (r) {
         r.hidden = !["failed", "interrupted"].includes(job.status) || !newest || newest.id !== job.id || job.kind === "remove-gold";
         const a = $id("jobAbort");
-        if (a) a.hidden = job.status !== "running";
+        if (a) a.hidden = job.status !== "running" && job.status !== "queued";
         r.title = { bake: "Open the bake form with this bake's ISO and image", "windows-bake": "Open the bake form with this bake's ISO and image", deploy: "Open Deploy", certificate: "Open Studio settings" }[job.kind] || "Start this job again with the same settings";
         // Continue: a media build that left something behind - a finished stage or downloads.
         const c = $id("jobContinue");
@@ -2025,8 +2111,61 @@ async function bladeJobs(main, stale) {
       }
     }
   }
-  jobsPoll = setTimeout(() => { if (!stale()) bladeJobs(main, stale).catch(() => {}); }, jobs.some(j => j.status === "running") ? 2000 : 15000);
+  jobsPoll = setTimeout(() => { if (!stale()) bladeJobs(main, stale).catch(() => {}); }, jobs.some(j => j.status === "running" || j.status === "queued") ? 2000 : 15000);
 }
+/* The queue's order by drag and drop (a line shows where the job lands) or Alt+↑ / Alt+↓ on
+   a focused row; the new order goes to the studio at once. */
+function wireQueueDrag(list, main) {
+  let line = null;
+  const rows = () => [...list.querySelectorAll(".job-item.q")];
+  const send = async order => {
+    try { jobsQueue = await api("PUT", "/jobs/queue", { order }); } catch (e) { toast(e.message, true); }
+    queueDrag = null;
+    renderServerBlade("jobs", main);
+  };
+  const drop = () => { if (line) { line.remove(); line = null; } };
+  list.addEventListener("dragstart", e => {
+    const r = e.target.closest(".job-item.q"); if (!r) return;
+    queueDrag = r.dataset.qid;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", queueDrag);
+    requestAnimationFrame(() => r.classList.add("ghost"));
+  });
+  list.addEventListener("dragover", e => {
+    if (!queueDrag) return;
+    if (e.target.closest(".drop-line")) { e.preventDefault(); return; }
+    const r = e.target.closest(".job-item.q"); if (!r) return;
+    e.preventDefault();
+    const box = r.getBoundingClientRect();
+    if (!line) { line = document.createElement("div"); line.className = "drop-line"; }
+    if (e.clientY > box.top + box.height / 2) r.after(line); else r.before(line);
+  });
+  list.addEventListener("drop", e => {
+    if (!queueDrag || !line) return;
+    e.preventDefault();
+    const ids = [];
+    for (const el of line.parentElement.children) {
+      if (el === line) ids.push(queueDrag);
+      else if (el.dataset && el.dataset.qid && el.dataset.qid !== queueDrag) ids.push(el.dataset.qid);
+    }
+    drop();
+    send(ids);
+  });
+  list.addEventListener("dragend", () => { drop(); rows().forEach(r => r.classList.remove("ghost")); if (queueDrag) { queueDrag = null; renderServerBlade("jobs", main); } });
+  list.addEventListener("keydown", e => {
+    const r = e.target.closest(".job-item.q");
+    if (!r) return;
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); r.click(); return; }
+    if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    e.preventDefault();
+    const ids = rows().map(x => x.dataset.qid), i = ids.indexOf(r.dataset.qid), k = i + (e.key === "ArrowUp" ? -1 : 1);
+    if (k < 0 || k >= ids.length) return;
+    [ids[i], ids[k]] = [ids[k], ids[i]];
+    queueFocus = r.dataset.qid;
+    send(ids);
+  });
+}
+
 /* The selected job's Continue answer, asked once per job and status. */
 let jobResume = { key: "", k: null };
 function jobFilterHtml(jobs) {
@@ -2531,16 +2670,57 @@ function autoUpdateCard(au) {
     <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="auVirtio"', `Keep virtio-win current${infoTip("Keep virtio-win current", "With virtio-win on stable (or latest) under Media: in a maintenance window, a newer release of that channel is downloaded into PVE - and WinPE built again, so its storage driver is the new one. New Windows golds take it; golds baked before keep theirs.")}`, s.keep_virtio_current !== false)}</div>
     <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="auWinpe"', `Keep WinPE current${infoTip("Keep WinPE current", "WinPE is what every Windows bake, deploy and media build boots. In a maintenance window, when the product WinPE is built from has a newer build than the WinPE - or virtio-win a newer release than its driver - the studio builds WinPE again - before the golds' updates run.")}`, s.keep_winpe_current !== false)}</div>
     <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="auPreviews"', `Include preview releases${infoTip("Preview releases", "Off: only the Patch Tuesday release of each month (B). On: also the optional non-security release later in the month. Insider builds are never followed.")}`, !!s.include_previews)}</div>
+    <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="auIsoAfter"', `ISO builds may finish after the window${infoTip("ISO builds after the window", "An ISO build downloads gigabytes and runs DISM for an hour or more. On: one may start until the window ends and finishes after it. Off: one starts only when the time its last build took still fits in the window (2 hours when there is none to go by); otherwise it waits for the next window. A build that has begun always finishes.")}`, s.iso_after_window !== false)}</div>
+    <div class="toggle-grid" style="grid-template-columns:1fr;margin-top:12px">${toggle('id="auBakesAfter"', `Gold bakes may finish after the window${infoTip("Gold bakes after the window", "A gold bake is lighter than an ISO build. On: the bakes for an ISO built in the window still start after it ends, until all of them are done. Off: no bake starts after the window - the rest waits for the next one, the new ISO stays.")}`, s.bakes_after_window !== false)}</div>
+    ${auPlanHtml(au.plan)}
     ${following.length ? `<div class="field-group">Keep current</div><div class="table-wrap"><table class="data"><thead><tr><th>Gold</th><th>Image</th><th>Product</th><th>Build</th></tr></thead><tbody>${followRows}</tbody></table></div>` : ""}
     ${runs.length ? `<div class="field-group">Runs</div><div class="table-wrap"><table class="data"><thead><tr><th>Product</th><th>Build</th><th>Release</th><th>Step</th><th>Golds</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : ""}
     ${actions(`<button class="btn" type="button" id="auCheck"><img src="${iconSrc("update.svg")}" alt=""> Check now</button>`, act("auSave", "save.svg", "Save", true))}`, "", active.length > 0 || !!failed, badge);
+}
+
+/* The next window as lanes on a clock: virtio-win and WinPE first when due, the ISO builds
+   one after another, the bakes beside them as soon as their ISO is there - each block as long
+   as that job took last time (dashed when there is nothing to go by). Past the window's end
+   a block is hatched. */
+function auPlanHtml(plan) {
+  if (!plan) return "";
+  const t0 = new Date(plan.start), len = plan.length;
+  const all = [...plan.pre, ...plan.iso, ...plan.bakes.flat()];
+  const head = `<div class="plan-head"><b>${plan.open ? "This window" : "Next window"}</b><span>${esc(fmtWhen(plan.start))} to ${esc(clock(new Date(t0.getTime() + len * 1000).toISOString()))}${all.length ? " · times from each job's last run" : ""}</span></div>`;
+  if (!all.length) return `<div class="plan">${head}<p class="hint">Nothing waits for it - no newer build for the golds that keep current.</p></div>`;
+  const last = Math.max(len, ...all.map(b => b.end));
+  const hour = 3600, span = Math.ceil(last / hour) * hour;
+  const x = v => `${(v / span * 100).toFixed(2)}%`;
+  const ticks = Array.from({ length: span / hour + 1 }, (_, i) => `<i style="left:${x(i * hour)}">${esc(clock(new Date(t0.getTime() + i * hour * 1000).toISOString()))}</i>`).join("");
+  const lines = Array.from({ length: span / hour - 1 }, (_, i) => `<span class="plan-hr" style="left:${x((i + 1) * hour)}"></span>`).join("");
+  const ico = { iso: iconSrc("download.svg"), virtio: iconSrc("disk.svg"), winpe: iconSrc("os-window.svg"), server: iconSrcBand("gold-image.svg", "work"), client: iconSrcBand("gold-image.svg", "host") };
+  const mins = b => `${Math.round((b.end - b.start) / 60)} min${b.known ? "" : ", a guess"}`;
+  const blk = b => {
+    const tip = `${b.title || b.label} · ${mins(b)}`;
+    const inner = `<img src="${ico[b.kind] || ico.iso}" alt="">${esc(b.label)}`;
+    if (b.end <= len || b.start >= len) return `<div class="blk ${b.kind}${b.start >= len ? " over" : ""}${b.known ? "" : " guess"}" style="left:${x(b.start)};width:${x(b.end - b.start)}" title="${esc(tip)}">${inner}</div>`;
+    return `<div class="blk ${b.kind} cut${b.known ? "" : " guess"}" style="left:${x(b.start)};width:${x(len - b.start)}" title="${esc(tip)}">${inner}</div><div class="blk ${b.kind} over tail" style="left:${x(len)};width:${x(b.end - len)}" title="${esc(tip)} · after the window"></div>`;
+  };
+  const end = `<span class="plan-end" style="left:${x(len)}"></span>`;
+  const lane = (name, blocks) => `<div class="plan-lane">${name}</div><div class="plan-track">${lines}${blocks.map(blk).join("")}${end}</div>`;
+  return `<div class="plan">${head}<div class="plan-scroll"><div class="plan-grid">
+    <div></div><div class="plan-axis">${ticks}</div>
+    ${plan.pre.length ? lane("Before", plan.pre) : ""}
+    ${plan.iso.length ? lane("ISO builds", plan.iso) : ""}
+    ${plan.bakes.map((l, i) => lane(i ? "" : "Gold bakes", l)).join("")}
+  </div></div>
+  <div class="plan-key"><span><i class="k-iso"></i>One ISO at a time</span><span><i class="k-bake"></i>Bakes start once their ISO is there</span><span><i class="k-over"></i>After the window</span></div></div>`;
 }
 
 function wireAutoUpdate(main) {
   const again = () => renderServerBlade("imagesettings", main);
   const on = (id, fn) => { const el = $id(id); if (el) el.addEventListener("click", fn); };
   on("auSave", async () => {
-    try { await api("PUT", "/auto-update", { keep_golds: parseInt($id("auKeep").value, 10) || 2, include_previews: $id("auPreviews").checked, keep_winpe_current: $id("auWinpe").checked, keep_virtio_current: $id("auVirtio").checked }); toast("Saved"); again(); }
+    try {
+      await api("PUT", "/auto-update", { keep_golds: parseInt($id("auKeep").value, 10) || 2, include_previews: $id("auPreviews").checked, keep_winpe_current: $id("auWinpe").checked,
+        keep_virtio_current: $id("auVirtio").checked, iso_after_window: $id("auIsoAfter").checked, bakes_after_window: $id("auBakesAfter").checked });
+      toast("Saved"); again();
+    }
     catch (e) { toast(e.message, true); }
   });
   on("auCheck", async e => {
@@ -2562,8 +2742,6 @@ async function bladeMedia(main, stale) {
     api("GET", "/auto-update").catch(() => null), api("GET", "/golds").catch(() => null)]);
   // The ISOs' Golds column needs them - Media can be the first blade opened.
   if (golds) cluster.golds = golds;
-  // FoD satellites in the studio's preselected language (Studio settings), en-US without one.
-  const fodLang = region.language || "en-US";
   if (stale()) return;
   const inv = c.inventory;
   const pe = win.winpe || {};
@@ -2632,7 +2810,7 @@ async function bladeMedia(main, stale) {
       <div class="tip-box"><img src="${iconSrc("help.svg")}" alt=""><div>ISOs come from the bake node's ISO storages - upload one in Proxmox VE (a storage's <b>ISO Images → Upload</b> or <b>Download from URL</b>).
         The studio reads them through a read-only mount to list their editions.</div></div>`
       : `<p class="hint">No Windows ISO on ${esc(isos.node || "the bake node")} yet. Upload one in Proxmox VE (a storage's <b>ISO Images → Upload</b> or <b>Download from URL</b>).</p>`, "", true)}
-    ${fod ? fodCard(fod, isos, fodLang) : ""}
+    ${fod ? fodCard(fod, isos) : ""}
     ${gsCard("gs-winpe", "os-server-desktop.svg", "Windows: WinPE", pe.volid ? `${esc(pe.volid)} · build ${esc(pe.build)}` : "Windows golds need it", `
       <p class="hint" style="margin-bottom:10px">The Setup environment (boot.wim <b>index 2</b>, the one that can service an offline image) with our startnet.cmd and the
       no-prompt EFI boot image. Every Windows bake boots it twice - to apply the image, and to customize it after sysprep. Build it from Microsoft's own files, or from a Windows ISO you uploaded.</p>
@@ -2669,7 +2847,7 @@ async function bladeMedia(main, stale) {
     } catch (e) { toast(e.message, true); }
   });
   main.querySelectorAll("[data-fod-build]").forEach(b => b.addEventListener("click", async () => {
-    try { const { id } = await api("POST", "/fod/build", { slot: b.dataset.fodBuild, lang: fodLang }); openJob(id); }
+    try { const { id } = await api("POST", "/fod/build", { slot: b.dataset.fodBuild }); openJob(id); }
     catch (e) { toast(e.message, true); }
   }));
   main.querySelectorAll("[data-iso-delete]").forEach(b => b.addEventListener("click", async () => {
@@ -2718,7 +2896,7 @@ function mediaWorkerCard(w, r) {
   return gsCard("gd-worker", "ram.svg", `Media worker ${infoTip("Media worker", "The WinPE VM that applies the cumulative update to a Windows media build with DISM. It lives only while the build runs, on the Build environment's node, VM disks and network.")}`,
     `${n} at a time · ${w.cores} cores · ${w.memory_mb / 1024} GB`, `
       <div class="grid-3">
-        ${field(`<span class="field-label"><img src="${iconSrc("iso-media.svg")}" alt="">At a time${infoTip("ISO builds at a time", `Builds started beyond this wait in the queue and start when one ends, in order. Each build needs about ${gb(room)} GB of the studio's work volume while it runs (three times its download)${total ? ` - this one has ${gb(total)} GB, room for ${fit}` : ""}. Side by side they share one download link and one disk, so two are not twice as fast. The maintenance window builds one after another either way.`)}</span>`,
+        ${field(`<span class="field-label"><img src="${iconSrc("iso-media.svg")}" alt="">At a time${infoTip("ISO builds at a time", `A limit of its own inside the job queue (Studio settings → Job queue): builds beyond it wait and start when one ends, in order, while other jobs pass them. Each build needs about ${gb(room)} GB of the studio's work volume while it runs (three times its download)${total ? ` - this one has ${gb(total)} GB, room for ${fit}` : ""}. Side by side they share one download link and one disk, so two are not twice as fast. The maintenance window builds one after another either way.`)}</span>`,
           `<select id="ibParallel">${opts([1, 2, 3, 4].map(choice), String(n))}</select>`)}
         ${field(fieldLabel("cpu.svg", "Cores"), `<input id="wkCores" type="number" min="1" max="64" value="${w.cores}">`)}
         ${field(fieldLabel("ram.svg", "Memory (MiB)"), `<input id="wkMem" type="number" min="2048" max="262144" step="1024" value="${w.memory_mb}">`)}
@@ -2935,10 +3113,19 @@ function maintRowsHtml() {
   </div>`).join("");
 }
 
+/* Every job waits in one queue: this many run at a time, the rest start in order. */
+function queueCard(q) {
+  const n = q.limit;
+  return gsCard("gs-queue", "update.svg", `Job queue ${infoTip("Job queue", "Every job goes through the queue - bakes, VM builds, Windows media, WinPE, the studio's own update. Beyond this number they wait and start in order as others end; drag them into another order under Jobs. ISO builds also keep their own limit (Image settings → Media worker), and the studio's update runs alone. After a restart, queued jobs wait again in their place; the queue starts once the studio has been up a minute and PVE answers.")}`,
+    n ? `${n} at a time` : "no limit", `
+      <div class="grid-3">${field(fieldLabel("update.svg", "Jobs at a time"), `<select id="qLimit">${opts([["1", "1 at a time"], ["2", "2 at a time"], ["3", "3 at a time · default"], ["4", "4 at a time"], ["6", "6 at a time"], ["8", "8 at a time"], ["0", "No limit"]], String(n))}</select>`)}</div>
+      ${actions(act("qSave", "save.svg", "Save", true))}`, "", false);
+}
+
 function maintCard(m) {
   const meta = (m.open ? `open now, until ${esc(m.open)}` : m.next ? `next ${esc(fmtWhen(m.next))}` : "none - nothing runs on its own") + (m.zone && (m.open || m.next) ? ` · ${esc(m.zone)}` : "");
   const badge = m.open ? `<span class="pill status on">Open</span>` : "";
-  return gsCard("gs-maint", "clock.svg", `Maintenance windows ${infoTip("Maintenance windows", "When the studio may do work nobody started: its own update (when Install updates automatically is on), then the Windows golds that keep current. Work starts only inside a window; at its end no new step starts, and one already running finishes. An end before the start runs past midnight. Times are the studio's" + (m.zone ? " (" + m.zone + ")" : "") + ".")}`, meta, `
+  return gsCard("gs-maint", "clock.svg", `Maintenance windows ${infoTip("Maintenance windows", "When the studio may do work nobody started, always in this order: a check that PVE, the bake node and the work volume are ready; its own update (when Install updates automatically is on); virtio-win; WinPE; Features on Demand; then the Windows golds that keep current - one ISO after another, each ISO's bakes beside the next one. Work starts only inside a window; what may finish after it is set under Image settings → Windows updates. An end before the start runs past midnight. Times are the studio's" + (m.zone ? " (" + m.zone + ")" : "") + ".")}`, meta, `
     <div id="mwRows" class="mw-rows">${maintRowsHtml()}</div>
     ${actions(`<button class="btn" type="button" id="mwAdd"><img src="${iconSrc("clock.svg")}" alt=""> Add a window</button>`, act("mwSave", "save.svg", "Save", true))}`, "", false, badge);
 }
@@ -3191,11 +3378,12 @@ function wireNotify(main, n) {
 }
 
 async function bladeStudio(main, stale) {
-  const [server, t, worker, ver, maint, mail, notif, history, netRaw, cas, tz, cat, con] = await Promise.all([api("GET", "/settings/server"), api("GET", "/tls"),
+  const [server, t, worker, ver, maint, mail, notif, history, netRaw, cas, tz, cat, con, queue] = await Promise.all([api("GET", "/settings/server"), api("GET", "/tls"),
     api("GET", "/settings/worker").catch(() => ({ memory_mb: 4096, cores: 4 })), api("GET", "/studio/version").catch(() => null),
     api("GET", "/settings/maintenance").catch(() => null), api("GET", "/settings/mail").catch(() => null), api("GET", "/settings/notify").catch(() => null),
     api("GET", "/notifications?limit=500").catch(() => []), api("GET", "/settings/network").catch(e => ({ error: e.message })), api("GET", "/settings/cas").catch(() => null),
-    api("GET", "/settings/timezone").catch(() => null), catalogCache || api("GET", "/catalog"), api("GET", "/settings/console").catch(() => null)]);
+    api("GET", "/settings/timezone").catch(() => null), catalogCache || api("GET", "/catalog"), api("GET", "/settings/console").catch(() => null),
+    api("GET", "/settings/queue").catch(() => null)]);
   catalogCache = cat;
   const net = netRaw && !netRaw.error ? netRaw : null;
   if (net && !netForm) netForm = netFormFrom(net);
@@ -3251,6 +3439,7 @@ async function bladeStudio(main, stale) {
       ${actions(act("stClockSave", "save.svg", "Save", true))}`, "", false)}
     ${gsCard("gs-confirm", "trash.svg", `Confirmations ${infoTip("Confirmations", "All on by default. \"Don't ask again\" in a delete dialog switches its question off here - remembered per browser, not for everyone.")}`, Object.keys(CONFIRM_KINDS).some(skipConfirm) ? "some skipped in this browser" : "asks before every delete", `
       <div class="toggle-grid">${Object.entries(CONFIRM_KINDS).map(([k, l]) => toggle(`id="cf_${k}"`, `Ask before ${esc(l.toLowerCase())}`, !skipConfirm(k))).join("")}</div>`, "", false)}
+    ${queue ? queueCard(queue) : ""}
     ${maint ? maintCard(maint) : ""}
     ${mail ? mailCard(mail, notif) : ""}
     ${notif ? notifyCard(notif, mail && mail.settings, history) : ""}
@@ -3258,6 +3447,11 @@ async function bladeStudio(main, stale) {
     ${con ? consoleCard(con, server.settings.fqdn) : ""}
     ${worker.debug_tools ? debugCard(worker) : ""}`;
   wireMaint(main); wireMail(main, mail); wireNotify(main, notif);
+  const qs = $id("qSave");
+  if (qs) qs.addEventListener("click", async () => {
+    try { await api("PUT", "/settings/queue", { limit: parseInt($id("qLimit").value, 10) || 0 }); toast("Saved"); renderServerBlade("studio", main); }
+    catch (e) { toast(e.message, true); }
+  });
   if (acmeForm.challenge === "dns-01" && acmeForm.dns_provider && $id("leHelp")) {
     api("GET", "/tls/providers/" + encodeURIComponent(acmeForm.dns_provider)).then(r => { if ($id("leHelp")) $id("leHelp").innerHTML = highlightHelp(r.help); })
       .catch(e => { if ($id("leHelp")) $id("leHelp").textContent = e.message; });

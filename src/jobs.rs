@@ -74,6 +74,9 @@ pub struct JobRow {
     /// list can colour a gold or VM by what it is long after the gold is gone.
     #[sqlx(default)]
     pub image: Option<String>,
+    /// The queue's order (a queued job starts before the ones with a higher number).
+    #[sqlx(default)]
+    pub seq: i64,
 }
 
 /// The handle a job's body writes through.
@@ -95,6 +98,7 @@ struct Live {
     abort: std::sync::Mutex<Option<String>>,
     /// <id>.steps: when each progress stage began - the mail's step times.
     steps: PathBuf,
+    id: String,
 }
 
 struct LiveInner {
@@ -103,6 +107,11 @@ struct LiveInner {
 }
 
 impl JobLog {
+    /// The job's own id.
+    pub fn id(&self) -> &str {
+        &self.live.id
+    }
+
     /// Err once someone pressed Abort - the long waits call this, so the job fails the normal
     /// way and its own cleanup (bake and worker VMs) still runs.
     pub fn check_abort(&self) -> Result<()> {
@@ -190,40 +199,172 @@ pub type Watch = (Vec<String>, Option<Event>, Option<broadcast::Receiver<Event>>
 /// Told the id of every job that ends (the notifications).
 pub type EndHook = Arc<dyn Fn(String) + Send + Sync>;
 
+/// Studio settings → Job queue.
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct QueueSettings {
+    /// Jobs at a time, over every kind; 0: no limit.
+    pub limit: u32,
+}
+
+impl Default for QueueSettings {
+    fn default() -> Self {
+        Self { limit: 3 }
+    }
+}
+
+tokio::task_local! {
+    /// Set while a queued job is started again after a restart: its id and place.
+    static RESTORE: (String, i64);
+}
+
 #[derive(Clone)]
 pub struct Jobs {
     db: SqlitePool,
     dir: PathBuf,
+    /// Every job of this process that has not ended - queued or running: its live log.
     running: Arc<RwLock<HashMap<String, Arc<Live>>>>,
     on_end: Arc<std::sync::OnceLock<EndHook>>,
     /// The jobs the last stop cut off: (id, title).
     pub interrupted: Arc<Vec<(String, String)>>,
-    /// A set number of jobs at a time per lane (the ISO builds share the work volume).
-    lanes: Arc<std::sync::Mutex<HashMap<String, Lane>>>,
+    /// The jobs that were queued when the process stopped, in queue order - started again
+    /// by the studio (requeue) once it is up.
+    pending: Arc<std::sync::Mutex<Vec<JobRow>>>,
+    sched: Arc<std::sync::Mutex<Sched>>,
 }
 
-/// A lane: its slots (tokio's semaphore - first come, first served), how many there are,
-/// and the titles of the jobs holding one.
-struct Lane {
-    slots: Arc<tokio::sync::Semaphore>,
+/// The queue: what waits, in which order, and what may start. Every job goes through it.
+struct Sched {
+    /// Jobs at a time over all kinds (Studio settings → Job queue); 0: no limit.
     limit: usize,
-    holders: Vec<(String, String)>,
+    /// A lane's own limit - the ISO builds share the work volume (Image settings).
+    lanes: HashMap<String, usize>,
+    /// Why nothing starts right now (the studio has just started, PVE does not answer),
+    /// and since when.
+    hold: Option<(String, String)>,
+    waiting: Vec<Wait>,
+    running: Vec<Slot>,
+    next_seq: i64,
 }
 
-impl Lane {
-    fn new() -> Self {
-        Self { slots: Arc::new(tokio::sync::Semaphore::new(1)), limit: 1, holders: Vec::new() }
+struct Wait {
+    id: String,
+    title: String,
+    lane: Option<String>,
+    exclusive: bool,
+    seq: i64,
+    /// The job this one waits for (params "after"): it starts only once that one succeeded,
+    /// and is skipped when that one fails.
+    after: Option<String>,
+    go: Option<tokio::sync::oneshot::Sender<Go>>,
+}
+
+/// What a waiting job is told.
+enum Go {
+    Start,
+    /// It never starts: the job it waited for did not succeed.
+    Skip(String),
+}
+
+struct Slot {
+    id: String,
+    title: String,
+    lane: Option<String>,
+    exclusive: bool,
+}
+
+impl Sched {
+    fn lane_limit(&self, lane: &str) -> usize {
+        self.lanes.get(lane).copied().unwrap_or(1).max(1)
+    }
+
+    /// The job `id` is still to finish - queued or running.
+    fn pending(&self, id: &str) -> bool {
+        self.waiting.iter().any(|w| w.id == id) || self.running.iter().any(|r| r.id == id)
+    }
+
+    fn title_of(&self, id: &str) -> String {
+        self.waiting.iter().map(|w| (&w.id, &w.title)).chain(self.running.iter().map(|r| (&r.id, &r.title))).find(|(i, _)| *i == id).map(|(_, t)| t.clone()).unwrap_or_default()
+    }
+
+    /// The jobs that start now, taken off the waiting list in queue order. A job whose lane
+    /// is full lets the ones behind it pass; the studio's update starts alone, and nothing
+    /// passes it while it waits.
+    fn pump(&mut self) -> Vec<Wait> {
+        let mut out = Vec::new();
+        if self.hold.is_some() || self.running.iter().any(|r| r.exclusive) {
+            return out;
+        }
+        self.waiting.sort_by_key(|w| w.seq);
+        if let Some(i) = self.waiting.iter().position(|w| w.exclusive) {
+            if self.running.is_empty() {
+                let w = self.waiting.remove(i);
+                self.running.push(Slot { id: w.id.clone(), title: w.title.clone(), lane: w.lane.clone(), exclusive: true });
+                out.push(w);
+            }
+            return out;
+        }
+        let mut i = 0;
+        while i < self.waiting.len() {
+            if self.limit > 0 && self.running.len() >= self.limit {
+                break;
+            }
+            let full = self.waiting[i]
+                .lane
+                .as_deref()
+                .is_some_and(|l| self.running.iter().filter(|r| r.lane.as_deref() == Some(l)).count() >= self.lane_limit(l));
+            let blocked = self.waiting[i].after.as_deref().is_some_and(|a| self.pending(a));
+            if full || blocked {
+                i += 1;
+                continue;
+            }
+            let w = self.waiting.remove(i);
+            self.running.push(Slot { id: w.id.clone(), title: w.title.clone(), lane: w.lane.clone(), exclusive: w.exclusive });
+            out.push(w);
+        }
+        out
+    }
+
+    /// Why a waiting job waits, in a few words.
+    fn why(&self, id: &str) -> String {
+        if let Some((why, _)) = &self.hold {
+            return why.clone();
+        }
+        let Some(w) = self.waiting.iter().find(|w| w.id == id) else { return String::new() };
+        if self.running.iter().any(|r| r.exclusive) || self.waiting.iter().any(|x| x.exclusive && x.id != id) {
+            return "the studio's update goes first".into();
+        }
+        if w.exclusive {
+            return format!("{} running job(s) finish first", self.running.len());
+        }
+        if let Some(a) = w.after.as_deref().filter(|a| self.pending(a)) {
+            let t = self.title_of(a);
+            // "Build Windows Server 2022 20348.5622 media (en-US)" -> its ISO, by name.
+            return match t.strip_prefix("Build ").and_then(|r| r.split(" media").next()).filter(|_| t.contains(" media")) {
+                Some(iso) => format!("waits for its ISO - {iso}"),
+                None => format!("waits for {t}"),
+            };
+        }
+        if let Some(l) = w.lane.as_deref() {
+            let busy: Vec<&str> = self.running.iter().filter(|r| r.lane.as_deref() == Some(l)).map(|r| r.title.as_str()).collect();
+            if busy.len() >= self.lane_limit(l) {
+                return format!("starts when {} has finished", busy.join(" or "));
+            }
+        }
+        let ahead = self.waiting.iter().filter(|x| x.seq < w.seq).count();
+        let all = format!("{} of {} at a time running", self.running.len(), self.limit);
+        if ahead == 0 { format!("next - {all}") } else { format!("{ahead} ahead of it - {all}") }
     }
 }
 
 impl Jobs {
-    /// A job that was running when the process stopped is not running any more.
+    /// A job that was running when the process stopped is not running any more; one that
+    /// was queued waits again (requeue starts it, in its place).
     pub async fn new(db: SqlitePool, dir: PathBuf) -> Result<Self> {
         tokio::fs::create_dir_all(&dir).await?;
         // Their logs get the closing line too - a log ends with [ end ] or [ error ], always.
-        let cut: Vec<(String, String)> = sqlx::query_as("SELECT id, title FROM jobs WHERE status IN ('queued', 'running')").fetch_all(&db).await?;
+        let cut: Vec<(String, String)> = sqlx::query_as("SELECT id, title FROM jobs WHERE status = 'running'").fetch_all(&db).await?;
         for (id, _) in &cut {
-            use tokio::io::AsyncWriteExt;
             if let Ok(mut f) = tokio::fs::OpenOptions::new().append(true).open(dir.join(format!("{id}.log"))).await {
                 let line = format!("{} [ {:<5} ] interrupted - the studio stopped while this job ran\n", Local::now().format("%Y-%m-%d %H:%M:%S"), "error");
                 let _ = f.write_all(line.as_bytes()).await;
@@ -232,12 +373,30 @@ impl Jobs {
         sqlx::query(
             "UPDATE jobs SET status = 'interrupted', ended_at = ?, \
              error = 'the studio stopped while this job ran' \
-             WHERE status IN ('queued', 'running')",
+             WHERE status = 'running'",
         )
         .bind(now())
         .execute(&db)
         .await?;
-        Ok(Self { db, dir, running: Default::default(), on_end: Default::default(), interrupted: Arc::new(cut), lanes: Default::default() })
+        let pending: Vec<JobRow> = sqlx::query_as("SELECT *, NULL AS image FROM jobs WHERE status = 'queued' ORDER BY seq, created_at").fetch_all(&db).await?;
+        let (max,): (i64,) = sqlx::query_as("SELECT COALESCE(MAX(seq), 0) FROM jobs").fetch_one(&db).await?;
+        let sched = Sched {
+            limit: QueueSettings::default().limit as usize,
+            lanes: HashMap::new(),
+            hold: Some(("the studio is starting".into(), now())),
+            waiting: Vec::new(),
+            running: Vec::new(),
+            next_seq: max,
+        };
+        Ok(Self {
+            db,
+            dir,
+            running: Default::default(),
+            on_end: Default::default(),
+            interrupted: Arc::new(cut),
+            pending: Arc::new(std::sync::Mutex::new(pending)),
+            sched: Arc::new(std::sync::Mutex::new(sched)),
+        })
     }
 
     /// Set once, at start.
@@ -245,7 +404,8 @@ impl Jobs {
         let _ = self.on_end.set(hook);
     }
 
-    /// Records the job and starts it. Returns its id at once; the work runs on.
+    /// Records the job and queues it; it starts at once when the queue has room. Returns its
+    /// id at once; the work runs on.
     pub async fn spawn<F, Fut>(
         &self,
         kind: &str,
@@ -261,28 +421,7 @@ impl Jobs {
         self.spawn_in(None, kind, title, created_by, params, body).await
     }
 
-    /// How many jobs of `lane` may run at a time (1 when never set). Fewer than now: the
-    /// running ones finish, the queue waits until the number is under the new limit.
-    pub fn set_lane_limit(&self, lane: &str, limit: usize) {
-        let limit = limit.max(1);
-        let mut lanes = self.lanes.lock().unwrap();
-        let l = lanes.entry(lane.to_owned()).or_insert_with(Lane::new);
-        if limit > l.limit {
-            l.slots.add_permits(limit - l.limit);
-        } else if limit < l.limit {
-            // Slots taken back as they come free.
-            let (slots, n) = (l.slots.clone(), (l.limit - limit) as u32);
-            tokio::spawn(async move {
-                if let Ok(p) = slots.acquire_many_owned(n).await {
-                    p.forget();
-                }
-            });
-        }
-        l.limit = limit;
-    }
-
-    /// Like spawn, but only the lane's limit of jobs runs at a time: a later one is queued
-    /// and starts when a slot comes free, in the order they were asked for.
+    /// Like spawn, but within the queue only the lane's limit of jobs runs at a time.
     pub async fn spawn_in_lane<F, Fut>(
         &self,
         lane: &str,
@@ -299,6 +438,135 @@ impl Jobs {
         self.spawn_in(Some(lane), kind, title, created_by, params, body).await
     }
 
+    /// The jobs that were queued when the process stopped - taken once.
+    pub fn take_pending(&self) -> Vec<JobRow> {
+        std::mem::take(&mut *self.pending.lock().unwrap())
+    }
+
+    /// Starts a job that was queued before the restart again, under its own id and in its
+    /// own place. `body` is what the job's kind builds from its saved settings.
+    pub async fn restore<F, Fut>(&self, row: &JobRow, lane: Option<&str>, body: F) -> Result<String>
+    where
+        F: FnOnce(JobLog) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<()>> + Send + 'static,
+    {
+        let params: serde_json::Value = serde_json::from_str(&row.params).unwrap_or_default();
+        RESTORE.scope((row.id.clone(), row.seq), self.spawn_in(lane, &row.kind, &row.title, &row.created_by, params, body)).await
+    }
+
+    /// A queued job that cannot be started again after the restart: interrupted, with why.
+    pub async fn give_up(&self, row: &JobRow, why: &str) {
+        if let Ok(mut f) = tokio::fs::OpenOptions::new().append(true).open(self.log_path(&row.id)).await {
+            let line = format!("{} [ {:<5} ] {why}\n", Local::now().format("%Y-%m-%d %H:%M:%S"), "error");
+            let _ = f.write_all(line.as_bytes()).await;
+        }
+        let _ = sqlx::query("UPDATE jobs SET status = 'interrupted', ended_at = ?, error = ? WHERE id = ? AND status = 'queued'")
+            .bind(now())
+            .bind(why)
+            .bind(&row.id)
+            .execute(&self.db)
+            .await;
+    }
+
+    /// Jobs at a time over all kinds; 0: no limit. Fewer than now: the running ones finish,
+    /// the queue waits until the number is under the new limit.
+    pub fn set_limit(&self, limit: usize) {
+        self.sched.lock().unwrap().limit = limit;
+        self.kick();
+    }
+
+    /// How many jobs of `lane` may run at a time (1 when never set).
+    pub fn set_lane_limit(&self, lane: &str, limit: usize) {
+        self.sched.lock().unwrap().lanes.insert(lane.to_owned(), limit.max(1));
+        self.kick();
+    }
+
+    /// Nothing new starts until release - with why (shown on every queued job).
+    pub fn hold(&self, why: &str) {
+        let mut s = self.sched.lock().unwrap();
+        if s.hold.as_ref().is_none_or(|h| h.0 != why) {
+            let since = s.hold.as_ref().map(|h| h.1.clone()).unwrap_or_else(now);
+            s.hold = Some((why.to_owned(), since));
+        }
+    }
+
+    pub fn release(&self) {
+        self.sched.lock().unwrap().hold = None;
+        self.kick();
+    }
+
+    /// Starts what the queue has room for.
+    fn kick(&self) {
+        let started = self.sched.lock().unwrap().pump();
+        for mut w in started {
+            if let Some(go) = w.go.take() {
+                let _ = go.send(Go::Start);
+            }
+        }
+    }
+
+    /// The queue's state for the pages: the limit, why it holds, and each queued job's
+    /// place and reason, in order.
+    pub fn queue(&self) -> serde_json::Value {
+        let s = self.sched.lock().unwrap();
+        let mut waiting: Vec<&Wait> = s.waiting.iter().collect();
+        waiting.sort_by_key(|w| w.seq);
+        serde_json::json!({
+            "limit": s.limit,
+            "running": s.running.len(),
+            "hold": s.hold.as_ref().map(|h| serde_json::json!({ "why": h.0, "since": h.1 })),
+            "lanes": s.lanes,
+            "queued": waiting.iter().enumerate().map(|(i, w)| serde_json::json!({ "id": w.id, "place": i + 1, "why": s.why(&w.id), "lane": w.lane, "after": w.after.as_ref().filter(|a| s.pending(a)) })).collect::<Vec<_>>(),
+        })
+    }
+
+    /// A new order for the queued jobs: `ids` first, in that order, the others after them
+    /// as they were. Saved, so a restart keeps it.
+    pub async fn reorder(&self, ids: &[String]) -> Result<()> {
+        let changes: Vec<(String, i64)> = {
+            let mut s = self.sched.lock().unwrap();
+            s.waiting.sort_by_key(|w| w.seq);
+            let mut seqs: Vec<i64> = s.waiting.iter().map(|w| w.seq).collect();
+            seqs.sort();
+            let mut order: Vec<String> = ids.iter().filter(|id| s.waiting.iter().any(|w| &w.id == *id)).cloned().collect();
+            for w in &s.waiting {
+                if !order.contains(&w.id) {
+                    order.push(w.id.clone());
+                }
+            }
+            // A job never goes before the queued job it waits for: it lands right behind it.
+            for w in s.waiting.iter().filter(|w| w.after.is_some()) {
+                let a = w.after.as_deref().unwrap_or_default();
+                let (Some(me), Some(dep)) = (order.iter().position(|x| *x == w.id), order.iter().position(|x| x == a)) else { continue };
+                if me < dep {
+                    let id = order.remove(me);
+                    order.insert(dep, id);
+                }
+            }
+            // Places that tie (jobs of before this order existed) get numbers of their own.
+            for i in 1..seqs.len() {
+                if seqs[i] <= seqs[i - 1] {
+                    seqs[i] = seqs[i - 1] + 1;
+                }
+            }
+            if let Some(last) = seqs.last() {
+                s.next_seq = s.next_seq.max(*last);
+            }
+            let changes: Vec<(String, i64)> = order.into_iter().zip(seqs).collect();
+            for (id, seq) in &changes {
+                if let Some(w) = s.waiting.iter_mut().find(|w| &w.id == id) {
+                    w.seq = *seq;
+                }
+            }
+            changes
+        };
+        for (id, seq) in &changes {
+            sqlx::query("UPDATE jobs SET seq = ? WHERE id = ?").bind(seq).bind(id).execute(&self.db).await?;
+        }
+        self.kick();
+        Ok(())
+    }
+
     async fn spawn_in<F, Fut>(
         &self,
         lane: Option<&str>,
@@ -312,113 +580,174 @@ impl Jobs {
         F: FnOnce(JobLog) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = Result<()>> + Send + 'static,
     {
-        let id = uuid::Uuid::new_v4().to_string();
-        // A slot of the lane, taken right here when one is free - so two asked for at once
-        // cannot both find the last one free - or waited for in the job's task.
-        let lane = lane.map(|l| {
-            let mut lanes = self.lanes.lock().unwrap();
-            let lane = lanes.entry(l.to_owned()).or_insert_with(Lane::new);
-            match lane.slots.clone().try_acquire_owned() {
-                Ok(g) => {
-                    lane.holders.push((id.clone(), title.to_owned()));
-                    (l.to_owned(), lane.slots.clone(), Some(g), Vec::new())
-                }
-                Err(_) => (l.to_owned(), lane.slots.clone(), None, lane.holders.iter().map(|h| h.1.clone()).collect()),
+        let restore = RESTORE.try_with(|r| r.clone()).ok();
+        let id = restore.as_ref().map(|r| r.0.clone()).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        // The job it waits for: still to finish here, done, or gone without success.
+        let after = params["after"].as_str().filter(|a| !a.is_empty()).map(str::to_owned);
+        let mut skip = None;
+        if let Some(a) = &after
+            && !self.sched.lock().unwrap().pending(a)
+        {
+            let st: Option<(String,)> = sqlx::query_as("SELECT status FROM jobs WHERE id = ?").bind(a).fetch_optional(&self.db).await?;
+            if st.as_ref().is_none_or(|(st,)| st != "succeeded") {
+                skip = Some(format!("not started - the job it waited for {}", st.map(|(s,)| format!("is {s}")).unwrap_or_else(|| "is gone".into())));
             }
-        });
-        let queued = lane.as_ref().is_some_and(|l| l.2.is_none());
-        sqlx::query(
-            "INSERT INTO jobs (id, kind, title, status, created_by, params, created_at, started_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&id)
-        .bind(kind)
-        .bind(title)
-        .bind(if queued { "queued" } else { "running" })
-        .bind(created_by)
-        .bind(params.to_string())
-        .bind(now())
-        .bind(if queued { None } else { Some(now()) })
-        .execute(&self.db)
-        .await?;
+        }
+        // The studio's own update restarts it: it runs alone.
+        let exclusive = kind == "update";
+        let (go_tx, mut go_rx) = tokio::sync::oneshot::channel::<Go>();
+        let (seq, started_now) = {
+            let mut s = self.sched.lock().unwrap();
+            let seq = match &restore {
+                Some((_, seq)) => *seq,
+                None => {
+                    s.next_seq += 1;
+                    s.next_seq
+                }
+            };
+            match skip.take() {
+                // Never queued: told at once that it is skipped.
+                Some(why) => {
+                    let _ = go_tx.send(Go::Skip(why));
+                    (seq, false)
+                }
+                None => {
+                    s.waiting.push(Wait { id: id.clone(), title: title.to_owned(), lane: lane.map(str::to_owned), exclusive, seq, after, go: Some(go_tx) });
+                    let started = s.pump();
+                    let now_too = started.iter().any(|w| w.id == id);
+                    for mut w in started {
+                        if let Some(go) = w.go.take() {
+                            let _ = go.send(Go::Start);
+                        }
+                    }
+                    (seq, now_too)
+                }
+            }
+        };
+        let status = if started_now { "running" } else { "queued" };
+        if restore.is_some() {
+            sqlx::query("UPDATE jobs SET status = ?, started_at = ? WHERE id = ?")
+                .bind(status)
+                .bind(if started_now { Some(now()) } else { None })
+                .bind(&id)
+                .execute(&self.db)
+                .await?;
+        } else {
+            sqlx::query(
+                "INSERT INTO jobs (id, kind, title, status, created_by, params, created_at, started_at, seq) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&id)
+            .bind(kind)
+            .bind(title)
+            .bind(status)
+            .bind(created_by)
+            .bind(params.to_string())
+            .bind(now())
+            .bind(if started_now { Some(now()) } else { None })
+            .bind(seq)
+            .execute(&self.db)
+            .await?;
+        }
 
-        let file = tokio::fs::File::create(self.log_path(&id)).await?;
+        let file = if restore.is_some() {
+            tokio::fs::OpenOptions::new().create(true).append(true).open(self.log_path(&id)).await?
+        } else {
+            tokio::fs::File::create(self.log_path(&id)).await?
+        };
         let (tx, _) = broadcast::channel(8192);
+        let lines = if restore.is_some() {
+            tokio::fs::read_to_string(self.log_path(&id)).await.unwrap_or_default().lines().map(str::to_owned).collect()
+        } else {
+            Vec::new()
+        };
         let live = Arc::new(Live {
-            inner: Mutex::new(LiveInner { lines: Vec::new(), file }),
+            inner: Mutex::new(LiveInner { lines, file }),
             tx,
             order: Arc::new(Mutex::new(())),
             progress: std::sync::Mutex::new(None),
             abort: std::sync::Mutex::new(None),
             steps: self.dir.join(format!("{id}.steps")),
+            id: id.clone(),
         });
         self.running.write().await.insert(id.clone(), live.clone());
 
         let this = self.clone();
         let job_id = id.clone();
         let job_title = title.to_owned();
+        let restored = restore.is_some();
         tokio::spawn(async move {
             let log = JobLog { live: live.clone() };
-            log.tag(Tag::Start, &job_title).await;
-            // Queued: wait for the lane, cancellable while waiting. The guard lives until the
-            // job ends.
-            let mut _lane_guard = None;
+            if restored {
+                log.tag(Tag::Info, "The studio restarted - back in the queue, in its place").await;
+            } else {
+                log.tag(Tag::Start, &job_title).await;
+            }
+            // Queued: wait for the queue, cancellable while waiting.
             let mut cancelled = None;
-            let lane_name = lane.as_ref().map(|l| l.0.clone());
-            if let Some((name, slots, guard, before)) = lane {
-                match guard {
-                    Some(g) => _lane_guard = Some(g),
-                    None => {
-                        let before = match before.as_slice() {
-                            [] => "the job before it".to_owned(),
-                            [one] => one.clone(),
-                            many => format!("one of {} has", many.join(", ")),
-                        };
-                        let before = if before.starts_with("one of ") { before } else { format!("{before} has") };
-                        log.tag(Tag::Info, format!("Queued - starts when {before} finished")).await;
-                        log.progress("Queued", None, String::new());
-                        // One wait for a slot the whole time - first come, first served - with
-                        // a look at Cancel every two seconds beside it.
-                        let wait = slots.acquire_owned();
-                        tokio::pin!(wait);
-                        let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
-                        loop {
-                            tokio::select! {
-                                g = &mut wait => {
-                                    _lane_guard = g.ok();
-                                    break;
-                                }
-                                _ = tick.tick() => {
-                                    if let Err(e) = log.check_abort() {
-                                        cancelled = Some(e);
-                                        break;
-                                    }
-                                }
+            let mut skipped = None;
+            if !started_now {
+                let why = this.sched.lock().unwrap().why(&job_id);
+                if !why.is_empty() {
+                    log.tag(Tag::Info, format!("Queued - {why}")).await;
+                    log.progress("Queued", None, why);
+                }
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+                loop {
+                    tokio::select! {
+                        go = &mut go_rx => {
+                            if let Ok(Go::Skip(why)) = go {
+                                skipped = Some(why);
                             }
+                            break;
                         }
-                        if cancelled.is_none() {
-                            if let Some(l) = this.lanes.lock().unwrap().get_mut(&name) {
-                                l.holders.push((job_id.clone(), job_title.clone()));
+                        _ = tick.tick() => {
+                            if let Err(e) = log.check_abort() {
+                                let mut s = this.sched.lock().unwrap();
+                                // Started in the same moment: it runs, and stops at its first check.
+                                if let Some(i) = s.waiting.iter().position(|w| w.id == job_id) {
+                                    s.waiting.remove(i);
+                                    cancelled = Some(e);
+                                }
+                                break;
                             }
-                            let _ = sqlx::query("UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?").bind(now()).bind(&job_id).execute(&this.db).await;
-                            log.progress_done();
-                            log.run("Starting - the work volume is free").await;
+                            let why = this.sched.lock().unwrap().why(&job_id);
+                            log.progress("Queued", None, why);
                         }
                     }
                 }
+                if cancelled.is_none() && skipped.is_none() {
+                    let _ = sqlx::query("UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?").bind(now()).bind(&job_id).execute(&this.db).await;
+                    log.progress_done();
+                    log.run("Starting - the queue has room").await;
+                }
             }
             // A panic in the body must still end the job, so run it as its own task.
-            let outcome = match cancelled {
-                Some(e) => Ok(Err(e)),
-                None => tokio::spawn(body(log.clone())).await,
+            let never_ran = cancelled.is_some() || skipped.is_some();
+            // Started: whatever it kept for a restart is in memory now.
+            let _ = tokio::fs::remove_file(this.secret_path(&job_id)).await;
+            let (status, error) = if let Some(why) = skipped {
+                ("skipped", Some(why))
+            } else {
+                let outcome = match cancelled {
+                    Some(e) => Ok(Err(e)),
+                    None => tokio::spawn(body(log.clone())).await,
+                };
+                match outcome {
+                    Ok(Ok(())) => ("succeeded", None),
+                    Ok(Err(e)) => ("failed", Some(format!("{e:#}"))),
+                    Err(e) => ("failed", Some(format!("job crashed: {e}"))),
+                }
             };
-            let (status, error) = match outcome {
-                Ok(Ok(())) => ("succeeded", None),
-                Ok(Err(e)) => ("failed", Some(format!("{e:#}"))),
-                Err(e) => ("failed", Some(format!("job crashed: {e}"))),
-            };
+            if never_ran {
+                // Its gold or VM record was made when it was asked for; nothing was built.
+                let _ = sqlx::query("UPDATE golds SET status = 'failed' WHERE job_id = ? AND status = 'baking'").bind(&job_id).execute(&this.db).await;
+                let _ = sqlx::query("UPDATE vms SET status = 'failed' WHERE job_id = ? AND status = 'building'").bind(&job_id).execute(&this.db).await;
+            }
+            let _ = tokio::fs::remove_file(this.secret_path(&job_id)).await;
             log.progress_done();
             match &error {
+                Some(e) if status == "skipped" => log.tag(Tag::End, format!("Skipped - {e}")).await,
                 Some(e) => log.tag(Tag::Error, e).await,
                 None => log.tag(Tag::End, format!("{job_title}: done")).await,
             }
@@ -434,17 +763,48 @@ impl Jobs {
                 let _ = live.tx.send(Event::Status { status: status.into(), error });
             }
             this.running.write().await.remove(&job_id);
-            if let Some(name) = &lane_name
-                && let Some(l) = this.lanes.lock().unwrap().get_mut(name)
-            {
-                l.holders.retain(|h| h.0 != job_id);
+            // What waited for it: starts now, or - when it did not succeed - is skipped.
+            let dependents: Vec<Wait> = {
+                let mut s = this.sched.lock().unwrap();
+                s.running.retain(|r| r.id != job_id);
+                if status == "succeeded" {
+                    Vec::new()
+                } else {
+                    let (gone, keep): (Vec<Wait>, Vec<Wait>) = std::mem::take(&mut s.waiting).into_iter().partition(|w| w.after.as_deref() == Some(job_id.as_str()));
+                    s.waiting = keep;
+                    gone
+                }
+            };
+            for mut w in dependents {
+                let why = format!("not started - {job_title} {}", if status == "skipped" { "was skipped" } else { "did not succeed" });
+                if let Some(go) = w.go.take() {
+                    let _ = go.send(Go::Skip(why));
+                }
             }
-            drop(_lane_guard);
+            this.kick();
             if let Some(hook) = this.on_end.get() {
                 hook(job_id);
             }
         });
         Ok(id)
+    }
+
+    /// What a queued job needs again after a restart but never keeps in its params (a
+    /// deploy's passwords): a file only the studio reads, gone when the job ends.
+    pub fn secret_path(&self, id: &str) -> PathBuf {
+        self.dir.join(format!("{id}.secret"))
+    }
+
+    pub async fn keep_secret(&self, id: &str, value: &serde_json::Value) -> Result<()> {
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = self.secret_path(id);
+        let mut f = std::fs::OpenOptions::new().create(true).truncate(true).write(true).mode(0o600).open(&path)?;
+        std::io::Write::write_all(&mut f, value.to_string().as_bytes())?;
+        Ok(())
+    }
+
+    pub async fn secret(&self, id: &str) -> Option<serde_json::Value> {
+        tokio::fs::read(self.secret_path(id)).await.ok().and_then(|b| serde_json::from_slice(&b).ok())
     }
 
     pub async fn list(&self, limit: i64) -> Result<Vec<JobRow>> {
@@ -490,25 +850,32 @@ impl Jobs {
         Ok((text.lines().map(str::to_owned).collect(), None, None))
     }
 
-    /// No job runs - the work folder holds nothing anyone needs.
+    /// No job runs - the work folder holds nothing anyone needs. Queued ones have not
+    /// begun (a media build that is continued keeps its folder by its checkpoint).
     pub async fn idle(&self) -> bool {
-        self.running.read().await.is_empty()
+        self.sched.lock().unwrap().running.is_empty()
     }
 
     /// Asks a running job to stop. False when it is not running here.
     pub async fn abort(&self, id: &str, who: &str) -> bool {
         let Some(live) = self.running.read().await.get(id).cloned() else { return false };
         let first = live.abort.lock().unwrap().replace(who.to_owned()).is_none();
+        let queued = self.sched.lock().unwrap().waiting.iter().any(|w| w.id == id);
         if first {
-            JobLog { live }.warn(format!("Cancel requested by {who} - stopping at the next safe point, then cleaning up")).await;
+            let text = if queued { format!("Cancelled by {who} - it leaves the queue") } else { format!("Cancel requested by {who} - stopping at the next safe point, then cleaning up") };
+            JobLog { live }.warn(text).await;
         }
         true
     }
 
-    /// Whether the job is running in this process right now.
-    /// The jobs running in this process now.
+    /// The jobs running in this process now - started, not queued.
     pub async fn running_ids(&self) -> Vec<String> {
-        self.running.read().await.keys().cloned().collect()
+        self.sched.lock().unwrap().running.iter().map(|r| r.id.clone()).collect()
+    }
+
+    /// The jobs waiting in the queue now.
+    pub async fn queued_ids(&self) -> Vec<String> {
+        self.sched.lock().unwrap().waiting.iter().map(|w| w.id.clone()).collect()
     }
 
     /// Waits for a job to end; its final row.
@@ -558,4 +925,150 @@ impl Jobs {
 
 fn now() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sched(limit: usize) -> Sched {
+        Sched { limit, lanes: HashMap::from([("media".to_owned(), 1)]), hold: None, waiting: Vec::new(), running: Vec::new(), next_seq: 0 }
+    }
+
+    fn wait(s: &mut Sched, id: &str, lane: Option<&str>, exclusive: bool) {
+        s.next_seq += 1;
+        s.waiting.push(Wait { id: id.into(), title: id.into(), lane: lane.map(str::to_owned), exclusive, seq: s.next_seq, after: None, go: None });
+    }
+
+    fn ids(v: Vec<Wait>) -> Vec<String> {
+        v.into_iter().map(|w| w.id).collect()
+    }
+
+    #[test]
+    fn the_limit_and_a_full_lane() {
+        let mut s = sched(3);
+        wait(&mut s, "iso1", Some("media"), false);
+        wait(&mut s, "iso2", Some("media"), false);
+        wait(&mut s, "bake1", None, false);
+        wait(&mut s, "bake2", None, false);
+        wait(&mut s, "bake3", None, false);
+        // One ISO at a time: the second lets the bakes behind it pass; three at a time in all.
+        assert_eq!(ids(s.pump()), ["iso1", "bake1", "bake2"]);
+        assert_eq!(s.why("iso2"), "starts when iso1 has finished");
+        s.running.retain(|r| r.id != "bake1");
+        assert_eq!(ids(s.pump()), ["bake3"]);
+        s.running.retain(|r| r.id != "iso1");
+        assert_eq!(ids(s.pump()), ["iso2"]);
+    }
+
+    #[test]
+    fn the_update_goes_alone() {
+        let mut s = sched(3);
+        wait(&mut s, "a", None, false);
+        assert_eq!(ids(s.pump()), ["a"]);
+        wait(&mut s, "update", None, true);
+        wait(&mut s, "b", None, false);
+        // b waits behind the update, which waits for a.
+        assert!(s.pump().is_empty());
+        assert_eq!(s.why("b"), "the studio's update goes first");
+        s.running.clear();
+        assert_eq!(ids(s.pump()), ["update"]);
+        assert!(s.pump().is_empty());
+    }
+
+    #[test]
+    fn a_bake_waits_for_its_iso() {
+        let mut s = sched(3);
+        wait(&mut s, "iso", Some("media"), false);
+        wait(&mut s, "bake", None, false);
+        s.waiting[1].after = Some("iso".into());
+        wait(&mut s, "web", None, false);
+        // The bake waits while its ISO runs; the job behind it passes.
+        assert_eq!(ids(s.pump()), ["iso", "web"]);
+        assert_eq!(s.why("bake"), "waits for iso");
+        s.running.retain(|r| r.id != "iso");
+        assert_eq!(ids(s.pump()), ["bake"]);
+    }
+
+    async fn jobs() -> (Jobs, tempfile_dir::Dir) {
+        let dir = tempfile_dir::Dir::new();
+        let db = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!().run(&db).await.unwrap();
+        let j = Jobs::new(db, dir.0.clone()).await.unwrap();
+        j.release();
+        (j, dir)
+    }
+
+    async fn status(j: &Jobs, id: &str) -> String {
+        for _ in 0..100 {
+            let s = j.get(id).await.unwrap().unwrap().status;
+            if s != "queued" && s != "running" {
+                return s;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        "still going".into()
+    }
+
+    #[tokio::test]
+    async fn a_failed_iso_skips_its_bakes() {
+        let (j, _d) = jobs().await;
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let iso = j.spawn_in_lane("media", "media", "Build ISO media (en-US)", "t", serde_json::json!({}), move |_| async move {
+            let _ = rx.await;
+            anyhow::bail!("DISM failed")
+        }).await.unwrap();
+        let ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let r = ran.clone();
+        let bake = j.spawn("bake", "Bake", "t", serde_json::json!({ "after": iso }), move |_| async move {
+            r.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }).await.unwrap();
+        assert!(j.queue()["queued"][0]["why"].as_str().unwrap().starts_with("waits for its ISO - ISO"));
+        let _ = tx.send(());
+        assert_eq!(status(&j, &iso).await, "failed");
+        assert_eq!(status(&j, &bake).await, "skipped");
+        assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn a_good_iso_starts_its_bakes() {
+        let (j, _d) = jobs().await;
+        let iso = j.spawn_in_lane("media", "media", "Build ISO media (en-US)", "t", serde_json::json!({}), |_| async { Ok(()) }).await.unwrap();
+        let bake = j.spawn("bake", "Bake", "t", serde_json::json!({ "after": iso }), |_| async { Ok(()) }).await.unwrap();
+        assert_eq!(status(&j, &iso).await, "succeeded");
+        assert_eq!(status(&j, &bake).await, "succeeded");
+        // Asked for after its ISO is through: it starts at once.
+        let late = j.spawn("bake", "Bake", "t", serde_json::json!({ "after": iso }), |_| async { Ok(()) }).await.unwrap();
+        assert_eq!(status(&j, &late).await, "succeeded");
+    }
+
+    /// A temporary folder for a test's job logs, removed afterwards.
+    mod tempfile_dir {
+        pub struct Dir(pub std::path::PathBuf);
+        impl Dir {
+            pub fn new() -> Self {
+                let p = std::env::temp_dir().join(format!("pvs-jobs-test-{}", uuid::Uuid::new_v4()));
+                std::fs::create_dir_all(&p).unwrap();
+                Self(p)
+            }
+        }
+        impl Drop for Dir {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+    }
+
+    #[test]
+    fn a_hold_and_no_limit() {
+        let mut s = sched(0);
+        s.hold = Some(("the studio is starting".into(), String::new()));
+        for i in 0..5 {
+            wait(&mut s, &format!("j{i}"), None, false);
+        }
+        assert!(s.pump().is_empty());
+        s.hold = None;
+        assert_eq!(s.pump().len(), 5);
+    }
 }

@@ -188,6 +188,28 @@ fn payloads(xml: &str) -> (Vec<(String, u64)>, Option<String>) {
     (out, version)
 }
 
+/// The languages Microsoft lists FoD satellites for: one <Prefix>BaselessCompDB_FOD_<lang>
+/// per language in the extracted AggregatedMetadata. en-us when there is none.
+fn fod_languages(agg: &Path) -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_dir(agg)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let n = e.file_name().to_string_lossy().to_lowercase();
+                    let i = n.find("baselesscompdb_fod_")?;
+                    n[i + "baselesscompdb_fod_".len()..].strip_suffix(".compdb.xml.cab").filter(|l| l.contains('-') && *l != "neutral").map(str::to_owned)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    out.sort();
+    out.dedup();
+    if out.is_empty() {
+        out.push("en-us".into());
+    }
+    out
+}
+
 /// <Prefix>BaselessCompDB_FOD_<lang>.CompDB.xml.cab in the extracted AggregatedMetadata.
 fn baseless_lang_cab(agg: &Path, lang: &str) -> Option<PathBuf> {
     let want = format!("baselesscompdb_fod_{lang}.compdb.xml.cab");
@@ -324,11 +346,11 @@ pub struct Built {
 /// A Languages and Optional Features ISO, the way Microsoft lays it out
 /// (LanguagesAndOptionalFeatures\ with the canonical .cab names, metadata\ with the target
 /// CompDBs that list them), from the newest build of the source's product - every Feature
-/// on Demand but the language ones, plus the satellites of one language. Plain Linux work:
+/// on Demand but the language ones, plus their satellites in every language. Plain Linux work:
 /// the UUP files are the canonical packages already, their names and sizes in Microsoft's
 /// own CompDBs.
 #[allow(clippy::too_many_arguments)]
-pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Path, node: &str, storage: &str, src: &Source, lang: &str) -> Result<Built> {
+pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Path, node: &str, storage: &str, src: &Source) -> Result<Built> {
     let prod = uup::product(src.product).context("no such product in the catalog")?;
     let mut pr = Progress::new(log, format!("Building the {} Features on Demand ISO", src.name));
     pr.calibrate("reading Microsoft's package lists").await;
@@ -411,7 +433,6 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
             .collect();
         let mut wanted: Vec<(String, uup::File)> = Vec::new();
         let (mut skipped_n, mut missing) = (0, Vec::new());
-        let lang_l = lang.to_lowercase();
         for (canonical, size) in &listed {
             if skipped(canonical) {
                 skipped_n += 1;
@@ -423,15 +444,24 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
             }
         }
         let packages = wanted.len();
-        // Each package's satellite in the image's language: X-amd64-en-us.cab.
-        for i in 0..packages {
-            let (canonical, _) = wanted[i].clone();
-            let key = format!("{}-{lang_l}", uup_key(&canonical));
-            if let Some(f) = by_key.get(&key) {
-                let stem = canonical.trim_end_matches(".cab").trim_end_matches('~').trim_end_matches('~');
-                let tail = &f.name[f.name.len() - 4 - lang.len()..f.name.len() - 4];
-                wanted.push((format!("{stem}~{tail}~.cab"), (*f).clone()));
+        // Each package's satellites in every language, as on Microsoft's Languages and Optional
+        // Features ISO: DISM /Add-Capability takes the ones for the image's languages from it
+        // (X-amd64-de-de.cab). The languages are the ones Microsoft lists FoD satellites for.
+        let langs = fod_languages(&agg);
+        let mut ranges: Vec<(String, usize, usize)> = Vec::new();
+        for lang_l in &langs {
+            let start = wanted.len();
+            for i in 0..packages {
+                let (canonical, _) = wanted[i].clone();
+                let key = format!("{}-{lang_l}", uup_key(&canonical));
+                if let Some(f) = by_key.get(&key) {
+                    let stem = canonical.trim_end_matches(".cab").trim_end_matches('~').trim_end_matches('~');
+                    let tail = &f.name[f.name.len() - 4 - lang_l.len()..f.name.len() - 4];
+                    let f = (*f).clone();
+                    wanted.push((format!("{stem}~{tail}~.cab"), f));
+                }
             }
+            ranges.push((lang_l.clone(), start, wanted.len()));
         }
         let satellites = wanted.len() - packages;
         if let Some(f) = all.iter().find(|f| f.name.eq_ignore_ascii_case("FoDMetadata_Client.cab")) {
@@ -446,7 +476,8 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
         }
         let total: u64 = wanted.iter().map(|(_, f)| f.size).sum();
         log.ok(format!(
-            "{packages} package(s) and {satellites} {lang} satellite(s), {:.2} GB - {skipped_n} language and Mixed Reality package(s) left out",
+            "{packages} package(s) and {satellites} satellite(s) in {} languages, {:.2} GB - {skipped_n} language and Mixed Reality package(s) left out",
+            langs.len(),
             total as f64 / 1e9
         ))
         .await;
@@ -473,16 +504,24 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
         // The satellites' own list (<Prefix>TargetCompDBForISO_FOD_<lang>), which Microsoft
         // puts on the ISO but not into UUP: made from UUP's Baseless list of the same
         // packages, its express payloads replaced by the full CABs' SHA-256 and size.
-        match for_iso_compdb(log, &dir, &agg, &lang_l, &wanted[packages..packages + satellites], &dl).await {
-            Ok(Some(cab)) => {
-                let n = cab.file_name().unwrap().to_owned();
-                tokio::fs::copy(&cab, root.join("metadata").join(&n)).await?;
-                log.ok(format!("metadata\\{}: the {satellites} {lang} satellites, as the Languages and Optional Features ISO lists them", n.to_string_lossy())).await;
+        // One per language.
+        let (mut listed_n, mut unlisted) = (0, Vec::new());
+        for (lang_l, a, b) in &ranges {
+            match for_iso_compdb(log, &dir, &agg, lang_l, &wanted[*a..*b], &dl).await {
+                Ok(Some(cab)) => {
+                    let n = cab.file_name().unwrap().to_owned();
+                    tokio::fs::copy(&cab, root.join("metadata").join(&n)).await?;
+                    listed_n += 1;
+                }
+                Ok(None) => unlisted.push(lang_l.clone()),
+                Err(e) => log.warn(format!("The {lang_l} satellites' list could not be made: {e:#}")).await,
             }
-            Ok(None) => log.line(format!("No Baseless FoD list for {lang} in the metadata - the satellites are on the ISO without a list of their own")).await,
-            Err(e) => log.warn(format!("The satellites' list could not be made: {e:#}")).await,
         }
-        // fod-<os>-<build>: one FoD ISO per release (its satellites are the studio's language).
+        log.ok(format!("metadata\\: the satellites' lists for {listed_n} languages, as the Languages and Optional Features ISO has them")).await;
+        if !unlisted.is_empty() {
+            log.line(format!("No Baseless FoD list for {} in the metadata - their satellites are on the ISO without a list of their own", unlisted.join(", "))).await;
+        }
+        // fod-<os>-<build>: one FoD ISO per release, with the satellites of every language.
         let name = format!("fod-{}-{base}.iso", src.short);
         let iso = dir.join(&name);
         let label: String = format!("FOD_{}_{base}", src.short.to_uppercase().replace('-', "_")).chars().take(32).collect();
@@ -509,6 +548,20 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn every_language_microsoft_lists() {
+        let d = std::env::temp_dir().join(format!("pvs-fod-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        for n in ["ServerBaselessCompDB_FOD_Neutral.CompDB.xml.cab", "ServerBaselessCompDB_FOD_de-DE.CompDB.xml.cab", "ServerBaselessCompDB_FOD_en-us.CompDB.xml.cab",
+            "ServerBaselessCompDB_FOD_sr-Latn-RS.CompDB.xml.cab", "ServerTargetCompDB_FOD_Neutral.xml.cab"] {
+            std::fs::write(d.join(n), b"").unwrap();
+        }
+        assert_eq!(fod_languages(&d), ["de-de", "en-us", "sr-latn-rs"]);
+        let _ = std::fs::remove_dir_all(&d);
+        assert_eq!(fod_languages(&d), ["en-us"]);
+    }
+
     use super::*;
 
     #[test]

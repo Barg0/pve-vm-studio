@@ -27,6 +27,7 @@ mod markers;
 mod notify;
 mod progress;
 mod pve;
+mod requeue;
 mod seed;
 mod selfnet;
 mod serial;
@@ -201,9 +202,15 @@ async fn main() -> Result<()> {
     state.pve.set_pins(cas::pin_digests(&cas::read_pins(&state.config.data_dir)));
     tokio::spawn(console::studio_watch(state.clone()));
 
-    // ISO builds at a time, as Image settings has it.
+    // Jobs at a time (Studio settings → Job queue) and ISO builds at a time (Image settings).
+    let queue: jobs::QueueSettings = settings::load(&state.db, "queue").await.unwrap_or_default();
+    state.jobs.set_limit(queue.limit as usize);
     let worker: media::WorkerSettings = settings::load(&state.db, "worker").await.unwrap_or_default();
     state.jobs.set_lane_limit("media", worker.parallel as usize);
+    // What was queued at the stop waits again in its place; the queue starts a minute
+    // after the start, once PVE answers.
+    requeue::restore(&state).await;
+    tokio::spawn(requeue::release_after_start(state.clone()));
     tokio::spawn(pve_nodes_loop(state.clone()));
     tokio::spawn(reconcile_after_restart(state.clone()));
     tokio::spawn(warm_caches(state.clone()));
