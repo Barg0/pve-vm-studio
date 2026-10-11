@@ -704,7 +704,7 @@ async fn bake_linux_inner(
     )
     .await;
     let notes = format!(
-        "## Gold: {}\n\nBaked by PVE VM Studio on {}. Do not start this template - clone it.\n\n\
+        "## Gold: {}\n\nBaked by PVE VM Studio on {}.\n\n\
          | | |\n|---|---|\n| Image | `{}` |\n| Kernel | `{}` |\n| Secure Boot | {} |\n| Updates | {} |\n| Features | {} |\n| Region | {} |\n| Source | {} |\n{}",
         img.name,
         Utc::now().format("%Y-%m-%d %H:%M UTC"),

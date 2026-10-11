@@ -2486,6 +2486,12 @@ fn license_for(s: &serde_json::Value, state: &serde_json::Value) -> String {
         .unwrap_or_default()
 }
 
+/// WinGet ships with Windows 11 and Windows Server 2025 with the Desktop Experience - not
+/// with Server 2022 and older, and not with Server Core.
+fn winget_capable(image_id: &str) -> bool {
+    image_id.starts_with("w11-") || (image_id.starts_with("ws2025-") && image_id.ends_with("-desktop"))
+}
+
 fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: &str, gold_id: &str, default_bridge: &str) -> VmSpec {
     let defaults = &state["defaults"];
     let str_of = |k: &str| s[k].as_str().unwrap_or("").trim().to_owned();
@@ -2571,7 +2577,7 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
         arc: arc_for(s, state),
         product_key: license_for(s, state),
         // Only when the section is switched on; ids as WinGet writes them, nothing else.
-        winget_apps: if s["wingetEnabled"].as_bool() == Some(true) {
+        winget_apps: if s["wingetEnabled"].as_bool() == Some(true) && winget_capable(s["imageId"].as_str().unwrap_or("")) {
             s["wingetApps"].as_array().into_iter().flatten()
                 .filter_map(|a| {
                     let id = a["id"].as_str()?.trim();

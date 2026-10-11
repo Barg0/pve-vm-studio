@@ -1322,7 +1322,9 @@ pub async fn bake(
     let node = p.node.as_str();
     let upgrade = virtual_edition(&opt.edition_upgrade);
     let id = gold_image_id(img, &opt.edition_upgrade);
-    let display = upgrade.map(|v| v.display.to_owned()).unwrap_or_else(|| img.name.clone());
+    // What people call it - "Windows Server 2022 Datacenter Desktop" - not the image's
+    // name in the WIM ("Windows Server 2022 SERVERDATACENTER").
+    let display = server_label(&id).or_else(|| upgrade.map(|v| v.display.to_owned())).unwrap_or_else(|| img.name.clone());
     let client = img.installation_type == "Client";
     golds::check_node_memory(pve, log, node, p.memory_mb.max(4096)).await?;
     let mut pr = Progress::new(log, format!("Baking {display}"));
@@ -1478,8 +1480,8 @@ pub async fn bake(
         set_boot(pve, node, vmid, "scsi0").await?;
         let gold_name = golds::gold_name(gold_id);
         let notes = format!(
-            "## Gold: {display}\n\nBaked by PVE VM Studio on {}. Do not start this template - clone it.\n\n\
-             | | |\n|---|---|\n| Gold id | `{gold_id}` |\n| Image | `{id}` (index {} of `{}`) |\n| Build | {} |\n| Language | {} |\n| Region | {} / keyboard {} / {} |\n| virtio-win | {virtio_release} |\n| Policies | {} |\n| Key | {} |\n",
+            "## Gold: {display}\n\nBaked by PVE VM Studio on {}.\n\n\
+             | | |\n|---|---|\n| Gold id | `{gold_id}` |\n| Image | `{id}` (index {} of `{}`) |\n| Build | {} |\n| Language | {} |\n| Region | {} / keyboard {} / {} |\n| virtio-win | {virtio_release} |\n| Policies | {} |\n",
             Utc::now().format("%Y-%m-%d %H:%M UTC"),
             img.index,
             opt.iso,
@@ -1489,7 +1491,6 @@ pub async fn bake(
             opt.region.keyboard,
             opt.region.timezone,
             if opt.features.is_empty() { "none".into() } else { opt.features.join(", ") },
-            if gvlk(edition_target.as_deref().unwrap_or(&img.edition_id), &img.build).is_some() { "KMS client (GVLK)" } else { "none" },
         );
         let build = if img.version.is_empty() { &img.build } else { &img.version };
         let tags = vec![crate::tags::GOLD.to_owned(), crate::tags::os("windows", &id, Some(build))];

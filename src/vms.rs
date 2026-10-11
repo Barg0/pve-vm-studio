@@ -810,10 +810,13 @@ async fn deploy_inner(
             log.warn("Something failed offline - GuestProvision gets the full lists and installs the rest at first boot").await;
         }
         log.ok("Deploy pass done").await;
-        let names: Vec<&str> = drives.iter().map(|(k, _)| *k).collect();
+        // The deploy pass was the last reader of COM1 - Windows itself reports through the
+        // guest agent - so the port goes with the CDs, before Windows first boots.
+        let mut names: Vec<&str> = drives.iter().map(|(k, _)| *k).collect();
+        names.push("serial0");
         pve.vm_set(&node, vmid, form![("delete", names.join(","))]).await?;
         seed::detach(pve, &node, vmid, slot).await?;
-        log.ok("CDs removed, the seed disk deleted").await;
+        log.ok("CDs, seed disk and serial port removed").await;
         windows::set_boot(pve, &node, vmid, "scsi0").await?;
 
         pve.vm_action(&node, vmid, "start").await?;
@@ -1119,7 +1122,7 @@ fn vm_notes(spec: &VmSpec, gold: &crate::golds::GoldRow, image: &str) -> String 
     }
     let table: String = rows.iter().map(|(k, v)| format!("| {k} | {} |\n", v.replace('|', "\\|"))).collect();
     format!(
-        "## {}\n\nBuilt by PVE VM Studio {} ({}) · {}\n\n| | |\n|---|---|\n{table}\nAs built - what can change since is in Proxmox VE's own summary.\n",
+        "## {}\n\nBuilt by PVE VM Studio {} ({}) · {}\n\n| | |\n|---|---|\n{table}",
         spec.name,
         env!("CARGO_PKG_VERSION"),
         env!("STUDIO_COMMIT"),

@@ -5844,7 +5844,9 @@ function renderServerArcSection(s) { return ""; }
    GuestProvision as SYSTEM, machine-wide, the newest version. A failure never stops the
    deploy - the VM comes up and its result lists the app as not installed. */
 const wgPick = { sid: null, q: "", hits: [], busy: false, timer: null };
-function wingetCapable(s) { const img = findImage(s.imageId); return !isLinuxServer(s) && img.kind !== "core"; }
+/* WinGet ships with Windows 11 and Windows Server 2025 with the Desktop Experience - not with
+   Server 2022 and older, and not with Server Core. */
+function wingetCapable(s) { const id = String(s.imageId || ""); return !isLinuxServer(s) && (id.startsWith("w11-") || (id.startsWith("ws2025-") && id.endsWith("-desktop"))); }
 /* Extras: what a VM can be made ready for at first boot. Hotpatch - Windows
    Server 2025 only - turns VBS on and checks it runs after the restart; Hotpatch itself is
    switched on for the VM in Azure. */
