@@ -348,7 +348,12 @@ impl Sched {
         if let Some(l) = w.lane.as_deref() {
             let busy: Vec<&str> = self.running.iter().filter(|r| r.lane.as_deref() == Some(l)).map(|r| r.title.as_str()).collect();
             if busy.len() >= self.lane_limit(l) {
-                return format!("starts when {} has finished", busy.join(" or "));
+                // The lane's job just ahead of it in the queue, else the running one(s).
+                let before = self.waiting.iter().filter(|x| x.lane.as_deref() == Some(l) && x.seq < w.seq).max_by_key(|x| x.seq);
+                return match before {
+                    Some(b) => format!("starts after {}", b.title),
+                    None => format!("starts when {} has finished", busy.join(" or ")),
+                };
             }
         }
         let ahead = self.waiting.iter().filter(|x| x.seq < w.seq).count();
@@ -953,12 +958,15 @@ mod tests {
         wait(&mut s, "bake2", None, false);
         wait(&mut s, "bake3", None, false);
         // One ISO at a time: the second lets the bakes behind it pass; three at a time in all.
+        wait(&mut s, "iso3", Some("media"), false);
         assert_eq!(ids(s.pump()), ["iso1", "bake1", "bake2"]);
         assert_eq!(s.why("iso2"), "starts when iso1 has finished");
+        assert_eq!(s.why("iso3"), "starts after iso2");
         s.running.retain(|r| r.id != "bake1");
         assert_eq!(ids(s.pump()), ["bake3"]);
         s.running.retain(|r| r.id != "iso1");
         assert_eq!(ids(s.pump()), ["iso2"]);
+        assert_eq!(s.why("iso3"), "starts when iso2 has finished");
     }
 
     #[test]

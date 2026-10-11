@@ -924,7 +924,12 @@ a.btn, a.btn:hover { text-decoration: none; }
 .q-slots { display: flex; gap: 3px; align-items: center; }
 .q-slots i { width: 10px; height: 10px; border-radius: 2px; background: var(--run); }
 .q-slots i.free { background: transparent; border: 1px solid var(--border); }
-.q-slots i.q { background: transparent; border: 1px dashed var(--fg-muted); }
+.q-head { display: flex; align-items: center; gap: 10px; }
+.q-head .q-slots i { width: 12px; height: 12px; }
+.q-sep { width: 1px; height: 16px; background: var(--divider); }
+.q-wait { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 11.5px; color: var(--fg-muted); white-space: nowrap; }
+.q-wait img { width: 14px; height: 14px; }
+.q-wait.iso { color: var(--band-deploy); }
 
 /* ---- Windows updates: the next window ---- */
 .plan { margin-top: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg); padding: 12px 14px 14px; }

@@ -509,8 +509,20 @@ function dashRunning(jobs) {
   const run = jobs.filter(j => j.status === "running"), q = queueOrder(jobs);
   const last = jobs.find(j => j.status !== "running" && j.status !== "queued");
   const limit = jobsQueue ? jobsQueue.limit : 0;
-  const slots = limit && (run.length || q.length) ? `<span class="q-slots" title="${run.length} of ${limit} at a time running, ${q.length} queued">${Array.from({ length: limit }, (_, i) => `<i class="${i < run.length ? "" : "free"}"></i>`).join("")}${q.slice(0, 8).map(() => `<i class="q"></i>`).join("")}</span>` : "";
-  const meta = run.length || q.length ? [`${run.length}${limit ? ` of ${limit}` : ""} running`, q.length ? `${q.length} queued` : ""].filter(Boolean).join(" · ") : "idle";
+  // The squares are the slots of Jobs at a time, each in the colour of what runs in it (an
+  // ISO build orange, a gold or VM in its machine's colour), empty = free. What waits is a
+  // count beside them, never a square: ISO builds held by their own limit apart.
+  const isoLimit = (jobsQueue && jobsQueue.lanes && jobsQueue.lanes.media) || 1;
+  const isoFull = run.filter(j => j.kind === "media").length >= isoLimit;
+  const isoWait = q.filter(j => j.kind === "media" && isoFull).length, otherWait = q.length - isoWait;
+  const tint = j => { if (j.kind === "media") return "var(--band-deploy)"; const b = jobSubject(j).band; return b && b !== "studio" ? `var(--band-${b})` : "var(--run)"; };
+  const boxes = run.map(j => `<i style="background:${tint(j)}" title="${esc(j.title)}"></i>`).join("") + (limit > run.length ? `<i class="free"></i>`.repeat(limit - run.length) : "");
+  const waits = [isoWait ? `<span class="q-wait iso" title="${isoWait} ISO build(s) wait - ISO builds run ${isoLimit === 1 ? "one" : isoLimit} at a time">+${isoWait}<img src="${iconSrc("download.svg")}" alt=""></span>` : "",
+    otherWait ? `<span class="q-wait" title="${otherWait} job(s) wait in the queue">+${otherWait}<img src="${iconSrc("clock.svg")}" alt=""></span>` : ""].filter(Boolean).join("");
+  const slots = run.length || q.length ? `<span class="q-head"><span class="q-slots">${boxes}</span>${waits ? `<span class="q-sep"></span>${waits}` : ""}</span>` : "";
+  const meta = run.length || q.length ? [`${run.length}${limit ? ` of ${limit}` : ""} running`,
+    isoWait ? `${isoWait} ISO build${isoWait === 1 ? "" : "s"} wait - ${isoLimit === 1 ? "one" : isoLimit} at a time` : "",
+    otherWait ? `${otherWait} queued` : ""].filter(Boolean).join(" · ") : "idle";
   const qRow = (j, i) => {
     const info = queueInfo(j.id);
     return `<div class="dash-act queued" role="button" tabindex="0" data-dash-job="${esc(j.id)}" title="Open the log">
@@ -1897,7 +1909,9 @@ function jobItems(jobs) {
 }
 function jobHistory(jobs) {
   const sel = jobs.find(j => j.id === jobSelected), selKey = sel && jobSubject(sel).key;
-  const shown = jobGroups(jobs).filter(g => jobFilter === "all" || g.runs[0].status === jobFilter);
+  // A filter shows each subject with its runs of that status - the tab counts runs, so the
+  // rows add up to it (a subject whose newest run is queued keeps its failed one here).
+  const shown = jobGroups(jobFilter === "all" ? jobs : jobs.filter(j => j.status === jobFilter));
   if (!shown.length) return `<p class="hint job-none">No ${esc(jobFilter)} jobs.</p>`;
   let day = "", out = "";
   for (const { sub, runs } of shown) {
