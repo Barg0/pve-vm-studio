@@ -865,6 +865,46 @@ const IMAGE_CATALOG = [
     defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
   },
   {
+    /* Windows Server vNext: the Insider flights of the next Windows Server. */
+    id: "wsvnext-datacenter-desktop",
+    label: "Windows Server vNext Datacenter Desktop",
+    icon: "os-server-panes.svg",
+    kind: "desktop",
+    edition: "Datacenter",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+  },
+  {
+    /* Windows Server vNext: the Insider flights of the next Windows Server. */
+    id: "wsvnext-datacenter-core",
+    label: "Windows Server vNext Datacenter Core",
+    icon: "os-server-panes.svg",
+    kind: "core",
+    edition: "Datacenter",
+    experience: "Core",
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+  },
+  {
+    /* Windows Server vNext: the Insider flights of the next Windows Server. */
+    id: "wsvnext-standard-desktop",
+    label: "Windows Server vNext Standard Desktop",
+    icon: "os-server-panes.svg",
+    kind: "desktop",
+    edition: "Standard",
+    experience: "DesktopExperience",
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 4 }
+  },
+  {
+    /* Windows Server vNext: the Insider flights of the next Windows Server. */
+    id: "wsvnext-standard-core",
+    label: "Windows Server vNext Standard Core",
+    icon: "os-server-panes.svg",
+    kind: "core",
+    edition: "Standard",
+    experience: "Core",
+    defaults: { useDifferencingDisk: false, enableSecureBoot: true, enableVtpm: false, startAfterCreate: true, memoryGB: 4, cpuCount: 2 }
+  },
+  {
     id: "w11-enterprise",
     label: "Windows 11 Enterprise",
     icon: "os-client-panes.svg",
@@ -1678,8 +1718,8 @@ function imageReleaseLabel(img) {
   if (isLinuxImage(img)) return LINUX_DISTRO_LABEL[img.distro] || img.label;
   if (img.noServerRoles) return img.label;
   if (img.kind === "client") return "Windows 11";
-  const m = String(img.id).match(/^ws(\d{4})/);
-  return m ? m[1] : img.label;
+  const m = String(img.id).match(/^ws(\d{4}|vnext)/);
+  return m ? (m[1] === "vnext" ? "vNext" : m[1]) : img.label;
 }
 /** Sub-headline under a release: the edition. Client images have none. */
 function imageEditionLabel(img) {
@@ -6794,18 +6834,23 @@ function compareGolds(a, b) {
 }
 /* Windows 11 releases by base build (src/golds.rs CLIENT_RELEASES): 26300 is 26H2. Server
    builds have no such name - 26100 is Windows Server 2025 there. */
-const CLIENT_RELEASES = [[26300, "26H2"], [26200, "25H2"], [26100, "24H2"], [22631, "23H2"], [22621, "22H2"], [22000, "21H2"]];
+const CLIENT_RELEASES = [[28000, "26H1"], [26300, "26H2"], [26200, "25H2"], [26100, "24H2"], [22631, "23H2"], [22621, "22H2"], [22000, "21H2"]];
+/* A Windows 11 build that is none of the releases: a Canary, Dev or Beta flight. Listed after
+   the releases in the image picker. */
+const INSIDER_RELEASE = "Insider Preview";
+const RELEASE_ORDER = CLIENT_RELEASES.map(([, r]) => r).concat(INSIDER_RELEASE);
 function goldRelease(g) {
   if (!g || !String(g.image_id || "").startsWith("w11")) return "";
   // build_version comes without Windows' 10.0 (golds.rs); a manifest's build may carry it.
   const v = g.build_version || String(goldManifest(g).build || "").replace(/^10\.0\./, "").split(".").map(Number);
   const major = v[0];
+  if (!major) return "";
   const hit = CLIENT_RELEASES.find(([b]) => b === major);
-  return hit ? hit[1] : "";
+  return hit ? hit[1] : INSIDER_RELEASE;
 }
 /* The releases an image has ready golds of, newest first. */
 function goldReleases(imageId) {
-  return CLIENT_RELEASES.map(([, r]) => r).filter(r => readyGolds().some(g => g.image_id === imageId && goldRelease(g) === r));
+  return RELEASE_ORDER.filter(r => readyGolds().some(g => g.image_id === imageId && goldRelease(g) === r));
 }
 function goldsOfImage(imageId, lang, release) {
   const l = String(lang || "").toLowerCase();
@@ -6914,7 +6959,7 @@ function goldPickerGroups() {
     /* Windows 11: a subgroup per release (26H2, 25H2), newest first, like Datacenter and
        Standard for Windows Server. */
     groups: rel.groups.flatMap(g => {
-      const releases = CLIENT_RELEASES.map(([, r]) => r).filter(r => g.images.some(img => goldReleases(img.id).includes(r)));
+      const releases = RELEASE_ORDER.filter(r => g.images.some(img => goldReleases(img.id).includes(r)));
       if (!releases.length) return [{ label: g.label, entries: g.images.flatMap(img => rows(img, "")) }];
       return releases.map(r => ({ label: g.label ? `${g.label} · ${r}` : r, entries: g.images.flatMap(img => goldReleases(img.id).includes(r) ? rows(img, r) : []) }));
     }).filter(g => g.entries.length)

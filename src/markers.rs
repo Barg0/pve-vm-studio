@@ -30,6 +30,8 @@ const TEXT: &[(&str, &str)] = &[
     ("GENERALIZED", "The image is generalized"),
     ("NOT-GENERALIZED", "The image is not generalized"),
     ("NO-SYSPREP-TAG", "Sysprep left no tag - it did not finish"),
+    ("SYSPREP-TAG-GONE", "The Sysprep window audit mode opens removed the tag - the image state decides"),
+    ("SYSPREP-TAG", "Sysprep left its tag"),
     ("ANSWERFILE", "Answer file written"),
     ("TIMEZONE", "Time zone"),
     ("LOCALE", "Language and keyboard"),
@@ -179,6 +181,8 @@ mod tests {
 
     #[test]
     fn markers_read_as_words() {
+        assert_eq!(text("PVS-SYSPREP-TAG-GONE"), "The Sysprep window audit mode opens removed the tag - the image state decides");
+        assert_eq!(text("PVS-SYSPREP-TAG"), "Sysprep left its tag");
         assert_eq!(text("PVS-PASS1-OK"), "Pass 1 done");
         assert_eq!(text("PVS-POLICY rdp"), "Policy: rdp");
         assert_eq!(text("BAKE-PKG fastfetch ok"), "Package fastfetch installed");

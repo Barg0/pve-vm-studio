@@ -12,10 +12,11 @@
 //!   3. oobeSystem reseals into audit mode; auditUser runs audit.cmd from the seed: the
 //!      QEMU guest agent first (from here the studio follows the log through it), then
 //!      virtio-win-gt, the chosen policies, the gold's answer file, and
-//!      `sysprep /generalize /oobe /mode:vm /quit`.
-//!   4. The studio checks generalize worked (Sysprep_succeeded.tag, and State.ini saying
-//!      IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE) before it shuts the VM down and makes it a
-//!      template.
+//!      `sysprep /generalize /oobe /mode:vm /shutdown`.
+//!   4. The studio checks generalize worked - State.ini saying
+//!      IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE, Microsoft's record of it - before it makes the
+//!      VM a template. Sysprep_succeeded.tag is only reported: the System Preparation Tool
+//!      that audit mode opens by itself deletes it when it starts.
 //!
 //! A VM's first boot: the gold's specialize pass runs firstboot.cmd, which finds the VM's
 //! own CD, names the machine and points Setup at the VM's answer file for oobeSystem
@@ -91,7 +92,9 @@ fn is_server(img: &WimImage) -> bool {
 
 /// The Hyper-V studio's image ids: ws2025-datacenter-core, w11-enterprise.
 pub fn image_id(img: &WimImage) -> String {
-    if let Some(year) = server_year(&img.build).filter(|_| is_server(img)) {
+    if is_server(img) {
+        // A server build that is no release yet is Windows Server vNext (the Insider flights).
+        let year = server_year(&img.build).map(|y| y.to_string()).unwrap_or_else(|| "vnext".into());
         let ed = img.edition_id.trim_start_matches("Server").to_lowercase();
         let kind = if img.installation_type == "Server Core" { "core" } else { "desktop" };
         format!("ws{year}-{ed}-{kind}")
@@ -233,6 +236,8 @@ fn virtio_dir(img: &WimImage) -> &'static str {
         (Some(2022), true) => "2k22",
         (Some(2019), true) => "2k19",
         (Some(2016), true) => "2k16",
+        // vNext: the newest server folder virtio-win has.
+        (None, true) => "2k25",
         _ => "w11",
     }
 }
@@ -760,11 +765,15 @@ for /l %%n in (0,1,7) do (
 if not exist W:\Windows\System32\config\SYSTEM (echo PVS-NO-WINDOWS > COM1 & goto :fail)
 echo PVS-PASS2-START > COM1
 type W:\Windows\Setup\State\State.ini > COM1 2>&1
-rem Sysprep can exit 0 and still fail; the tag and the image state are the proof.
-if not exist W:\Windows\System32\Sysprep\Sysprep_succeeded.tag (echo PVS-NO-SYSPREP-TAG > COM1 & goto :fail)
+rem Sysprep can exit 0 and still fail; the image state is the proof (Microsoft's "Windows Setup
+rem States"). The tag is not documented, and the System Preparation Tool that audit mode opens
+rem by itself deletes it when it starts - so it is only reported, never a reason to fail.
+if exist W:\Windows\System32\Sysprep\Sysprep_succeeded.tag (echo PVS-SYSPREP-TAG > COM1) else (echo PVS-SYSPREP-TAG-GONE > COM1)
 rem ImageState read by cmd itself: this WinPE has no findstr.exe.
 set IMGSTATE=
 for /f "usebackq tokens=1,* delims==" %%a in ("W:\Windows\Setup\State\State.ini") do if /i "%%a"=="ImageState" set IMGSTATE=%%b
+rem Microsoft's example writes the value in quotation marks; the images here do not.
+if defined IMGSTATE set IMGSTATE=%IMGSTATE:"=%
 if /i not "%IMGSTATE%"=="IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE" (echo PVS-NOT-GENERALIZED %IMGSTATE% > COM1 & goto :fail)
 echo PVS-GENERALIZED > COM1
 {edition}call :dism /Image:W:\ /Set-UserLocale:{locale} /Set-SysLocale:{locale} /Set-InputLocale:{input} || goto :fail
@@ -1182,7 +1191,7 @@ pub(crate) async fn run_pass(
                         // One line per feature, capability or app is detail: the caller sums
                         // them up per Server Manager feature. So is a worker's verdict per
                         // update, which the media build words itself.
-                        if ["PVS-FEATURE-", "PVS-CAP-", "PVS-APP-", "PVS-PROV-", "PVS-UPD-OK", "PVS-UPD-FAIL", "PVS-UPD-SKIP", "PVS-STOPPED"].iter().any(|p| part.starts_with(p)) {
+                        if ["PVS-FEATURE-", "PVS-CAP-", "PVS-APP-", "PVS-PROV-", "PVS-UPD-OK", "PVS-UPD-FAIL", "PVS-UPD-SKIP", "PVS-STOPPED"].iter().any(|p| part.starts_with(p)) || part == "PVS-SYSPREP-TAG" {
                             log.debug(crate::markers::text(part)).await;
                         } else {
                             log.line(crate::markers::text(part)).await;
@@ -1233,6 +1242,7 @@ pub fn server_label(image_id: &str) -> Option<String> {
         "desktop" => "Desktop",
         _ => return None,
     };
+    let year = if year == "vnext" { "vNext" } else { year };
     Some(format!("Windows Server {year} {edition} {kind}{suffix}"))
 }
 
@@ -1458,7 +1468,7 @@ pub async fn bake(
         set_boot(pve, node, vmid, "sata0").await?;
         let m = run_pass(pve, log, &mut pr, node, vmid, "pass 2", 30, &pass2_units()).await?;
         if !m.iter().any(|l| l == "PVS-PASS2-OK") {
-            let why = m.iter().find(|l| l.starts_with("PVS-NO-SYSPREP-TAG") || l.starts_with("PVS-NOT-GENERALIZED") || l.starts_with("PVS-EDITION-NOT-CHANGED") || l.ends_with("FAILED")).cloned();
+            let why = m.iter().find(|l| l.starts_with("PVS-NOT-GENERALIZED") || l.starts_with("PVS-EDITION-NOT-CHANGED") || l.ends_with("FAILED")).cloned();
             bail!("pass 2 failed: {}", why.or_else(|| m.last().cloned()).map(|l| crate::markers::text(&l)).unwrap_or_else(|| "nothing on the serial console".into()));
         }
 
@@ -1913,6 +1923,7 @@ mod tests {
     #[test]
     fn server_labels() {
         assert_eq!(server_label("ws2025-datacenter-desktop").as_deref(), Some("Windows Server 2025 Datacenter Desktop"));
+        assert_eq!(server_label("wsvnext-datacenter-core").as_deref(), Some("Windows Server vNext Datacenter Core"));
         assert_eq!(server_label("ws2025-datacenter-az-core").as_deref(), Some("Windows Server 2025 Datacenter Core: Azure Edition"));
         assert_eq!(server_label("ws2022-standard-core").as_deref(), Some("Windows Server 2022 Standard Core"));
         assert_eq!(server_label("w11-enterprise"), None);
@@ -2078,5 +2089,15 @@ mod tests {
         assert_eq!(gold_image_id(&core, "AzureEdition"), "ws2025-datacenter-az-core");
         assert_eq!(gold_image_id(&core, ""), "ws2025-datacenter-core");
         assert!(!virtual_edition_fits("AzureEdition", &img("ServerDatacenter", "Server", "20348")));
+    }
+
+    #[test]
+    fn vnext_and_insider_ids() {
+        // Windows Server vNext (29667) is a server, never Windows 11.
+        assert_eq!(image_id(&img("ServerDatacenter", "Server", "29667")), "wsvnext-datacenter-desktop");
+        assert_eq!(image_id(&img("ServerStandard", "Server Core", "29667")), "wsvnext-standard-core");
+        assert_eq!(virtio_dir(&img("ServerDatacenter", "Server", "29667")), "2k25");
+        // A Canary flight of Windows 11 stays a Windows 11 image.
+        assert_eq!(image_id(&img("Enterprise", "Client", "29683")), "w11-enterprise");
     }
 }

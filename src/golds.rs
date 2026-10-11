@@ -141,7 +141,10 @@ pub fn build_version(g: &GoldRow) -> Vec<u64> {
 /// latest bake.
 /// Windows client releases by base build: 26300 is 26H2. Server builds have no such name
 /// (26100 is Windows Server 2025 there), so only Windows 11 golds get one.
-pub const CLIENT_RELEASES: &[(u64, &str)] = &[(26300, "26H2"), (26200, "25H2"), (26100, "24H2"), (22631, "23H2"), (22621, "22H2"), (22000, "21H2")];
+pub const CLIENT_RELEASES: &[(u64, &str)] = &[(28000, "26H1"), (26300, "26H2"), (26200, "25H2"), (26100, "24H2"), (22631, "23H2"), (22621, "22H2"), (22000, "21H2")];
+
+/// A Windows 11 build that is none of the releases: a Canary, Dev or Beta flight.
+pub const INSIDER: &str = "Insider Preview";
 
 /// A Windows 11 gold's release (25H2, 26H2), from its build.
 pub fn release(g: &GoldRow) -> Option<&'static str> {
@@ -149,7 +152,7 @@ pub fn release(g: &GoldRow) -> Option<&'static str> {
         return None;
     }
     let major = build_version(g).first().copied()?;
-    CLIENT_RELEASES.iter().find(|(b, _)| *b == major).map(|(_, r)| *r)
+    Some(CLIENT_RELEASES.iter().find(|(b, _)| *b == major).map(|(_, r)| *r).unwrap_or(INSIDER))
 }
 
 /// The gold a VM builds from: a pinned one, else the newest build of its image - in its
