@@ -1880,12 +1880,12 @@ pub(crate) async fn windows_bake_job(app: AppState, log: crate::jobs::JobLog, gi
         if pe.node != p.node {
             anyhow::bail!("the WinPE was built on {}, the bake runs on {} - rebuild it there under Settings", pe.node, p.node);
         }
-        // [insider-iakerb] Only an Insider ISO built under Media with a build that is no release.
+        // A Windows Insider gold has no guest agent: its VMs are for a look at a preview.
         let isos: Vec<crate::media::MediaIso> = settings::load(&app.db, "media_isos").await.unwrap_or_default();
         let product = isos.iter().find(|i| i.volid == opt.iso).and_then(|i| crate::uup::product(&i.product));
-        let insider = windows::insider_image(&img, product);
-        if insider {
-            log.line("Windows Insider build: IAKerb off for the audit boot, back to Windows' default before the gold is sealed").await;
+        let agent = !windows::insider_image(&img, product);
+        if !agent {
+            log.line("Windows Insider build: no guest agent - its VMs deploy through the WinPE deploy pass and are not followed once they start").await;
         }
         windows::bake(
             windows::WinBake { pve: &pve, db: &db, log: &log, work: &work },
@@ -1897,7 +1897,7 @@ pub(crate) async fn windows_bake_job(app: AppState, log: crate::jobs::JobLog, gi
             &virtio_volid,
             &release,
             &iso_sha256,
-            insider,
+            agent,
         )
         .await
     }

@@ -90,10 +90,10 @@ fn is_server(img: &WimImage) -> bool {
     img.installation_type.starts_with("Server")
 }
 
-/// [insider-iakerb] A Windows Insider image: its ISO was built under Media from an Insider
-/// product (Windows 11 Canary, Dev/Beta, Windows Server vNext) AND its build is no release
-/// (Windows Server 2016-2025, the Windows 11 releases). Both, so an unknown build or an ISO
-/// the studio did not build never counts - nothing here may reach a released Windows.
+/// A Windows Insider image: its ISO was built under Media from an Insider product (Windows
+/// 11 Canary, Dev/Beta, Windows Server vNext) AND its build is no release (Windows Server
+/// 2016-2025, the Windows 11 releases). Both, so an unknown build or an ISO the studio did
+/// not build never counts - a released Windows is always baked as it was.
 pub fn insider_image(img: &WimImage, iso_product: Option<&crate::uup::Product>) -> bool {
     let release = if is_server(img) {
         server_year(&img.build).is_some()
@@ -488,25 +488,8 @@ pub fn audit_unattend() -> String {
 }
 
 /// WinPE pass 1: partition, apply, drivers, boot files, the audit-mode answer file.
-pub fn pe1_cmd(img: &WimImage, insider: bool) -> String {
+pub fn pe1_cmd(img: &WimImage) -> String {
     let vdir = virtio_dir(img);
-    // [insider-iakerb] Insider images only: IAKerb, on by default in the Insider builds since
-    // June 2026 (Microsoft's "Reducing NTLM dependency: IAKerb and LocalKDC"), off for the
-    // audit boot - MSDTC's authenticated RPC to its own name finds no KDC on a workgroup
-    // machine there, and COM+ (the guest agent's VSS provider) fails with 0x8004E00F.
-    // Released Windows has no IAKerb. Pass 2 deletes the value again.
-    let iakerb = if insider {
-        r#"reg load HKLM\KSYS W:\Windows\System32\config\SYSTEM > COM1 2>&1 || goto :fail
-set IAKERB_BEFORE=none
-for /f "tokens=1,3" %%a in ('reg query "HKLM\KSYS\ControlSet001\Control\Lsa\Kerberos\Parameters" /v DisableIAKerb 2^>nul') do if /i "%%a"=="DisableIAKerb" set IAKERB_BEFORE=%%b
-echo PVS-IAKERB-BEFORE %IAKERB_BEFORE% > COM1
-reg add "HKLM\KSYS\ControlSet001\Control\Lsa\Kerberos\Parameters" /v DisableIAKerb /t REG_DWORD /d 1 /f > COM1 2>&1 || (reg unload HKLM\KSYS > nul 2>&1 & goto :fail)
-reg unload HKLM\KSYS > COM1 2>&1 || goto :fail
-echo PVS-IAKERB-OFF > COM1
-"#
-    } else {
-        ""
-    };
     crlf(&format!(
         r#"@echo off
 rem PVE VM Studio WinPE pass 1: partition, apply, virtio drivers, boot files, the
@@ -582,7 +565,7 @@ rem install.wim can ship this tag, and pass 2 reads it as proof sysprep worked.
 if exist W:\Windows\System32\Sysprep\Sysprep_succeeded.tag del /f /q W:\Windows\System32\Sysprep\Sysprep_succeeded.tag
 mkdir W:\Windows\Panther
 copy /y %SEED%\pvs\audit.xml W:\Windows\Panther\unattend.xml > COM1 2>&1 || goto :fail
-{iakerb}echo PVS-PASS1-OK > COM1
+echo PVS-PASS1-OK > COM1
 goto :eof
 :fail
 echo PVS-PASS1-FAILED > COM1
@@ -593,7 +576,15 @@ echo PVS-PASS1-FAILED > COM1
 
 /// Audit mode, the gold's first boot: virtio drivers and the guest agent, then generalize.
 /// No NIC traffic (the NIC's link is down) - nothing may update between boot and sysprep.
-pub fn audit_cmd(insider: bool) -> String {
+/// `agent`: false for a Windows Insider gold - its VMs are started to look at a preview and
+/// thrown away, and the agent's VSS registration fails on those builds (2026-10-14).
+pub fn audit_cmd(agent: bool) -> String {
+    let qga = if agent {
+        r"msiexec /i %VIO%\guest-agent\qemu-ga-x86_64.msi /qn /norestart /l*v C:\Windows\Temp\qemu-ga.log
+echo PVS-QGA %ERRORLEVEL% > COM1"
+    } else {
+        "echo PVS-NO-QGA > COM1"
+    };
     crlf(&format!(
         r#"@echo off
 rem PVE VM Studio, audit mode. Installing the drivers here binds each one to a real device;
@@ -606,14 +597,7 @@ for %%d in (D E F G H I J K L M N O P Q R S T U V W Y Z) do if exist %%d:\virtio
 echo PVS-AUDIT-START VIO=%VIO% > COM1
 msiexec /i %VIO%\virtio-win-gt-x64.msi /qn /norestart /l*v C:\Windows\Temp\virtio-win-gt.log
 echo PVS-VIRTIO %ERRORLEVEL% > COM1
-rem [qga-diag] Insider images (only theirs carry the next line): the IAKerb setting pass 1
-rem wrote, as this boot sees it.
-{iakerb_call}msiexec /i %VIO%\guest-agent\qemu-ga-x86_64.msi /qn /norestart /l*v C:\Windows\Temp\qemu-ga.log
-set QGA=%ERRORLEVEL%
-echo PVS-QGA %QGA% > COM1
-rem [qga-diag] A failed install: the MSI log's deciding lines.
-if not "%QGA%"=="0" call :qgalog C:\Windows\Temp\qemu-ga.log QGA-LOG
-call :svc QEMU-GA QGA-SERVICE
+{qga}
 sc qc vioscsi > COM1 2>&1
 if not exist C:\Windows\PVS mkdir C:\Windows\PVS
 copy /y %SEED%\pvs\firstboot.cmd C:\Windows\PVS\firstboot.cmd > COM1 2>&1
@@ -622,55 +606,7 @@ rem No /unattend, as in New-Vhdx: a cached answer file that is in use is not rep
 rem one, so the audit-mode file would survive into the gold. Pass 2 writes the gold's
 rem answer file offline instead.
 C:\Windows\System32\Sysprep\Sysprep.exe /generalize /oobe /mode:vm /shutdown
-exit /b 0
-
-rem [qga-diag] A service's state on COM1: PVS-<marker> <service> <state>, "missing" when there is none.
-:svc
-set ST=missing
-for /f "tokens=4" %%a in ('sc query %1 2^>nul ^| findstr /c:"STATE"') do set ST=%%a
-echo PVS-%2 %1 %ST% > COM1
-goto :eof
-
-rem [qga-diag] An MSI log's (%1) error lines on COM1 as PVS-<%2>, at most 20 (type reads
-rem its UTF-16 too). Delayed expansion keeps the lines' own < > & | from being read as
-rem commands.
-:qgalog
-setlocal EnableDelayedExpansion
-set N=0
-for /f "delims=" %%l in ('type %1 ^| findstr /i /c:"returned actual error code" /c:"Return value 3" /c:"Error 1"') do (
-  set /a N+=1
-  if !N! leq 20 (
-    set "L=%%l"
-    echo PVS-%2 !L! > COM1
-  )
-)
-endlocal
-goto :eof
-
-rem [qga-diag] Insider images only: DisableIAKerb as Windows reads it in this boot.
-:iakerb
-set D=C:\Windows\Temp\pvs-diag.txt
-reg query "HKLM\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters" /v DisableIAKerb > %D% 2>&1
-findstr /i "DisableIAKerb" %D% > nul || echo DisableIAKerb not set > %D%
-call :emit QGA-IAKERB 3
-goto :eof
-
-rem [qga-diag] The diagnostics file's lines on COM1 as PVS-<marker> <line>, at most <count> (type
-rem reads a UTF-16 file too).
-:emit
-setlocal EnableDelayedExpansion
-set N=0
-for /f "delims=" %%l in ('type "%D%"') do (
-  set /a N+=1
-  if !N! leq %2 (
-    set "L=%%l"
-    echo PVS-%1 !L! > COM1
-  )
-)
-endlocal
-goto :eof
-"#,
-        iakerb_call = if insider { "call :iakerb\n" } else { "" },
+"#
     ))
 }
 
@@ -797,28 +733,8 @@ echo PVS-POLICY power > COM1
 
 /// WinPE pass 2, on the generalized gold: prove generalize worked, then locale, time zone,
 /// policies and the product key - offline, after generalize, in New-Vhdx's order.
-pub fn pe2_cmd(img: &WimImage, region: &WinRegion, features: &[String], edition_target: Option<&str>, iakerb_before: Option<Option<u32>>) -> String {
+pub fn pe2_cmd(img: &WimImage, region: &WinRegion, features: &[String], edition_target: Option<&str>) -> String {
     let client = img.installation_type == "Client";
-    // [insider-iakerb] DisableIAKerb back to exactly what pass 1 found in the image (None:
-    // not an Insider image, nothing to do; Some(None): it was not there, so it goes; Some(v):
-    // v again) - and read back, the bake fails if it is not. This WinPE has no findstr.
-    let key = r"HKLM\KSYS\ControlSet001\Control\Lsa\Kerberos\Parameters";
-    let leave = r"(echo PVS-IAKERB-LEFT > COM1 & reg unload HKLM\KSOFT > nul 2>&1 & reg unload HKLM\KSYS > nul 2>&1 & goto :fail)";
-    let iakerb = match iakerb_before {
-        None => String::new(),
-        Some(None) => format!(
-            "reg delete \"{key}\" /v DisableIAKerb /f > COM1 2>&1\n\
-             reg query \"{key}\" /v DisableIAKerb > nul 2>&1 && {leave}\n\
-             echo PVS-IAKERB-RESTORED not set > COM1\n"
-        ),
-        Some(Some(v)) => format!(
-            "reg add \"{key}\" /v DisableIAKerb /t REG_DWORD /d {v} /f > COM1 2>&1\n\
-             set IAKERB_NOW=\n\
-             for /f \"tokens=1,3\" %%a in ('reg query \"{key}\" /v DisableIAKerb 2^>nul') do if /i \"%%a\"==\"DisableIAKerb\" set IAKERB_NOW=%%b\n\
-             if /i not \"%IAKERB_NOW%\"==\"0x{v:x}\" {leave}\n\
-             echo PVS-IAKERB-RESTORED 0x{v:x} > COM1\n"
-        ),
-    };
     let locale = &region.locale;
     let input = input_locale(if region.keyboard.is_empty() { locale } else { &region.keyboard });
     let tz = &region.timezone;
@@ -886,7 +802,7 @@ call :dism /Image:W:\ /Set-TimeZone:"{tz}" || goto :fail
 echo PVS-TIMEZONE {tz} > COM1
 reg load HKLM\KSYS W:\Windows\System32\config\SYSTEM > COM1 2>&1 || goto :fail
 reg load HKLM\KSOFT W:\Windows\System32\config\SOFTWARE > COM1 2>&1 || goto :fail
-{iakerb}{policies}rem The answer file: whatever audit mode left cached goes, the pointer Setup searches
+{policies}rem The answer file: whatever audit mode left cached goes, the pointer Setup searches
 rem first goes, and the gold's own file takes Panther's place.
 reg delete "HKLM\KSYS\Setup" /v UnattendFile /f >nul 2>&1
 reg unload HKLM\KSOFT > COM1 2>&1
@@ -1431,7 +1347,7 @@ pub async fn bake(
     virtio_volid: &str,
     virtio_release: &str,
     iso_sha256: &str,
-    insider: bool,
+    agent: bool,
 ) -> Result<()> {
     let (pve, log) = (b.pve, b.log);
     let node = p.node.as_str();
@@ -1458,9 +1374,9 @@ pub async fn bake(
             &s1,
             "PVSSEED",
             &[
-                ("pvs/pe.cmd", &pe1_cmd(img, insider)),
+                ("pvs/pe.cmd", &pe1_cmd(img)),
                 ("pvs/audit.xml", &audit_unattend()),
-                ("pvs/audit.cmd", &audit_cmd(insider)),
+                ("pvs/audit.cmd", &audit_cmd(agent)),
                 ("pvs/firstboot.cmd", &firstboot_cmd()),
             ],
         )
@@ -1498,7 +1414,8 @@ pub async fn bake(
             ("serial0", "socket"),
             ("net0", net0),
             // fstrim_cloned_disks: thin storage gets the clone's freed blocks back (PVE's qm guide).
-            ("agent", "enabled=1,fstrim_cloned_disks=1"),
+            // A gold without the agent (Windows Insider) leaves PVE nothing to wait for.
+            ("agent", if agent { "enabled=1,fstrim_cloned_disks=1" } else { "enabled=0" }),
             // Windows expects a local-time RTC.
             ("localtime", 1),
             ("boot", "order=sata0"),
@@ -1526,21 +1443,6 @@ pub async fn bake(
         if !m.iter().any(|l| l == "PVS-PASS1-OK") {
             bail!("pass 1 failed: {}", m.last().map(|l| crate::markers::text(l)).unwrap_or_else(|| "nothing on the serial console".into()));
         }
-        // [insider-iakerb] What the image had before pass 1 changed it - pass 2 puts exactly
-        // that back. An Insider image without the marker is not baked on: nothing is assumed.
-        let iakerb_before: Option<Option<u32>> = if insider {
-            let raw = m.iter().find_map(|l| l.strip_prefix("PVS-IAKERB-BEFORE ").map(|v| v.trim().to_owned()));
-            match raw.as_deref() {
-                Some("none") => Some(None),
-                Some(v) => match u32::from_str_radix(v.trim_start_matches("0x").trim_start_matches("0X"), 16) {
-                    Ok(n) => Some(Some(n)),
-                    Err(_) => bail!("pass 1 reported DisableIAKerb as '{v}' - not a value the studio can restore"),
-                },
-                None => bail!("pass 1 did not report DisableIAKerb's state - not baking on without knowing what to restore"),
-            }
-        } else {
-            None
-        };
         // Asked now, before audit mode has cost twenty minutes: an index that cannot become
         // the edition will not become it after sysprep either.
         let targets: Vec<String> = m.iter().filter_map(|l| l.strip_prefix("PVS-TARGET ").map(|t| t.trim().to_owned())).collect();
@@ -1579,7 +1481,7 @@ pub async fn bake(
             b.work,
             &s2,
             "PVSSEED",
-            &[("pvs/pe.cmd", &pe2_cmd(img, &opt.region, &opt.features, edition_target.as_deref(), iakerb_before)), ("pvs/gold.xml", &gold_unattend())],
+            &[("pvs/pe.cmd", &pe2_cmd(img, &opt.region, &opt.features, edition_target.as_deref())), ("pvs/gold.xml", &gold_unattend())],
         )
         .await?;
         seed::detach(pve, node, vmid, "sata3").await?;
@@ -1675,6 +1577,7 @@ pub async fn bake(
                     "sourceMediaSha256": iso_sha256,
                     "installationType": img.installation_type,
                     "virtio": virtio_release,
+                    "guestAgent": agent,
                 }),
                 node,
                 &p.disk_storage,
@@ -2211,36 +2114,18 @@ mod tests {
         assert!(!virtual_edition_fits("AzureEdition", &img("ServerDatacenter", "Server", "20348")));
     }
 
-    // [insider-iakerb] Never a released Windows: both the Insider ISO and a build that is no
-    // release, and the scripts of a released Windows carry none of it.
+    /// Only an Insider ISO with a build that is no release bakes without the agent.
     #[test]
     fn insider_only() {
         let canary = crate::uup::product("w11-canary");
         let vnext = crate::uup::product("ws-insider");
-        let stable = crate::uup::product("ws2025");
         assert!(insider_image(&img("Professional", "Client", "29683"), canary));
         assert!(insider_image(&img("ServerDatacenter", "Server Core", "29683"), vnext));
-        assert!(!insider_image(&img("ServerDatacenter", "Server Core", "26100"), vnext), "a release build is never Insider");
-        assert!(!insider_image(&img("Professional", "Client", "26200"), canary), "a release build is never Insider");
-        assert!(!insider_image(&img("ServerDatacenter", "Server Core", "29683"), stable), "not from an Insider ISO");
+        assert!(!insider_image(&img("ServerDatacenter", "Server Core", "26100"), vnext), "a release build");
+        assert!(!insider_image(&img("Professional", "Client", "26200"), canary), "a release build");
+        assert!(!insider_image(&img("ServerDatacenter", "Server Core", "29683"), crate::uup::product("ws2025")), "not an Insider ISO");
         assert!(!insider_image(&img("Professional", "Client", "29683"), None), "an ISO the studio did not build");
-        let ws = img("ServerDatacenter", "Server Core", "26100");
-        let region = WinRegion { locale: "en-US".into(), keyboard: String::new(), timezone: "UTC".into() };
-        for script in [pe1_cmd(&ws, false), audit_cmd(false), pe2_cmd(&ws, &region, &[], None, None)] {
-            assert!(!script.contains("call :iakerb"), "an Insider call in a released Windows' script");
-        }
-        assert!(pe1_cmd(&ws, false).find("DisableIAKerb").is_none());
-        assert!(pe2_cmd(&ws, &region, &[], None, None).find("DisableIAKerb").is_none());
-        let c = img("Professional", "Client", "29683");
-        assert!(pe1_cmd(&c, true).contains("/v DisableIAKerb /t REG_DWORD /d 1"));
-        assert!(pe1_cmd(&c, true).contains("PVS-IAKERB-BEFORE"));
-        // Not there before: deleted and checked gone. There before: that value again, read back.
-        let gone = pe2_cmd(&c, &region, &[], None, Some(None));
-        assert!(gone.contains("reg delete") && gone.contains("PVS-IAKERB-LEFT"));
-        let zero = pe2_cmd(&c, &region, &[], None, Some(Some(0)));
-        assert!(zero.contains("/v DisableIAKerb /t REG_DWORD /d 0 /f") && zero.contains("\"0x0\"") && !zero.contains("reg delete \"HKLM\\KSYS\\ControlSet001\\Control\\Lsa"));
-        assert!(audit_cmd(true).contains("call :iakerb"));
-        assert!(!audit_cmd(true).contains("MSDTC"), "MSDTC is left as Windows has it");
+        assert!(audit_cmd(true).contains("qemu-ga-x86_64.msi") && !audit_cmd(false).contains("qemu-ga"));
     }
 
     #[test]

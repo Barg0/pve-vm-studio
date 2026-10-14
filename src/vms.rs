@@ -360,6 +360,9 @@ async fn deploy_inner(
     }
     let win = gold.os == "windows";
     let manifest: serde_json::Value = serde_json::from_str(&gold.manifest).unwrap_or_default();
+    // A gold baked without the guest agent (Windows Insider): the VM is started and not
+    // followed - nothing in it can report back. Golds from before the flag have the agent.
+    let agent = !win || manifest["guestAgent"].as_bool() != Some(false);
     let img = if win {
         windows::check_name(&spec.name)?;
         None
@@ -561,6 +564,11 @@ async fn deploy_inner(
 
     // ---- Windows: the WinPE deploy pass, when WinPE can boot here ----
     let pass_media = if win { deploy_pass_media(pve, db, log, &node, &manifest).await? } else { None };
+    // Without the agent nobody learns when the first boot is through, so the seed (with the
+    // passwords) must be gone before it: only the deploy pass takes everything off first.
+    if !agent && pass_media.is_none() {
+        bail!("this gold has no guest agent (Windows Insider) - it deploys only through the WinPE deploy pass, which cannot run here (see above)");
+    }
 
     // The join: in specialize when the answer file reaches it (the deploy pass writes it
     // into Panther), as the design asks; on the seed-CD path the VM's file only reaches
@@ -819,24 +827,30 @@ async fn deploy_inner(
         log.ok("CDs, seed disk and serial port removed").await;
         windows::set_boot(pve, &node, vmid, "scsi0").await?;
 
-        pve.vm_action(&node, vmid, "start").await?;
-        pr.stage(50.0, 90.0, "first boot");
-        log.run("First boot: specialize names the VM, OOBE takes its answer file").await;
-        windows::follow_first_boot(pve, log, &mut pr, &node, vmid).await?;
-        if m.iter().any(|l| l.contains("-FAIL ")) {
-            deploy_pass_dism_errors(pve, log, &node, vmid).await;
-        }
-        if guest_provision_result(pve, db, log, vm_id, &node, vmid).await? {
-            pr.stage(90.0, 93.0, "restarting");
-            log.run(format!("Restarting - {} asked for it", restart_reason(&spec))).await;
-            pve.run_task(
-                &format!("/nodes/{}/qemu/{vmid}/status/shutdown", crate::pve::enc(&node)),
-                form![("timeout", "300"), ("forceStop", "1")],
-                |_| {},
-            )
-            .await
-            .context("shutting the VM down")?;
+        if !agent {
+            pve.vm_set(&node, vmid, form![("agent", "enabled=0")]).await?;
             pve.vm_action(&node, vmid, "start").await?;
+            log.ok("Started - no guest agent in this gold (Windows Insider), so the studio does not follow the first boot").await;
+        } else {
+            pve.vm_action(&node, vmid, "start").await?;
+            pr.stage(50.0, 90.0, "first boot");
+            log.run("First boot: specialize names the VM, OOBE takes its answer file").await;
+            windows::follow_first_boot(pve, log, &mut pr, &node, vmid).await?;
+            if m.iter().any(|l| l.contains("-FAIL ")) {
+                deploy_pass_dism_errors(pve, log, &node, vmid).await;
+            }
+            if guest_provision_result(pve, db, log, vm_id, &node, vmid).await? {
+                pr.stage(90.0, 93.0, "restarting");
+                log.run(format!("Restarting - {} asked for it", restart_reason(&spec))).await;
+                pve.run_task(
+                    &format!("/nodes/{}/qemu/{vmid}/status/shutdown", crate::pve::enc(&node)),
+                    form![("timeout", "300"), ("forceStop", "1")],
+                    |_| {},
+                )
+                .await
+                .context("shutting the VM down")?;
+                pve.vm_action(&node, vmid, "start").await?;
+            }
         }
     } else if win {
         pve.vm_action(&node, vmid, "start").await?;
@@ -877,7 +891,7 @@ async fn deploy_inner(
 
     // ---- 5. running ----
     let mut ip = spec.ip.clone();
-    if win || spec.start_after {
+    if agent && (win || spec.start_after) {
         pr.stage(93.0, 100.0, "waiting for an address");
         if !win {
             pve.vm_action(&node, vmid, "start").await?;
@@ -894,7 +908,7 @@ async fn deploy_inner(
             log.warn("Running, but the guest agent reported no address yet").await;
         }
     }
-    if spec.hotpatch && win {
+    if spec.hotpatch && win && agent {
         hotpatch_check(pve, db, log, vm_id, &node, vmid, &gold.image_id).await;
     }
     // Built: PVE refuses to remove it, or its disks, until protection is taken off.
