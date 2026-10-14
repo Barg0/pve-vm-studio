@@ -130,7 +130,7 @@ async fn run_ok(prog: &str, args: &[&str]) -> bool {
 
 /// The KB a CompDB file is named for: LCUCompDB_KB5129242.xml.cab -> KB5129242.
 fn compdb_kb(name: &str) -> Option<String> {
-    let at = name.find("_KB")? + 1;
+    let at = name.to_ascii_uppercase().find("_KB")? + 1;
     let digits: String = name[at + 2..].chars().take_while(|c| c.is_ascii_digit()).collect();
     (!digits.is_empty()).then(|| format!("KB{digits}"))
 }
@@ -152,7 +152,9 @@ pub async fn read_meta(cab: &Path, work: &Path) -> Meta {
     for name in names {
         let path = dir.join(&name);
         let Some(kb) = compdb_kb(&name) else { continue };
-        if name.starts_with("LCUCompDB_") || name.starts_with("outer.AggregatedMetadata_") {
+        // Canary sets name them in lower case behind a '_' (_desktoptargetcompdb_….xml.cab).
+        let low = name.trim_start_matches('_').to_ascii_lowercase();
+        if low.starts_with("lcucompdb_") || low.starts_with("outer.aggregatedmetadata_") {
             // LCUCompDB_KB….xml.cab (a cab of the XML), or an outer cab holding LCUCompDB_KB….xml.
             let x = dir.join(format!("x-{kb}"));
             let _ = tokio::fs::create_dir_all(&x).await;
@@ -161,7 +163,8 @@ pub async fn read_meta(cab: &Path, work: &Path) -> Meta {
             {
                 while let Ok(Some(e)) = xr.next_entry().await {
                     let n = e.file_name().to_string_lossy().into_owned();
-                    if n.starts_with("LCUCompDB_") && n.ends_with(".xml") {
+                    let nl = n.trim_start_matches('_').to_ascii_lowercase();
+                    if nl.starts_with("lcucompdb_") && nl.ends_with(".xml") {
                         let raw = tokio::fs::read(e.path()).await.unwrap_or_default();
                         if let Some(l) = parse_lcu_compdb(&String::from_utf8_lossy(&raw)) {
                             m.lcus.insert(kb.clone(), l);
@@ -170,11 +173,11 @@ pub async fn read_meta(cab: &Path, work: &Path) -> Meta {
                 }
             }
             m.kinds.insert(kb.clone(), Kind::Cumulative);
-            if name.starts_with("LCUCompDB_") {
+            if low.starts_with("lcucompdb_") {
                 m.lcu_db.insert(kb, path);
             }
-        } else if name.starts_with("SSUCompDB_") {
-            if !name.contains("-express") {
+        } else if low.starts_with("ssucompdb_") {
+            if !low.contains("-express") {
                 // The file it names: only that one goes into an .msu beside it (the converter's :doSSU).
                 let x = dir.join(format!("ssu-{kb}"));
                 let _ = tokio::fs::create_dir_all(&x).await;
@@ -191,11 +194,11 @@ pub async fn read_meta(cab: &Path, work: &Path) -> Meta {
                 }
                 m.ssu_db = Some((path, file));
             }
-        } else if name.starts_with("SafeOSDUCompDB_") {
+        } else if low.starts_with("safeosducompdb_") {
             m.kinds.insert(kb, Kind::SafeOs);
-        } else if name.starts_with("SetupDUCompDB_") {
+        } else if low.starts_with("setupducompdb_") {
             m.kinds.insert(kb, Kind::Setup);
-        } else if name.starts_with("EKBUpdateCompDB_") {
+        } else if low.starts_with("ekbupdatecompdb_") {
             m.kinds.insert(kb, Kind::Enablement);
         }
     }

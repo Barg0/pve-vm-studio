@@ -181,11 +181,12 @@ pub fn plan(app_xml: &str, editions: &[Option<String>], catalog: &[uup::File]) -
 }
 
 /// One CompDB XML out of a build's AggregatedMetadata.cab (each sits in a cab of its own
-/// inside it), or None when the build has none by that name.
+/// inside it), or None when the build has none by that name. Canary sets name them in lower
+/// case behind a '_' (_desktoptargetcompdb_app_neutral.xml.cab, 29683.1000).
 pub async fn compdb(log: &JobLog, agg: &Path, tmp: &Path, name: &str) -> Result<Option<String>> {
     let list = tokio::process::Command::new("cabextract").arg("-l").arg(agg).output().await.context("running cabextract")?;
     let want = format!("{name}.xml.cab").to_lowercase();
-    let Some(inner) = String::from_utf8_lossy(&list.stdout).lines().map(|l| l.rsplit('|').next().unwrap_or("").trim().to_owned()).find(|n| n.to_lowercase() == want) else {
+    let Some(inner) = String::from_utf8_lossy(&list.stdout).lines().map(|l| l.rsplit('|').next().unwrap_or("").trim().to_owned()).find(|n| n.trim_start_matches('_').to_lowercase() == want) else {
         return Ok(None);
     };
     let _ = tokio::fs::remove_dir_all(tmp).await;
@@ -193,10 +194,10 @@ pub async fn compdb(log: &JobLog, agg: &Path, tmp: &Path, name: &str) -> Result<
     let tmp_s = tmp.display().to_string();
     run(log, "cabextract", &["-q", "-F", &inner, "-d", &tmp_s, &agg.display().to_string()]).await?;
     run(log, "cabextract", &["-q", "-d", &tmp_s, &tmp.join(&inner).display().to_string()]).await?;
-    let xml_name = inner.trim_end_matches(".cab").trim_end_matches(".CAB").to_lowercase();
+    let xml_name = inner.trim_start_matches('_').trim_end_matches(".cab").trim_end_matches(".CAB").to_lowercase();
     let mut rd = tokio::fs::read_dir(tmp).await?;
     while let Some(e) = rd.next_entry().await? {
-        if e.file_name().to_string_lossy().to_lowercase() == xml_name {
+        if e.file_name().to_string_lossy().trim_start_matches('_').to_lowercase() == xml_name {
             let raw = tokio::fs::read(e.path()).await?;
             let _ = tokio::fs::remove_dir_all(tmp).await;
             return Ok(Some(String::from_utf8_lossy(&raw).trim_start_matches('\u{feff}').to_owned()));

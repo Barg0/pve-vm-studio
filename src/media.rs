@@ -1132,6 +1132,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         // What each update is, where it goes and in which order (winupdates.rs): Microsoft's
         // metadata names each one where the set has it (24H2 and later, Windows 11 23H2) and
         // links the cumulative chain by its builds; each package's own update.mum says the rest.
+        let has_agg = files.iter().any(|f| is_aggregated(&f.name));
         let meta = match files.iter().find(|f| is_aggregated(&f.name)) {
             Some(f) => crate::winupdates::read_meta(&dl.join(&f.name), &dir.join("meta")).await,
             None => crate::winupdates::Meta::default(),
@@ -1140,6 +1141,8 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         let mut plan = crate::winupdates::plan_set(&dl, &upd_files, &meta).await;
         log.run(if meta.present {
             "Update plan, from Microsoft's metadata and each package's own manifest".to_owned()
+        } else if has_agg {
+            "Update plan, from each package's own manifest (Microsoft's metadata names no update in this set)".to_owned()
         } else {
             "Update plan, from each package's own manifest (the set has no AggregatedMetadata)".to_owned()
         })
@@ -1301,7 +1304,14 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                     extra.frameworks = plan.frameworks.clone();
                     extra.apps = plan.per_image.clone();
                     apps_root = Some((root, want));
+                } else {
+                    log.line("No inbox app list in this set's metadata - the images keep only what their edition carries").await;
                 }
+            } else {
+                log.line("The set has no AggregatedMetadata - no inbox app list, the images keep only what their edition carries").await;
+            }
+            if !extra.edge {
+                log.line("The set has no Edge.wim - Microsoft Edge is not added").await;
             }
         }
         let has_apps = extra.apps.iter().any(|a| !a.is_empty());
