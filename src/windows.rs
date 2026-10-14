@@ -584,6 +584,7 @@ msiexec /i %VIO%\guest-agent\qemu-ga-x86_64.msi /qn /norestart /l*v C:\Windows\T
 set QGA=%ERRORLEVEL%
 echo PVS-QGA %QGA% > COM1
 if not "%QGA%"=="0" call :qgalog
+if not "%QGA%"=="0" call :dtcdiag
 call :svc QEMU-GA QGA-SERVICE
 sc qc vioscsi > COM1 2>&1
 if not exist C:\Windows\PVS mkdir C:\Windows\PVS
@@ -612,6 +613,42 @@ for /f "delims=" %%l in ('type C:\Windows\Temp\qemu-ga.log ^| findstr /i /c:"ret
   if !N! leq 20 (
     set "L=%%l"
     echo PVS-QGA-LOG !L! > COM1
+  )
+)
+endlocal
+goto :eof
+
+rem After a failed install, still diagnostics only: MSDTC (COM+ answers 0x8004E00F,
+rem CONTEXT_E_TMNOTAVAILABLE, when it cannot reach it) - its configuration, one start with
+rem its answer and state, and the newest entries MSDTC, COM+ and the Service Control
+rem Manager wrote about it.
+:dtcdiag
+set D=C:\Windows\Temp\pvs-diag.txt
+sc qc MSDTC > %D% 2>&1
+call :emit QGA-DTC-CONFIG 20
+sc start MSDTC > %D% 2>&1
+echo PVS-QGA-DTC-START exit code %ERRORLEVEL% > COM1
+call :emit QGA-DTC-START 20
+ping -n 6 127.0.0.1 > nul
+call :svc MSDTC QGA-DTC-AFTER
+wevtutil qe Application /q:"*[System[Provider[@Name='MSDTC' or @Name='MSDTC 2' or @Name='MSDTC Client' or @Name='MSDTC Client 2' or @Name='COM+']]]" /c:6 /rd:true /f:text > %D% 2>&1
+call :emit QGA-DTC-APPLOG 60
+wevtutil qe System /q:"*[System[Provider[@Name='Service Control Manager']]]" /c:40 /rd:true /f:text > %D% 2>&1
+type %D% | findstr /i /c:"Event ID" /c:"Date:" /c:"Distributed Transaction" /c:"MSDTC" /c:"COM+" > %D%.f 2>&1
+move /y %D%.f %D% > nul
+call :emit QGA-DTC-SCM 40
+goto :eof
+
+rem The diagnostics file's lines on COM1 as PVS-<marker> <line>, at most <count> (type
+rem reads a UTF-16 file too).
+:emit
+setlocal EnableDelayedExpansion
+set N=0
+for /f "delims=" %%l in ('type "%D%"') do (
+  set /a N+=1
+  if !N! leq %2 (
+    set "L=%%l"
+    echo PVS-%1 !L! > COM1
   )
 )
 endlocal
