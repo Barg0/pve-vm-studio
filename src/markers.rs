@@ -19,21 +19,20 @@ const TEXT: &[(&str, &str)] = &[
     ("TARGET", "Edition target"),
     ("EDITION", "Edition set to"),
     ("EDITION-NOT-CHANGED", "Edition not changed, still"),
+    // [insider-iakerb] Windows Insider images only.
+    ("IAKERB-BEFORE", "DisableIAKerb in the image before"),
+    ("IAKERB-OFF", "Insider build: IAKerb off for the audit boot"),
+    ("IAKERB-RESTORED", "DisableIAKerb back as the image had it"),
+    ("IAKERB-LEFT", "IAKerb setting still in the image - the gold is not sealed"),
     ("PASS1-OK", "Pass 1 done"),
     ("PASS1-FAILED", "Pass 1 failed"),
     ("AUDIT-START", "Audit mode started"),
     ("VIRTIO", "virtio drivers installed, exit code"),
     ("QGA", "QEMU guest agent installed, exit code"),
     // [qga-diag] Guest agent diagnostics on Insider builds - go with them.
-    ("QGA-DEP", "Before the guest agent"),
     ("QGA-LOG", "Guest agent install log"),
     ("QGA-SERVICE", "Guest agent service"),
-    ("QGA-DTC-CONFIG", "MSDTC configuration"),
-    ("QGA-WAIT", "Started and waited for"),
-    ("QGA-DTC-APPLOG", "Application log error/warning"),
-    ("QGA-DTC-SCM", "Service Control Manager on MSDTC/COM+/VSS"),
-    ("QGA-RETRY", "Guest agent install, second try"),
-    ("QGA-RETRY-LOG", "Guest agent second try log"),
+    ("QGA-IAKERB", "IAKerb in audit mode"),
     ("SYSPREP-START", "Sysprep started"),
     ("PASS2-START", "Pass 2: region, policies and key"),
     ("POLICY", "Policy"),
@@ -169,14 +168,13 @@ pub fn text(line: &str) -> String {
             _ => head.to_owned(),
         };
     }
-    // [qga-diag] PVS-QGA-LOG / -RETRY-LOG <MSI log line>: a custom action's code also in
-    // hex, the HRESULT's form.
-    if matches!(key, "QGA-LOG" | "QGA-RETRY-LOG")
+    // [qga-diag] PVS-QGA-LOG <MSI log line>: a custom action's code also in hex, the
+    // HRESULT's form.
+    if key == "QGA-LOG"
         && let Some(at) = args.find("returned actual error code ")
         && let Some(n) = args[at + 27..].split(|c: char| !(c == '-' || c.is_ascii_digit())).next().and_then(|n| n.parse::<i64>().ok())
     {
-        let head = if key == "QGA-LOG" { "Guest agent install log" } else { "Guest agent second try log" };
-        return format!("{head}: {args} (0x{:08X})", n as u32);
+        return format!("Guest agent install log: {args} (0x{:08X})", n as u32);
     }
     let head = match TEXT.iter().find(|(k, _)| *k == key) {
         Some((_, t)) => (*t).to_owned(),
@@ -205,7 +203,6 @@ mod tests {
             text("PVS-QGA-LOG CustomAction RegisterCom returned actual error code -2147164145 (note this may not be 100% accurate if translation happened inside sandbox)"),
             "Guest agent install log: CustomAction RegisterCom returned actual error code -2147164145 (note this may not be 100% accurate if translation happened inside sandbox) (0x8004E00F)"
         );
-        assert_eq!(text("PVS-QGA-DEP MSDTC RUNNING"), "Before the guest agent: MSDTC RUNNING");
         assert_eq!(text("PVS-QGA-SERVICE QEMU-GA missing"), "Guest agent service: QEMU-GA missing");
     }
 
