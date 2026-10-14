@@ -50,7 +50,7 @@ pub struct AutoUpdateSettings {
 
 impl Default for AutoUpdateSettings {
     fn default() -> Self {
-        Self { keep_golds: 2, include_previews: false, keep_winpe_current: true, keep_virtio_current: true, iso_after_window: true, bakes_after_window: true }
+        Self { keep_golds: 1, include_previews: false, keep_winpe_current: true, keep_virtio_current: true, iso_after_window: true, bakes_after_window: true }
     }
 }
 
@@ -691,12 +691,16 @@ struct Pass {
 struct State {
     checked: Option<std::time::Instant>,
     self_checked: Option<std::time::Instant>,
+    /// The window (its end) the last fresh look was for, and when it was.
+    window_checked: Option<(String, std::time::Instant)>,
+    /// FoD slots whose ISO the studio built and whose product has a build not compared yet.
+    fod_due: Vec<String>,
 }
 
 /// One loop for everything the studio does on its own: every minute it takes the outcome
 /// of the runs' finished jobs; every six hours it asks UUP dump; in a maintenance window it
-/// works in a fixed order - preflight, the studio's own update, virtio-win, WinPE, Features
-/// on Demand, then the ISOs one after another with each ISO's bakes beside the next one.
+/// works in a fixed order - fresh data, preflight, the studio's own update, virtio-win, WinPE,
+/// the Features on Demand check, then the ISOs one after another with each ISO's bakes beside the next one.
 pub async fn scheduler(app: AppState) {
     tokio::time::sleep(std::time::Duration::from_secs(90)).await;
     let mut st = State::default();
@@ -789,6 +793,24 @@ async fn tick(app: &AppState, st: &mut State) -> Result<()> {
     let windows: MaintenanceSettings = settings::load(&app.db, "maintenance").await.unwrap_or_default();
     let now = chrono::Local::now().naive_local();
     let end = windows.open_at(now);
+
+    // In a window: fresh data when it opens and every hour after. Microsoft Update first - a
+    // build counts as Patch Tuesday only once it lists it - then UUP dump's builds.
+    if let Some(end) = end {
+        let key = end.format("%Y-%m-%dT%H:%M").to_string();
+        let hour = std::time::Duration::from_secs(3600);
+        if st.window_checked.as_ref().is_none_or(|(k, t)| *k != key || t.elapsed() >= hour) {
+            st.window_checked = Some((key, std::time::Instant::now()));
+            if let Err(e) = crate::wu::refresh(&app.config.data_dir, std::time::Duration::ZERO).await {
+                tracing::warn!("Microsoft Update not asked: {e:#}");
+            }
+            st.checked = Some(std::time::Instant::now());
+            if let Err(e) = check(app).await {
+                tracing::warn!("auto-update check: {e:#}");
+            }
+            st.fod_due = fod_due(app).await;
+        }
+    }
     let mut runs = list_runs(&app.db).await?;
     runs.reverse(); // oldest first
 
@@ -881,25 +903,19 @@ async fn tick(app: &AppState, st: &mut State) -> Result<()> {
         return Ok(());
     }
 
-    // 4. Features on Demand: a release the golds follow that has no FoD ISO gets one. A
-    // download only - it runs beside the first ISO.
-    if open {
-        let fod: crate::fod::FodSettings = settings::load(&app.db, "fod").await.unwrap_or_default();
-        // One FoD ISO per release, with the satellites of every language.
-        for r in runs.iter().filter(|r| r.step == "pending") {
-            let key = fod_key(&r.product);
-            let have = match key {
-                "server" => !fod.server.is_empty(),
-                "server2022" => !fod.server2022.is_empty(),
-                "client" => !fod.client.is_empty(),
-                _ => true,
-            };
-            if !have && !in_flight(&app.db, "fod").await && !tried(&app.db, "fod", "automatic FoD build", "fod", key).await {
-                match api::spawn_fod(app, "automatic FoD build", key).await {
-                    Ok(id) => tracing::info!("automatic FoD build for {key} started (job {id})"),
-                    Err(e) => tracing::warn!("automatic FoD build for {key} could not start: {e:#}"),
-                }
+    // 4. Features on Demand: an ISO the studio built is compared with the newest build's
+    // packages and built again only when they differ (a package Microsoft added later). A
+    // release without one stays without. Beside the ISOs.
+    if open && !in_flight(&app.db, "fod").await {
+        while let Some(key) = st.fod_due.pop() {
+            if tried(&app.db, "fod", "automatic FoD check", "fod", &key).await {
+                continue;
             }
+            match api::spawn_fod(app, "automatic FoD check", &key, true).await {
+                Ok(id) => tracing::info!("automatic FoD check for {key} started (job {id})"),
+                Err(e) => tracing::warn!("automatic FoD check for {key} could not start: {e:#}"),
+            }
+            break;
         }
     }
 
@@ -935,6 +951,31 @@ async fn tick(app: &AppState, st: &mut State) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The FoD slots to compare: an ISO the studio built, and a newest build of its product
+/// other than the one it was last compared with (or built from).
+async fn fod_due(app: &AppState) -> Vec<String> {
+    let mut fod: crate::fod::FodSettings = settings::load(&app.db, "fod").await.unwrap_or_default();
+    let checked: HashMap<String, String> = settings::load(&app.db, "fod_checked").await.unwrap_or_default();
+    let mut due = Vec::new();
+    for src in crate::fod::SOURCES {
+        if !fod.slot_mut(src.key).is_some_and(|v| crate::fod::studio_built(v)) {
+            continue;
+        }
+        let Some(p) = uup::product(src.product) else { continue };
+        match uup::product_builds(&app.web, p, false).await {
+            Ok(b) => {
+                if let Some(b) = b.first()
+                    && checked.get(src.key) != Some(&b.uuid)
+                {
+                    due.push(src.key.to_owned());
+                }
+            }
+            Err(e) => tracing::warn!("FoD check: asking UUP dump for {}: {e:#}", p.name),
+        }
+    }
+    due
 }
 
 /// Any job of the window's own still queued or running.
@@ -1076,17 +1117,6 @@ pub async fn plan(app: &AppState) -> serde_json::Value {
         "pre": pre, "iso": iso, "bakes": lanes,
         "limit": queue.limit,
     })
-}
-
-/// The FoD slot a product's golds use.
-fn fod_key(product: &str) -> &'static str {
-    if product.starts_with("ws2022") {
-        "server2022"
-    } else if product.starts_with("ws") {
-        "server"
-    } else {
-        "client"
-    }
 }
 
 fn now_utc() -> String {

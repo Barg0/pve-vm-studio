@@ -2731,7 +2731,7 @@ function wireAutoUpdate(main) {
   const on = (id, fn) => { const el = $id(id); if (el) el.addEventListener("click", fn); };
   on("auSave", async () => {
     try {
-      await api("PUT", "/auto-update", { keep_golds: parseInt($id("auKeep").value, 10) || 2, include_previews: $id("auPreviews").checked, keep_winpe_current: $id("auWinpe").checked,
+      await api("PUT", "/auto-update", { keep_golds: parseInt($id("auKeep").value, 10) || 1, include_previews: $id("auPreviews").checked, keep_winpe_current: $id("auWinpe").checked,
         keep_virtio_current: $id("auVirtio").checked, iso_after_window: $id("auIsoAfter").checked, bakes_after_window: $id("auBakesAfter").checked });
       toast("Saved"); again();
     }

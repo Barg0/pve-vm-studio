@@ -539,6 +539,12 @@ pub async fn job_ended(app: AppState, id: String) {
             send(&app, "winpe_built", r).await;
         }
         "fod" if ok => {
+            if params["check"].as_bool().unwrap_or(false) {
+                let by: std::collections::HashMap<String, String> = settings::load(&app.db, "fod_built").await.unwrap_or_default();
+                if by.get(params["fod"].as_str().unwrap_or_default()) != Some(&row.id) {
+                    return;
+                }
+            }
             let f: crate::fod::FodSettings = settings::load(&app.db, "fod").await.unwrap_or_default();
             let volid = match params["fod"].as_str().unwrap_or_default() {
                 "server2022" => f.server2022.clone(),

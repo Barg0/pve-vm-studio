@@ -1542,32 +1542,59 @@ async fn build_fod(State(app): State<AppState>, user: User, Json(q): Json<FodBui
     user.require(&app, "/vms", "VM.Allocate").await?;
     let src = fod::source(&q.slot).ok_or_else(|| ApiError::bad_request("no such release"))?;
     already_running(&app, "fod", "fod", src.key).await?;
-    let job = spawn_fod(&app, &user.session.user, src.key).await?;
+    let job = spawn_fod(&app, &user.session.user, src.key, false).await?;
     Ok((StatusCode::ACCEPTED, Json(json!({ "id": job }))))
 }
 
-/// Starts a release's FoD ISO build: the Media page's, and the maintenance window's.
-pub async fn spawn_fod(app: &AppState, by: &str, key: &str) -> ApiResult<String> {
+/// Starts a release's FoD ISO build: the Media page's, and the maintenance window's check
+/// (`check`: the ISO the studio built for the release is built again only when Microsoft's
+/// newest build lists other packages).
+pub async fn spawn_fod(app: &AppState, by: &str, key: &str, check: bool) -> ApiResult<String> {
     let src = fod::source(key).ok_or_else(|| ApiError::bad_request("no such release"))?;
-    let title = format!("Build {} Features on Demand", src.name);
+    let title = format!("{} {} Features on Demand", if check { "Check" } else { "Build" }, src.name);
     let (a, key) = (app.clone(), src.key.to_owned());
-    Ok(app.jobs.spawn("fod", &title, by, json!({ "fod": src.key }), move |log| fod_job(a, log, key)).await?)
+    Ok(app.jobs.spawn("fod", &title, by, json!({ "fod": src.key, "check": check }), move |log| fod_job(a, log, key, check)).await?)
 }
 
 /// Builds a release's FoD ISO and sets it - also what a queued build runs after a restart.
-pub(crate) async fn fod_job(app: AppState, log: crate::jobs::JobLog, key: String) -> anyhow::Result<()> {
+pub(crate) async fn fod_job(app: AppState, log: crate::jobs::JobLog, key: String, check: bool) -> anyhow::Result<()> {
     let src = fod::source(&key).ok_or_else(|| anyhow::anyhow!("no FoD release {key}"))?;
     let bake: BakeSettings = settings::load(&app.db, "bake").await?;
     let win: virtio::WindowsSettings = settings::load(&app.db, "windows").await?;
     let p = bake.resolve(&app.pve).await?;
     let storage = if win.iso_storage.is_empty() { p.iso_storage.clone() } else { win.iso_storage.clone() };
-    let built = fod::build_uup(&app.pve, &log, &app.web, &app.config.data_dir.join("work"), &p.node, &storage, src).await?;
     let mut s: fod::FodSettings = settings::load(&app.db, "fod").await?;
-    if let Some(slot) = s.slot_mut(src.key) {
-        *slot = built.volid.clone();
-    }
-    settings::save(&app.db, "fod", &s).await?;
-    log.ok(format!("{} VMs use {} now ({} packages, {} satellites)", src.name, built.volid, built.packages, built.satellites)).await;
+    let compare = if check {
+        let have = s.slot_mut(src.key).map(|v| v.clone()).unwrap_or_default();
+        match fod::studio_built(&have).then(|| iso_path(&app, &have)).flatten() {
+            Some(path) => Some(path),
+            None => {
+                log.ok(format!("{} has no Features on Demand ISO the studio built - nothing to check", src.name)).await;
+                return Ok(());
+            }
+        }
+    } else {
+        None
+    };
+    let outcome = fod::build_uup(&app.pve, &log, &app.web, &app.config.data_dir.join("work"), &p.node, &storage, src, compare.as_deref()).await?;
+    let uuid = match outcome {
+        fod::Outcome::Built(built, uuid) => {
+            if let Some(slot) = s.slot_mut(src.key) {
+                *slot = built.volid.clone();
+            }
+            settings::save(&app.db, "fod", &s).await?;
+            log.ok(format!("{} VMs use {} now ({} packages, {} satellites)", src.name, built.volid, built.packages, built.satellites)).await;
+            // The job that made the slot's ISO - a check that built nothing sends no mail.
+            let mut by: std::collections::HashMap<String, String> = settings::load(&app.db, "fod_built").await.unwrap_or_default();
+            by.insert(src.key.to_owned(), log.id().to_owned());
+            settings::save(&app.db, "fod_built", &by).await?;
+            uuid
+        }
+        fod::Outcome::Unchanged(uuid) => uuid,
+    };
+    let mut checked: std::collections::HashMap<String, String> = settings::load(&app.db, "fod_checked").await.unwrap_or_default();
+    checked.insert(src.key.to_owned(), uuid);
+    settings::save(&app.db, "fod_checked", &checked).await?;
     Ok(())
 }
 

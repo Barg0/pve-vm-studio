@@ -70,6 +70,12 @@ pub fn source(key: &str) -> Option<&'static Source> {
     SOURCES.iter().find(|s| s.key == key)
 }
 
+/// Whether a FoD slot's ISO is one this studio built (fod-<os>-<build>.iso) - the only kind
+/// the maintenance window checks; one given by hand is the admin's.
+pub fn studio_built(volid: &str) -> bool {
+    volid.rsplit('/').next().is_some_and(|f| f.starts_with("fod-") && f.ends_with(".iso"))
+}
+
 /// The FoD ISO a deploy uses and how WinPE finds its payload - resolved when the build is
 /// planned, carried in the VM's spec.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -343,14 +349,52 @@ pub struct Built {
     pub satellites: usize,
 }
 
+/// A FoD job's end: a new ISO, or the one it was compared with already has every package.
+/// Either way the build it read (`uuid`), so the window asks again only after a newer one.
+pub enum Outcome {
+    Built(Built, String),
+    Unchanged(String),
+}
+
+/// The packages on a FoD ISO this studio built: LanguagesAndOptionalFeatures\*.cab, names in
+/// lower case with their sizes, sorted.
+async fn iso_cabs(iso: &Path) -> Result<Vec<(String, u64)>> {
+    let out = tokio::process::Command::new("7z")
+        .args(["l", "-ba", "-slt"])
+        .arg(iso)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+        .context("running 7z - is the 7zip package installed?")?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut cabs = Vec::new();
+    let mut path: Option<String> = None;
+    for l in text.lines() {
+        if let Some(p) = l.strip_prefix("Path = ") {
+            path = Some(p.replace('\\', "/").to_lowercase());
+        } else if let Some(n) = l.strip_prefix("Size = ")
+            && let Some(p) = path.take()
+            && let Some(name) = p.strip_prefix("languagesandoptionalfeatures/")
+            && !name.contains('/')
+            && name.ends_with(".cab")
+        {
+            cabs.push((name.to_owned(), n.trim().parse().unwrap_or(0)));
+        }
+    }
+    cabs.sort();
+    Ok(cabs)
+}
+
 /// A Languages and Optional Features ISO, the way Microsoft lays it out
 /// (LanguagesAndOptionalFeatures\ with the canonical .cab names, metadata\ with the target
 /// CompDBs that list them), from the newest build of the source's product - every Feature
 /// on Demand but the language ones, plus their satellites in every language. Plain Linux work:
 /// the UUP files are the canonical packages already, their names and sizes in Microsoft's
-/// own CompDBs.
+/// own CompDBs. With `compare` (an ISO this studio built before), the ISO is only built again
+/// when the newest build's packages are not exactly the ones on it.
 #[allow(clippy::too_many_arguments)]
-pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Path, node: &str, storage: &str, src: &Source) -> Result<Built> {
+pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Path, node: &str, storage: &str, src: &Source, compare: Option<&Path>) -> Result<Outcome> {
     let prod = uup::product(src.product).context("no such product in the catalog")?;
     let mut pr = Progress::new(log, format!("Building the {} Features on Demand ISO", src.name));
     pr.calibrate("reading Microsoft's package lists").await;
@@ -358,7 +402,7 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
     // Its own cache: a media build's files share names with these, not content.
     let dl = work.join("uup-files").join(format!("fod-{}", src.key));
     tokio::fs::create_dir_all(&dl).await?;
-    let result: Result<Built> = async {
+    let result: Result<Outcome> = async {
         pr.stage(0.0, 3.0, "asking the catalog");
         let build = uup::product_builds(web, prod, false).await?.into_iter().next().with_context(|| format!("the catalog lists no {} build", prod.name))?;
         log.get(format!("Asking the UUP dump catalog for the files of {} ({})", build.title, build.uuid)).await;
@@ -481,6 +525,20 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
             total as f64 / 1e9
         ))
         .await;
+        if let Some(iso) = compare {
+            let name = iso.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let mut want: Vec<(String, u64)> = wanted.iter().map(|(c, f)| (c.to_lowercase(), f.size)).collect();
+            want.sort();
+            want.dedup();
+            let have = iso_cabs(iso).await?;
+            if want == have {
+                log.ok(format!("{name} has every package of {} - nothing to build", build.title)).await;
+                return Ok(Outcome::Unchanged(build.uuid.clone()));
+            }
+            let new = want.iter().filter(|w| !have.contains(w)).count();
+            let gone = have.iter().filter(|h| !want.contains(h)).count();
+            log.line(format!("{name} differs from {}: {new} package(s) new or changed, {gone} no longer listed - building it again", build.title)).await;
+        }
 
         pr.stage(5.0, 80.0, "downloading from Microsoft");
         let mut files: Vec<uup::File> = wanted.iter().map(|(_, f)| f.clone()).collect();
@@ -539,7 +597,7 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
         log.run(format!("Uploading into {storage} on {node}")).await;
         let volid = pve.upload_progress(node, storage, "iso", &iso, &name, |f| pr.within(f, format!("uploading · {:.0}%", f * 100.0))).await?;
         log.ok(format!("{volid} is ready - new {} VMs install their capabilities from it", src.name)).await;
-        Ok(Built { volid, packages, satellites })
+        Ok(Outcome::Built(Built { volid, packages, satellites }, build.uuid.clone()))
     }
     .await;
     let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -548,6 +606,13 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn studio_built_iso() {
+        assert!(super::studio_built("local:iso/fod-ws2025-26100.iso"));
+        assert!(!super::studio_built("local:iso/26100.1.LOF.iso"));
+        assert!(!super::studio_built(""));
+    }
 
     #[test]
     fn every_language_microsoft_lists() {

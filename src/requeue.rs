@@ -39,8 +39,8 @@ async fn relaunch(app: &AppState, row: &JobRow) -> Result<()> {
             app.jobs.restore(row, None, move |log| api::virtio_job(a, log)).await?;
         }
         "fod" => {
-            let key = s("fod");
-            app.jobs.restore(row, None, move |log| api::fod_job(a, log, key)).await?;
+            let (key, check) = (s("fod"), p["check"].as_bool().unwrap_or(false));
+            app.jobs.restore(row, None, move |log| api::fod_job(a, log, key, check)).await?;
         }
         "winpe" if !s("uup").is_empty() => {
             let (uuid, lang) = (s("uup"), s("lang"));
