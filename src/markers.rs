@@ -24,14 +24,16 @@ const TEXT: &[(&str, &str)] = &[
     ("AUDIT-START", "Audit mode started"),
     ("VIRTIO", "virtio drivers installed, exit code"),
     ("QGA", "QEMU guest agent installed, exit code"),
+    // [qga-diag] Guest agent diagnostics on Insider builds - go with them.
     ("QGA-DEP", "Before the guest agent"),
     ("QGA-LOG", "Guest agent install log"),
     ("QGA-SERVICE", "Guest agent service"),
     ("QGA-DTC-CONFIG", "MSDTC configuration"),
-    ("QGA-DTC-START", "Starting MSDTC"),
-    ("QGA-DTC-AFTER", "MSDTC after the start"),
-    ("QGA-DTC-APPLOG", "MSDTC and COM+ events"),
-    ("QGA-DTC-SCM", "Service Control Manager events"),
+    ("QGA-WAIT", "Started and waited for"),
+    ("QGA-DTC-APPLOG", "Application log error/warning"),
+    ("QGA-DTC-SCM", "Service Control Manager on MSDTC/COM+/VSS"),
+    ("QGA-RETRY", "Guest agent install, second try"),
+    ("QGA-RETRY-LOG", "Guest agent second try log"),
     ("SYSPREP-START", "Sysprep started"),
     ("PASS2-START", "Pass 2: region, policies and key"),
     ("POLICY", "Policy"),
@@ -167,12 +169,14 @@ pub fn text(line: &str) -> String {
             _ => head.to_owned(),
         };
     }
-    // PVS-QGA-LOG <MSI log line>: a custom action's code also in hex, the HRESULT's form.
-    if key == "QGA-LOG"
+    // [qga-diag] PVS-QGA-LOG / -RETRY-LOG <MSI log line>: a custom action's code also in
+    // hex, the HRESULT's form.
+    if matches!(key, "QGA-LOG" | "QGA-RETRY-LOG")
         && let Some(at) = args.find("returned actual error code ")
         && let Some(n) = args[at + 27..].split(|c: char| !(c == '-' || c.is_ascii_digit())).next().and_then(|n| n.parse::<i64>().ok())
     {
-        return format!("Guest agent install log: {args} (0x{:08X})", n as u32);
+        let head = if key == "QGA-LOG" { "Guest agent install log" } else { "Guest agent second try log" };
+        return format!("{head}: {args} (0x{:08X})", n as u32);
     }
     let head = match TEXT.iter().find(|(k, _)| *k == key) {
         Some((_, t)) => (*t).to_owned(),
@@ -194,6 +198,7 @@ pub fn list(markers: &[String]) -> String {
 mod tests {
     use super::*;
 
+    // [qga-diag]
     #[test]
     fn guest_agent_log_in_hex() {
         assert_eq!(

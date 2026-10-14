@@ -576,14 +576,14 @@ for %%d in (D E F G H I J K L M N O P Q R S T U V W Y Z) do if exist %%d:\virtio
 echo PVS-AUDIT-START VIO=%VIO% > COM1
 msiexec /i %VIO%\virtio-win-gt-x64.msi /qn /norestart /l*v C:\Windows\Temp\virtio-win-gt.log
 echo PVS-VIRTIO %ERRORLEVEL% > COM1
-rem Diagnostics only: the state of what the agent's VSS registration uses (COM+ and its
+rem [qga-diag] Diagnostics: the state of what the agent's VSS registration uses (COM+ and its
 rem MSDTC, WMI, VSS) before its install; on a failed install the MSI log's deciding lines;
 rem the agent's service after it.
 for %%s in (MSDTC COMSysApp winmgmt VSS) do call :svc %%s QGA-DEP
 msiexec /i %VIO%\guest-agent\qemu-ga-x86_64.msi /qn /norestart /l*v C:\Windows\Temp\qemu-ga.log
 set QGA=%ERRORLEVEL%
 echo PVS-QGA %QGA% > COM1
-if not "%QGA%"=="0" call :qgalog
+if not "%QGA%"=="0" call :qgalog C:\Windows\Temp\qemu-ga.log QGA-LOG
 if not "%QGA%"=="0" call :dtcdiag
 call :svc QEMU-GA QGA-SERVICE
 sc qc vioscsi > COM1 2>&1
@@ -596,50 +596,68 @@ rem answer file offline instead.
 C:\Windows\System32\Sysprep\Sysprep.exe /generalize /oobe /mode:vm /shutdown
 exit /b 0
 
-rem A service's state on COM1: PVS-<marker> <service> <state>, "missing" when there is none.
+rem [qga-diag] A service's state on COM1: PVS-<marker> <service> <state>, "missing" when there is none.
 :svc
 set ST=missing
 for /f "tokens=4" %%a in ('sc query %1 2^>nul ^| findstr /c:"STATE"') do set ST=%%a
 echo PVS-%2 %1 %ST% > COM1
 goto :eof
 
-rem The MSI log's error lines on COM1, at most 20 (type reads its UTF-16 too). Delayed
-rem expansion keeps the lines' own < > & | from being read as commands.
+rem [qga-diag] An MSI log's (%1) error lines on COM1 as PVS-<%2>, at most 20 (type reads
+rem its UTF-16 too). Delayed expansion keeps the lines' own < > & | from being read as
+rem commands.
 :qgalog
 setlocal EnableDelayedExpansion
 set N=0
-for /f "delims=" %%l in ('type C:\Windows\Temp\qemu-ga.log ^| findstr /i /c:"returned actual error code" /c:"Return value 3" /c:"Error 1"') do (
+for /f "delims=" %%l in ('type %1 ^| findstr /i /c:"returned actual error code" /c:"Return value 3" /c:"Error 1"') do (
   set /a N+=1
   if !N! leq 20 (
     set "L=%%l"
-    echo PVS-QGA-LOG !L! > COM1
+    echo PVS-%2 !L! > COM1
   )
 )
 endlocal
 goto :eof
 
-rem After a failed install, still diagnostics only: MSDTC (COM+ answers 0x8004E00F,
-rem CONTEXT_E_TMNOTAVAILABLE, when it cannot reach it) - its configuration, one start with
-rem its answer and state, and the newest entries MSDTC, COM+ and the Service Control
-rem Manager wrote about it.
+rem [qga-diag] After a failed install (COM+ answered 0x8004E00F, CONTEXT_E_TMNOTAVAILABLE:
+rem it could not reach MSDTC, which it starts on demand): MSDTC's configuration; then
+rem MSDTC, COM+ and VSS started and waited for until each runs (a race between COM+ and
+rem the MSDTC it starts shows here); the install once more, with its own log; the newest
+rem errors and warnings of the Application log and the Service Control Manager's entries
+rem about MSDTC and COM+, one line each.
 :dtcdiag
 set D=C:\Windows\Temp\pvs-diag.txt
 sc qc MSDTC > %D% 2>&1
 call :emit QGA-DTC-CONFIG 20
-sc start MSDTC > %D% 2>&1
-echo PVS-QGA-DTC-START exit code %ERRORLEVEL% > COM1
-call :emit QGA-DTC-START 20
-ping -n 6 127.0.0.1 > nul
-call :svc MSDTC QGA-DTC-AFTER
-wevtutil qe Application /q:"*[System[Provider[@Name='MSDTC' or @Name='MSDTC 2' or @Name='MSDTC Client' or @Name='MSDTC Client 2' or @Name='COM+']]]" /c:6 /rd:true /f:text > %D% 2>&1
-call :emit QGA-DTC-APPLOG 60
-wevtutil qe System /q:"*[System[Provider[@Name='Service Control Manager']]]" /c:40 /rd:true /f:text > %D% 2>&1
-type %D% | findstr /i /c:"Event ID" /c:"Date:" /c:"Distributed Transaction" /c:"MSDTC" /c:"COM+" > %D%.f 2>&1
-move /y %D%.f %D% > nul
-call :emit QGA-DTC-SCM 40
+for %%s in (MSDTC COMSysApp VSS) do call :waitsvc %%s
+msiexec /i %VIO%\guest-agent\qemu-ga-x86_64.msi /qn /norestart /l*v C:\Windows\Temp\qemu-ga-retry.log
+set QGA2=%ERRORLEVEL%
+echo PVS-QGA-RETRY exit code %QGA2% > COM1
+if not "%QGA2%"=="0" call :qgalog C:\Windows\Temp\qemu-ga-retry.log QGA-RETRY-LOG
+powershell -NoProfile -Command "$e = Get-WinEvent -FilterHashtable @{LogName='Application';Level=1,2,3} -MaxEvents 10 -ErrorAction SilentlyContinue; if (-not $e) { 'none' }; $e | ForEach-Object { '{0:HH:mm:ss} {1} {2}: {3}' -f $_.TimeCreated, $_.Id, $_.ProviderName, ($_.Message -replace '\s+', ' ') }" > %D% 2>&1
+call :emit QGA-DTC-APPLOG 10
+powershell -NoProfile -Command "$e = Get-WinEvent -FilterHashtable @{LogName='System';ProviderName='Service Control Manager'} -MaxEvents 200 -ErrorAction SilentlyContinue | Where-Object { $_.Message -match 'Distributed Transaction|MSDTC|COM\+|Volume Shadow' } | Select-Object -First 10; if (-not $e) { 'none' }; $e | ForEach-Object { '{0:HH:mm:ss} {1}: {2}' -f $_.TimeCreated, $_.Id, ($_.Message -replace '\s+', ' ') }" > %D% 2>&1
+call :emit QGA-DTC-SCM 10
 goto :eof
 
-rem The diagnostics file's lines on COM1 as PVS-<marker> <line>, at most <count> (type
+rem [qga-diag] Starts a service and waits until it runs, at most 60 s: PVS-QGA-WAIT
+rem <service> <state> after <seconds> s.
+:waitsvc
+sc start %1 > nul 2>&1
+set W=0
+:waitsvc_loop
+sc query %1 | findstr /c:"RUNNING" > nul && goto :waitsvc_done
+if %W% geq 60 goto :waitsvc_done
+ping -n 3 127.0.0.1 > nul
+set /a W+=2
+goto :waitsvc_loop
+:waitsvc_done
+set ST=missing
+for /f "tokens=4" %%a in ('sc query %1 2^>nul ^| findstr /c:"STATE"') do set ST=%%a
+echo PVS-QGA-WAIT %1 %ST% after %W% s > COM1
+goto :eof
+
+rem [qga-diag] The diagnostics file's lines on COM1 as PVS-<marker> <line>, at most <count> (type
 rem reads a UTF-16 file too).
 :emit
 setlocal EnableDelayedExpansion
