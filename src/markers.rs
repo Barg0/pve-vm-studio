@@ -24,6 +24,9 @@ const TEXT: &[(&str, &str)] = &[
     ("AUDIT-START", "Audit mode started"),
     ("VIRTIO", "virtio drivers installed, exit code"),
     ("QGA", "QEMU guest agent installed, exit code"),
+    ("QGA-DEP", "Before the guest agent"),
+    ("QGA-LOG", "Guest agent install log"),
+    ("QGA-SERVICE", "Guest agent service"),
     ("SYSPREP-START", "Sysprep started"),
     ("PASS2-START", "Pass 2: region, policies and key"),
     ("POLICY", "Policy"),
@@ -159,6 +162,13 @@ pub fn text(line: &str) -> String {
             _ => head.to_owned(),
         };
     }
+    // PVS-QGA-LOG <MSI log line>: a custom action's code also in hex, the HRESULT's form.
+    if key == "QGA-LOG"
+        && let Some(at) = args.find("returned actual error code ")
+        && let Some(n) = args[at + 27..].split(|c: char| !(c == '-' || c.is_ascii_digit())).next().and_then(|n| n.parse::<i64>().ok())
+    {
+        return format!("Guest agent install log: {args} (0x{:08X})", n as u32);
+    }
     let head = match TEXT.iter().find(|(k, _)| *k == key) {
         Some((_, t)) => (*t).to_owned(),
         None => {
@@ -178,6 +188,16 @@ pub fn list(markers: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guest_agent_log_in_hex() {
+        assert_eq!(
+            text("PVS-QGA-LOG CustomAction RegisterCom returned actual error code -2147164145 (note this may not be 100% accurate if translation happened inside sandbox)"),
+            "Guest agent install log: CustomAction RegisterCom returned actual error code -2147164145 (note this may not be 100% accurate if translation happened inside sandbox) (0x8004E00F)"
+        );
+        assert_eq!(text("PVS-QGA-DEP MSDTC RUNNING"), "Before the guest agent: MSDTC RUNNING");
+        assert_eq!(text("PVS-QGA-SERVICE QEMU-GA missing"), "Guest agent service: QEMU-GA missing");
+    }
 
     #[test]
     fn markers_read_as_words() {

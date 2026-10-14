@@ -9,9 +9,9 @@
 //!      the windowsPE pass, disk layout, the chosen image, a KMS client key (GVLK) so the
 //!      edition is set and OOBE has no key page. Progress: bytes written to the system disk
 //!      against the image's size from install.wim.
-//!   3. oobeSystem reseals into audit mode; auditUser runs audit.cmd from the seed: the
-//!      QEMU guest agent first (from here the studio follows the log through it), then
-//!      virtio-win-gt, the chosen policies, the gold's answer file, and
+//!   3. oobeSystem reseals into audit mode; auditUser runs audit.cmd from the seed:
+//!      virtio-win-gt, then the QEMU guest agent, the chosen policies, the gold's answer
+//!      file, and
 //!      `sysprep /generalize /oobe /mode:vm /shutdown`.
 //!   4. The studio checks generalize worked - State.ini saying
 //!      IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE, Microsoft's record of it - before it makes the
@@ -576,8 +576,15 @@ for %%d in (D E F G H I J K L M N O P Q R S T U V W Y Z) do if exist %%d:\virtio
 echo PVS-AUDIT-START VIO=%VIO% > COM1
 msiexec /i %VIO%\virtio-win-gt-x64.msi /qn /norestart /l*v C:\Windows\Temp\virtio-win-gt.log
 echo PVS-VIRTIO %ERRORLEVEL% > COM1
+rem Diagnostics only: the state of what the agent's VSS registration uses (COM+ and its
+rem MSDTC, WMI, VSS) before its install; on a failed install the MSI log's deciding lines;
+rem the agent's service after it.
+for %%s in (MSDTC COMSysApp winmgmt VSS) do call :svc %%s QGA-DEP
 msiexec /i %VIO%\guest-agent\qemu-ga-x86_64.msi /qn /norestart /l*v C:\Windows\Temp\qemu-ga.log
-echo PVS-QGA %ERRORLEVEL% > COM1
+set QGA=%ERRORLEVEL%
+echo PVS-QGA %QGA% > COM1
+if not "%QGA%"=="0" call :qgalog
+call :svc QEMU-GA QGA-SERVICE
 sc qc vioscsi > COM1 2>&1
 if not exist C:\Windows\PVS mkdir C:\Windows\PVS
 copy /y %SEED%\pvs\firstboot.cmd C:\Windows\PVS\firstboot.cmd > COM1 2>&1
@@ -586,6 +593,29 @@ rem No /unattend, as in New-Vhdx: a cached answer file that is in use is not rep
 rem one, so the audit-mode file would survive into the gold. Pass 2 writes the gold's
 rem answer file offline instead.
 C:\Windows\System32\Sysprep\Sysprep.exe /generalize /oobe /mode:vm /shutdown
+exit /b 0
+
+rem A service's state on COM1: PVS-<marker> <service> <state>, "missing" when there is none.
+:svc
+set ST=missing
+for /f "tokens=4" %%a in ('sc query %1 2^>nul ^| findstr /c:"STATE"') do set ST=%%a
+echo PVS-%2 %1 %ST% > COM1
+goto :eof
+
+rem The MSI log's error lines on COM1, at most 20 (type reads its UTF-16 too). Delayed
+rem expansion keeps the lines' own < > & | from being read as commands.
+:qgalog
+setlocal EnableDelayedExpansion
+set N=0
+for /f "delims=" %%l in ('type C:\Windows\Temp\qemu-ga.log ^| findstr /i /c:"returned actual error code" /c:"Return value 3" /c:"Error 1"') do (
+  set /a N+=1
+  if !N! leq 20 (
+    set "L=%%l"
+    echo PVS-QGA-LOG !L! > COM1
+  )
+)
+endlocal
+goto :eof
 "#,
     )
 }
