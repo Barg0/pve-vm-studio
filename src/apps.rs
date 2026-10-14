@@ -69,8 +69,10 @@ fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
 }
 
 /// The app CompDB: its features (top level only - a dependency is a <Feature FeatureID=...
-/// Type="Required" /> inside one) and package id -> payload path under IPA\<group>\.
-fn parse_app_compdb(xml: &str) -> (Vec<Feature>, HashMap<String, String>) {
+/// Type="Required" /> inside one) and package id -> payload path under IPA\<group>\, with
+/// the name a catalog gives it when it names files by their whole path (Canary 29683.1000:
+/// IPA_WinStore_Microsoft.WindowsStore_8wekyb3d8bbwe.msixbundle), in lower case.
+fn parse_app_compdb(xml: &str) -> (Vec<Feature>, HashMap<String, (String, String)>) {
     let (feats, packs) = xml.split_once("</Features>").unwrap_or((xml, ""));
     let mut out = Vec::new();
     for seg in feats.split("<Feature Type=\"").skip(1) {
@@ -89,9 +91,10 @@ fn parse_app_compdb(xml: &str) -> (Vec<Feature>, HashMap<String, String>) {
         let body = seg.split("</Package>").next().unwrap_or("");
         if let Some(p) = body.split_once("Path=\"").and_then(|(_, r)| r.split('"').next()) {
             // UUP\Desktop\Apps\IPA\<group>\<path> -> <path> (it may hold AppxMetadata\Stub\...).
-            let rel = p.split_once("\\IPA\\").map(|(_, r)| r).unwrap_or(p);
-            let rel = rel.split_once('\\').map(|(_, r)| r).unwrap_or(rel);
-            paths.insert(id.to_owned(), rel.to_owned());
+            let in_ipa = p.split_once("\\IPA\\").map(|(_, r)| r).unwrap_or(p);
+            let rel = in_ipa.split_once('\\').map(|(_, r)| r).unwrap_or(in_ipa);
+            let flat = format!("IPA_{}", in_ipa.replace('\\', "_")).to_lowercase();
+            paths.insert(id.to_owned(), (rel.to_owned(), flat));
         }
     }
     (out, paths)
@@ -131,9 +134,9 @@ pub fn plan(app_xml: &str, editions: &[Option<String>], catalog: &[uup::File]) -
     let mut place = |f: &Feature, plan: &mut Plan| -> Option<Vec<String>> {
         let mut rels = Vec::new();
         for pid in &f.packages {
-            let rel = paths.get(pid)?;
+            let (rel, flat) = paths.get(pid)?;
             let name = rel.rsplit('\\').next().unwrap_or(rel).to_lowercase();
-            let file = by_name.get(&name)?;
+            let file = by_name.get(&name).or_else(|| by_name.get(flat))?;
             let target = if f.framework { format!("MSIXFramework\\{rel}") } else { format!("{}\\{rel}", f.id) };
             if need.insert(file.name.clone()) {
                 plan.files.push((*file).clone());
@@ -278,6 +281,18 @@ mod tests {
         assert!(p.layout.contains(&("NewsStub_x64.msix".into(), "Microsoft.BingNews_8wekyb3d8bbwe\\AppxMetadata\\Stub\\NewsStub_x64.msix".into())));
         assert_eq!(p.licenses.len(), 2);
         assert_eq!(p.files.len(), 5);
+    }
+
+    #[test]
+    fn catalog_names_by_whole_path() {
+        // Canary 29683.1000: IPA_<group>_<path with \ as _>.
+        let pro = r#"<Feature FeatureID="Microsoft.WindowsStore_8wekyb3d8bbwe" FMID="MSDN" Group="PreinstalledApps" Type="Optional" />"#;
+        let names = ["Microsoft.VCLibs.x64.14.00.appx", "Microsoft.WindowsStore_8wekyb3d8bbwe.msixbundle", "StorePackage_x64.msix"];
+        let catalog: Vec<uup::File> = names.iter().map(|n| f(&format!("IPA_WinStore_{n}"))).collect();
+        let p = plan(APPS, &[Some(pro.into())], &catalog).unwrap();
+        assert!(p.missing.is_empty(), "{:?}", p.missing);
+        assert_eq!(p.per_image[0][0].main, "Microsoft.WindowsStore_8wekyb3d8bbwe.msixbundle");
+        assert!(p.layout.contains(&("IPA_WinStore_Microsoft.WindowsStore_8wekyb3d8bbwe.msixbundle".into(), "Microsoft.WindowsStore_8wekyb3d8bbwe\\Microsoft.WindowsStore_8wekyb3d8bbwe.msixbundle".into())));
     }
 }
 
