@@ -241,13 +241,13 @@ async fn sha256_b64(path: &Path) -> Result<String> {
 /// not on this ISO are dropped, and features left without a package with them.
 pub fn for_iso_xml(baseless: &str, lang: &str, payloads: &HashMap<String, (String, u64)>) -> String {
     let mut out = String::new();
-    let mut lines = baseless.lines().peekable();
+    let lines = baseless.lines().peekable();
     let mut block: Vec<&str> = Vec::new();
     let (mut in_feature, mut in_package) = (false, false);
     let keep_ids = |b: &[&str]| -> Vec<String> {
         b.iter().filter_map(|l| l.trim_start().strip_prefix("<Package ID=\"").and_then(|r| r.split('"').next())).map(str::to_owned).collect()
     };
-    while let Some(line) = lines.next() {
+    for line in lines {
         let t = line.trim_start();
         let indent = line.len() - t.len();
         // Top-level features and packages are four deep in Microsoft's pretty-printed XML.

@@ -427,7 +427,7 @@ async fn prune_dism_logs(dir: &Path, keep: usize) {
         ent.1.push(e.path());
     }
     let mut by_age: Vec<_> = runs.into_values().collect();
-    by_age.sort_by(|a, b| b.0.cmp(&a.0));
+    by_age.sort_by_key(|r| std::cmp::Reverse(r.0));
     for (_, files) in by_age.into_iter().skip(keep) {
         for f in files {
             let _ = tokio::fs::remove_file(f).await;
@@ -567,6 +567,7 @@ fn log_name(at: &str, file: &str) -> String {
 /// The worker's script: the install image's updates one at a time (each with its verdict),
 /// the package list of every image for the studio to check, the Safe OS update into WinRE,
 /// and DISM's own log back to the studio whatever happened.
+#[allow(clippy::too_many_arguments)]
 fn worker_cmd(url: &str, pin: &str, indexes: usize, chain: &[String], image: &[String], winre: &[String], ssu: Option<&str>, extra: &Extras) -> String {
     let mut s = worker_head("media worker: install.wim + updates -> serviced install.wim", url, pin);
     s += &worker_cmd_body(indexes, chain, image, winre, ssu, extra);
@@ -1037,6 +1038,7 @@ impl Checkpoint {
 }
 
 /// Builds the ISO. Returns what the blade's history records.
+#[allow(clippy::too_many_arguments)]
 pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Client, work: &Path, p: &Placement, link: Link, req: Request) -> Result<MediaIso> {
     let prod = req.product;
     let mut pr = Progress::new(log, format!("Building {} {}", prod.name, req.build));

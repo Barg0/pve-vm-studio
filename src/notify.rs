@@ -342,12 +342,9 @@ pub async fn job_ended(app: AppState, id: String) {
             let gold = params["gold"].as_str().unwrap_or_default();
             let g = crate::golds::get(&app.db, gold).await.ok().flatten();
             let m: serde_json::Value = g.as_ref().map(|g| serde_json::from_str(&g.manifest).unwrap_or_default()).unwrap_or_default();
-            let mut display = g.as_ref().and_then(|g| crate::windows::server_label(&g.image_id))
+            // "Windows 11 Enterprise 26H2" - the studio's name, as on the page.
+            let display = g.as_ref().map(crate::names::gold_long)
                 .unwrap_or_else(|| m["displayName"].as_str().or_else(|| m["name"].as_str()).unwrap_or(&row.title).to_owned());
-            // "Windows 11 Enterprise 26H2": the release, where Windows 11 has one.
-            if let Some(r) = g.as_ref().and_then(crate::golds::release).filter(|r| !display.contains(r)) {
-                display = format!("{display} {r}");
-            }
             let (gold_glyph, vm_glyph) = machine_glyphs(&m);
             let mut r = Report::new(
                 format!("{}: {display}", if ok { "Gold baked" } else { "Bake failed" }),
@@ -425,11 +422,8 @@ pub async fn job_ended(app: AppState, id: String) {
                 &if ok { "PROVISIONED".to_owned() } else { failed_at.map_or("FAILED".to_owned(), |f| format!("Failed at {f}")) },
                 if ok { Tone::Success } else { Tone::Danger },
             );
-            let mut image = g.as_ref().and_then(|g| crate::windows::server_label(&g.image_id))
+            let image = g.as_ref().map(crate::names::gold_long)
                 .unwrap_or_else(|| gm["displayName"].as_str().or_else(|| gm["name"].as_str()).unwrap_or("").to_owned());
-            if let Some(r) = g.as_ref().and_then(crate::golds::release).filter(|r| !image.is_empty() && !image.contains(r)) {
-                image = format!("{image} {r}");
-            }
             r.subtitle = [image, if gold_name.is_empty() { String::new() } else { format!("from gold {gold_name}") }].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
             r.pills = vec![("Started by".into(), row.created_by.clone())];
             if let Some(v) = &v {

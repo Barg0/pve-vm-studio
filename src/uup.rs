@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
@@ -190,33 +190,121 @@ fn insider_title(t: &str) -> bool {
 /// channel without an answer is asked from the next one.
 const CHANNEL_BASES: [&str; 3] = ["w11-26h2", "w11-25h2", "w11-24h2"];
 
-/// What a channel offers right now: the Insider flight Windows Update gives a Windows 11
-/// client in that ring (UUP dump's fetchupd), asked from the newest release that answers.
-/// Kept for six hours; the catalog's rate limit allows about one question in ten seconds.
-pub async fn channel_offer(web: &reqwest::Client, p: &Product, fresh: bool) -> Result<Build> {
-    type Offers = std::collections::HashMap<&'static str, (std::time::Instant, Build)>;
-    static OFFERS: tokio::sync::Mutex<Option<Offers>> = tokio::sync::Mutex::const_new(None);
-    let ring = p.ring.ok_or_else(|| anyhow!("{} follows no Insider channel", p.name))?;
-    let mut cache = OFFERS.lock().await;
-    let max_age = if fresh { 900 } else { 6 * 3600 };
-    if let Some((at, b)) = cache.as_ref().and_then(|c| c.get(p.id))
-        && at.elapsed() < std::time::Duration::from_secs(max_age)
-    {
-        return Ok(b.clone());
-    }
-    let all = catalog(web, false).await?;
-    for base in CHANNEL_BASES.iter().filter_map(|id| product(id)) {
-        // Its newest build, read off the catalog directly (product_builds asks this function).
-        let Some(from) = all.iter().filter(|b| b.arch == "amd64" && (base.matches)(&b.title)).max_by_key(|b| build_num(&b.build)) else { continue };
-        let r = get(web, "fetchupd.php", &[("arch", "amd64"), ("ring", ring), ("build", &from.build), ("sku", "48")]).await?;
-        let offered = offered(p, &r);
-        if let Some(mut b) = offered {
-            b.created = all.iter().filter(|c| c.uuid == b.uuid).map(|c| c.created).min().unwrap_or_else(|| chrono::Utc::now().timestamp());
-            cache.get_or_insert_with(Default::default).insert(p.id, (std::time::Instant::now(), b.clone()));
-            return Ok(b);
+/// What each Insider channel offers: the flight Windows Update gives a Windows 11 client in
+/// that ring (UUP dump's fetchupd), by product id. Asked in the background (refresh_offers)
+/// and kept in the database, so the page never waits for Microsoft - a live question takes up
+/// to 15 s, may fail, and the catalog allows about one in ten seconds - and a restart has
+/// the last answers at once.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Offers {
+    pub builds: std::collections::HashMap<String, Build>,
+    /// Why a channel has no answer yet, by product id.
+    pub errors: std::collections::HashMap<String, String>,
+    /// When the channels were asked last (Unix seconds).
+    pub asked: i64,
+}
+
+static OFFERS: std::sync::Mutex<Option<Offers>> = std::sync::Mutex::new(None);
+/// One refresh at a time: the background's, a window's, a Refresh press.
+static REFRESHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// The last answers from the database - once, at start.
+pub async fn load_offers(db: &sqlx::SqlitePool) {
+    let o: Offers = crate::settings::load(db, "channel_offers").await.unwrap_or_default();
+    *OFFERS.lock().unwrap() = Some(o);
+}
+
+/// What the channel offers, as last asked - None while it has never answered.
+pub fn offer(p: &Product) -> Option<Build> {
+    OFFERS.lock().unwrap().as_ref().and_then(|o| o.builds.get(p.id).cloned())
+}
+
+/// Why a channel has no answer (None: none asked yet, or it answered).
+pub fn offer_error(p: &Product) -> Option<String> {
+    OFFERS.lock().unwrap().as_ref().and_then(|o| o.errors.get(p.id).cloned())
+}
+
+/// Seconds since the channels were asked last; None: never.
+pub fn offers_age() -> Option<i64> {
+    OFFERS.lock().unwrap().as_ref().filter(|o| o.asked > 0).map(|o| chrono::Utc::now().timestamp() - o.asked)
+}
+
+/// Asks every channel once, one question at a time and twelve seconds apart, from the newest
+/// Windows 11 release that answers - a failed question tries the next release. A channel
+/// that answers nothing keeps its last answer and says why. `wait`: queue behind a refresh
+/// already running (a window wants fresh answers); else return at once.
+pub async fn refresh_offers(web: &reqwest::Client, db: &sqlx::SqlitePool, wait: bool) -> Result<()> {
+    let _one = if wait {
+        REFRESHING.lock().await
+    } else {
+        match REFRESHING.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Ok(()),
         }
+    };
+    let all = catalog(web, false).await?;
+    let mut last_ask: Option<std::time::Instant> = None;
+    for p in PRODUCTS.iter().filter(|p| p.listed) {
+        let Some(ring) = p.ring else { continue };
+        let mut found = None;
+        let mut why = String::new();
+        for base in CHANNEL_BASES.iter().filter_map(|id| product(id)) {
+            // Its newest build, read off the catalog.
+            let Some(from) = all.iter().filter(|b| b.arch == "amd64" && (base.matches)(&b.title)).max_by_key(|b| build_num(&b.build)) else { continue };
+            if let Some(at) = last_ask {
+                tokio::time::sleep(GAP.saturating_sub(at.elapsed())).await;
+            }
+            last_ask = Some(std::time::Instant::now());
+            match get(web, "fetchupd.php", &[("arch", "amd64"), ("ring", ring), ("build", &from.build), ("sku", "48")]).await {
+                Ok(r) => {
+                    if let Some(mut b) = offered(p, &r) {
+                        b.created = all.iter().filter(|c| c.uuid == b.uuid).map(|c| c.created).min().unwrap_or_else(|| chrono::Utc::now().timestamp());
+                        found = Some(b);
+                        break;
+                    }
+                }
+                Err(e) => why = format!("asked from {}: {e:#}", base.name),
+            }
+        }
+        let snapshot = {
+            let mut g = OFFERS.lock().unwrap();
+            let o = g.get_or_insert_with(Default::default);
+            match found {
+                Some(b) => {
+                    o.builds.insert(p.id.to_owned(), b);
+                    o.errors.remove(p.id);
+                }
+                None => {
+                    let msg = if why.is_empty() {
+                        format!("Microsoft offers nothing in {} from any Windows 11 release - the channel query ({ring}) may have changed", p.name)
+                    } else {
+                        format!("Microsoft did not answer for {} ({why}) - asked again in 15 minutes", p.name)
+                    };
+                    tracing::warn!("{msg}");
+                    o.errors.insert(p.id.to_owned(), msg);
+                }
+            }
+            o.asked = chrono::Utc::now().timestamp();
+            o.clone()
+        };
+        crate::settings::save(db, "channel_offers", &snapshot).await?;
     }
-    bail!("Microsoft offers nothing in {} from any Windows 11 release - the channel query ({ring}) may have changed", p.name)
+    Ok(())
+}
+
+/// The background: the channels at start, then every six hours - a quarter of an hour after
+/// one did not answer.
+pub async fn offers_loop(web: reqwest::Client, db: sqlx::SqlitePool) {
+    loop {
+        // Asked within the last six hours (before a restart): not again yet.
+        let fresh = offers_age().is_some_and(|a| a < 6 * 3600) && OFFERS.lock().unwrap().as_ref().is_some_and(|o| o.errors.is_empty());
+        if !fresh && let Err(e) = refresh_offers(&web, &db, false).await {
+            tracing::warn!("Insider channels not asked: {e:#}");
+        }
+        let failed = OFFERS.lock().unwrap().as_ref().is_none_or(|o| !o.errors.is_empty());
+        tokio::time::sleep(std::time::Duration::from_secs(if failed { 900 } else { 6 * 3600 })).await;
+    }
 }
 
 /// The newest flight of the product's kind in a fetchupd answer - beside it Windows Update
@@ -286,8 +374,12 @@ pub async fn catalog_age() -> Option<u64> {
 /// Microsoft offers there now - so a jump to a new base (29xxx to 30xxx) moves the list with it.
 pub async fn product_builds(web: &reqwest::Client, p: &Product, fresh: bool) -> Result<Vec<Build>> {
     let all = catalog(web, fresh).await?;
+    // A channel's line is what it offered when last asked - never a live question here.
     let offer = match p.ring {
-        Some(_) => Some(channel_offer(web, p, fresh).await?),
+        Some(_) => match offer(p) {
+            Some(o) => Some(o),
+            None => return Ok(Vec::new()),
+        },
         None => None,
     };
     let line = offer.as_ref().map(|o| o.build.split('.').next().unwrap_or("").to_owned());
@@ -301,11 +393,11 @@ pub async fn product_builds(web: &reqwest::Client, p: &Product, fresh: bool) -> 
     {
         out.push(o);
     }
-    out.sort_by(|a, b| a.created.cmp(&b.created));
+    out.sort_by_key(|a| a.created);
     let mut seen = std::collections::HashSet::new();
     out.retain(|b| seen.insert(b.build.clone()));
     let num = |b: &Build| b.build.split('.').map(|x| x.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
-    out.sort_by(|a, b| num(b).cmp(&num(a)));
+    out.sort_by_key(|b| std::cmp::Reverse(num(b)));
     Ok(out)
 }
 
@@ -681,6 +773,30 @@ mod tests {
         let beta = answer(&[("26300.9711", "2b22470a-8b6f-498f-9c88-66f7b9fb56b1", "Windows 11, version 26H2 (26300.9711)"), oobe, net]);
         assert!(offered(product("w11-beta").unwrap(), &beta).is_none());
         assert!(offered(product("w11-beta").unwrap(), &serde_json::json!({})).is_none());
+    }
+
+    /// Live: asks UUP dump for every channel the way the background does, into a database,
+    /// and reads them back the way the page does. `cargo test -- --ignored channels_live`.
+    #[tokio::test]
+    #[ignore]
+    async fn channels_live() {
+        let db = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!().run(&db).await.unwrap();
+        let web = reqwest::Client::builder().user_agent("pve-vm-studio/test").build().unwrap();
+        let t = std::time::Instant::now();
+        refresh_offers(&web, &db, true).await.unwrap();
+        eprintln!("asked in {:.0} s", t.elapsed().as_secs_f64());
+        // A restart: the answers come back from the database.
+        *OFFERS.lock().unwrap() = None;
+        load_offers(&db).await;
+        let t = std::time::Instant::now();
+        for id in ["w11-beta", "w11-experimental", "w11-future"] {
+            let p = product(id).unwrap();
+            let list = product_builds(&web, p, false).await.unwrap();
+            eprintln!("{id}: offer {:?}, error {:?}, {} builds, newest {:?}", offer(p).map(|b| b.build), offer_error(p), list.len(), list.first().map(|b| &b.build));
+        }
+        eprintln!("listed in {:.2} s", t.elapsed().as_secs_f64());
+        assert!(["w11-beta", "w11-experimental", "w11-future"].iter().any(|id| offer(product(id).unwrap()).is_some()));
     }
 
     #[test]

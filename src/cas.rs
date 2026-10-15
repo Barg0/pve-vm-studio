@@ -47,14 +47,13 @@ fn certs_in_der(der: &[u8]) -> Vec<Vec<u8>> {
     let mut out = Vec::new();
     let mut i = 0;
     while i + 4 < der.len() {
-        if der[i] == 0x30 {
-            if let Ok((rest, _)) = x509_parser::parse_x509_certificate(&der[i..]) {
+        if der[i] == 0x30
+            && let Ok((rest, _)) = x509_parser::parse_x509_certificate(&der[i..]) {
                 let len = der.len() - i - rest.len();
                 out.push(der[i..i + len].to_vec());
                 i += len;
                 continue;
             }
-        }
         i += 1;
     }
     out

@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WimImage {
     pub index: u32,
     pub name: String,
@@ -122,7 +122,7 @@ async fn read_xml(iso: &Path, inner: &str) -> Result<String> {
     let _ = child.kill().await;
 
     // UTF-16LE with a BOM.
-    let units: Vec<u16> = xml.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let units: Vec<u16> = xml.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
     Ok(String::from_utf16_lossy(&units).trim_start_matches('\u{feff}').to_owned())
 }
 

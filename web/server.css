@@ -962,3 +962,20 @@ a.btn, a.btn:hover { text-decoration: none; }
 .q-link { width: 12px; height: 12px; flex: none; color: var(--fg-muted); }
 .job-item.s-skipped .job-name, .job-item.s-skipped .job-sub { color: var(--fg-muted); }
 .job-hist i.s-skipped { background: transparent; outline: 1px dashed var(--fg-muted); opacity: 1; }
+
+/* ---------- the studio was updated: reload ----------
+   One line under the top bar on every page, until the page is reloaded. While it shows,
+   the layout below gives up its height so nothing is pushed out of sight. */
+  .reload-strip {
+    display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 14px;
+    border-bottom: 1px solid var(--border); background: var(--bg-subtle); font-size: 13px;
+  }
+  .reload-strip[hidden] { display: none; }
+  .reload-strip.ok { background: var(--accent-soft); border-bottom-color: var(--accent-border); }
+  .reload-strip-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .reload-strip-text .muted { color: var(--fg-muted); }
+  .reload-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--accent); }
+  .reload-strip.down .reload-dot { background: var(--warn); animation: reload-pulse 1.2s ease-in-out infinite; }
+  @keyframes reload-pulse { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .reload-strip.down .reload-dot { animation: none; } }
+  body.reload-on .layout, body.reload-on .login-wrap { height: calc(100% - 48px - 38px); }

@@ -136,8 +136,8 @@ pub async fn status(web: &reqwest::Client, fresh: bool, development: bool) -> Va
             // What changed between this build and the development build: its commits.
             let mut commits = Vec::new();
             let mut ahead = 0;
-            if !own.is_empty() && !built.is_empty() {
-                if let Some(c) = gh(web, &format!("/compare/{own}...{built}")).await {
+            if !own.is_empty() && !built.is_empty()
+                && let Some(c) = gh(web, &format!("/compare/{own}...{built}")).await {
                     ahead = c["ahead_by"].as_u64().unwrap_or(0);
                     commits = c["commits"].as_array().map(|a| {
                         a.iter().rev().take(15).map(|x| json!({
@@ -147,7 +147,6 @@ pub async fn status(web: &reqwest::Client, fresh: bool, development: bool) -> Va
                         })).collect::<Vec<_>>()
                     }).unwrap_or_default();
                 }
-            }
             state = if built.is_empty() { "none" } else if !own.is_empty() && built.starts_with(own) { "current" } else if ahead > 0 || own.is_empty() { "update" } else { "current" };
             development_build = json!({ "release": rel, "commit": built.chars().take(7).collect::<String>(), "ahead": ahead, "commits": commits });
         } else {

@@ -130,7 +130,62 @@ $id("logoutBtn").addEventListener("click", async () => {
   showLogin();
 });
 
+/* ---------- the studio was updated: reload ----------
+   An open page keeps running the version it loaded. It remembers which build answered then
+   and asks again every 20 seconds: another build means the studio was updated (by anyone,
+   or the automatic update) - the strip offers a reload. No answer means it is restarting. */
+const studioBuild = { loaded: "", timer: null, updated: "", down: false, gen: 0 };
+function buildWords(now, was) {
+  const parse = b => { const m = /^(\S+)(?: \(([^)]+)\))?$/.exec(b || ""); return m ? { v: m[1], c: m[2] || "" } : { v: b || "", c: "" }; };
+  const n = parse(now), w = parse(was);
+  return n.v === w.v && n.c ? `development build ${n.c}` : n.v + (n.c ? ` (${n.c})` : "");
+}
+function paintReloadStrip() {
+  const el = $id("reloadStrip");
+  const state = studioBuild.down ? "down" : studioBuild.updated ? "ok" : "";
+  document.body.classList.toggle("reload-on", !!state);
+  el.hidden = !state;
+  if (!state) return;
+  el.className = "reload-strip " + state;
+  el.innerHTML = state === "down"
+    ? `<span class="reload-dot"></span><span class="reload-strip-text"><b>The studio is not answering</b> - it is most likely restarting. This page keeps trying.</span>`
+    : `<span class="reload-dot"></span><span class="reload-strip-text"><b>The studio was updated to ${esc(buildWords(studioBuild.updated, studioBuild.loaded))}</b> <span class="muted">from ${esc(studioBuild.loaded)}</span></span>
+       <button class="btn primary sm" type="button" id="reloadBtn">Reload</button>`;
+  const b = $id("reloadBtn");
+  if (b) b.addEventListener("click", async () => {
+    // The design saves as it goes; one still on its way is sent before the page goes.
+    b.disabled = true; b.textContent = "Saving…";
+    try { await flushSave(); } catch { /* the reload shows what was saved */ }
+    location.reload();
+  });
+}
+async function watchBuild() {
+  clearTimeout(studioBuild.timer);
+  // One loop only: a sign-in while a check is on its way starts a new one, the old one ends.
+  const gen = ++studioBuild.gen;
+  try {
+    const r = await fetch("/api/session", { cache: "no-store" });
+    // Signed out (the restart can end a session): the sign-in takes over and starts this again.
+    if (r.status === 401) { studioBuild.down = false; paintReloadStrip(); return; }
+    if (!r.ok) throw new Error(String(r.status));
+    const s = await r.json();
+    studioBuild.down = false;
+    if (s.build && s.build !== studioBuild.loaded) studioBuild.updated = s.build;
+  } catch { studioBuild.down = true; }
+  if (gen !== studioBuild.gen) return;
+  paintReloadStrip();
+  studioBuild.timer = setTimeout(watchBuild, studioBuild.down ? 5000 : 20000);
+}
+
 async function signedIn(s) {
+  // The build this page was loaded with: the first answer, kept until a reload.
+  if (!studioBuild.loaded && s && s.build) studioBuild.loaded = s.build;
+  if (studioBuild.loaded) {
+    // Signed in again after the restart: the new build is known right away.
+    if (s && s.build && s.build !== studioBuild.loaded) studioBuild.updated = s.build;
+    studioBuild.down = false; paintReloadStrip();
+    studioBuild.gen++; clearTimeout(studioBuild.timer); studioBuild.timer = setTimeout(watchBuild, 20000);
+  }
   session.user = s.user; session.csrf = s.csrf;
   $id("login").hidden = true; $id("layout").hidden = false;
   document.querySelector(".topbar .actions").style.visibility = "";
@@ -740,6 +795,15 @@ async function wmLoadBuilds(fresh) {
   // Until Microsoft Update has answered, the labels are estimates: asked again shortly.
   clearTimeout(wmUi.wuTimer);
   if (wmUi.wu[id] && !wmUi.wu[id].checked) wmUi.wuTimer = setTimeout(() => { if (wmUi.product === id && location.hash === "#/winmedia") wmLoadBuilds(true); }, 10000);
+  // An Insider channel the studio is still asking Microsoft about: looked at again every
+  // 20 seconds until it has answered.
+  clearTimeout(wmUi.askTimer);
+  const asked = (wmUi.products || []).find(p => p.id === id);
+  if (asked && asked.asking) wmUi.askTimer = setTimeout(async () => {
+    if (wmUi.product !== id || location.hash !== "#/winmedia") return;
+    try { const r = await api("GET", "/media/products"); wmUi.products = r.products; } catch { /* next round */ }
+    wmLoadBuilds(true);
+  }, 20000);
   const list = wmUi.builds[id] || [];
   // The newest stable (Patch Tuesday) build - what the default filter shows first.
   if (!list.some(b => b.uuid === wmUi.uuid)) { const first = list.find(b => / (B|OOB)$/.test(b.kind)) || list[0]; wmUi.uuid = first ? first.uuid : ""; wmUi.editions = null; }
@@ -831,6 +895,7 @@ function paintWinMedia() {
     </div>`;
 
   const rows = !all ? `<tr><td colspan="5" class="muted">Asking the catalog…</td></tr>`
+    : !builds.length && prod.asking ? `<tr><td colspan="5" class="muted">Asking Microsoft which build this channel offers - it shows here by itself.</td></tr>`
     : !builds.length ? `<tr><td colspan="5" class="muted">${kind === "b" && !q && wmUi.wu[wmUi.product] && !wmUi.wu[wmUi.product].checked ? "Checking Microsoft Update for the security releases…" : "No build matches - clear the search or pick All."}</td></tr>`
     : builds.map(x => `<tr class="${x.uuid === wmUi.uuid ? "sel" : ""}" data-wm-build="${esc(x.uuid)}">
       <td>${wmBuild(x.build)}${x.uuid === all[0].uuid ? ' <span class="pill status ok wm-newest">Newest</span>' : ""}</td>
@@ -986,7 +1051,7 @@ function goldDetailHtml(g) {
   const utc = iso => iso ? String(iso).replace("T", " ").slice(0, 16) + " UTC" : "";
   const baked = m.createdUtc && g.created_at ? Math.max(0, Math.round((new Date(m.createdUtc) - new Date(g.created_at)) / 1000)) : null;
   const inside = win ? [
-    ["Edition", m.editionId], ["Experience", m.installationType === "Server Core" ? "Server Core" : m.installationType === "Server" ? "Desktop Experience" : m.installationType],
+    ["Edition", g.edition_name || m.editionId], ["Experience", m.installationType === "Server Core" ? "Server Core" : m.installationType === "Server" ? "Desktop Experience" : m.installationType],
     ["Build", m.build], ["Language", m.language || m.imageLanguage], ["Activation", ACTIVATION[m.activation] || m.activation || (m.key === "gvlk" ? ACTIVATION["kms-client"] : "")],
     ["Evaluation", m.evaluation === undefined ? "" : m.evaluation ? "Yes - 180 days" : "No"], ["Generalized", m.generalized === undefined ? "" : m.generalized ? "Yes" : "No - VMs share its SID"],
     ["Firmware", "OVMF (UEFI) · q35"], ["Secure Boot", "On · Microsoft keys enrolled"],
@@ -1864,7 +1929,11 @@ function jobSubject(j) {
     const image = j.image || (g && g.image_id) || p.image || bakeImage();
     // Linux and Windows bakes share the kind "bake", so without an image the colour is
     // unknown - neutral grey rather than a guessed OS colour.
-    return { key: "gold:" + p.gold, name: "Gold " + String(p.gold).replace(/^(pve-|bake-)/, ""), icon: "gold-image.svg",
+    // The studio's name for it ("W11 Enterprise 26H2 26300.9711 (c864831d)"). A gold still
+    // baking has no build of its own yet, and a removed one no row: they keep the name their
+    // job was titled with.
+    const named = g && g.name_short && g.status === "ready" ? g.name_short : j.title.replace(/^(Bake|Remove) /, "");
+    return { key: "gold:" + p.gold, name: named, icon: "gold-image.svg",
       band: image ? serverGlyphBand({ imageId: image }) : g && g.os === "linux" ? "linux" : "studio", what: "Gold" };
   }
   // A window's bake that waits for its ISO: no gold yet - the gold it replaces names it.

@@ -924,7 +924,7 @@ mod tests {
         assert!(y.contains("use-routes: false"), "a DHCP extra adapter must not take the default route");
         // One DHCP adapter: cloud-init's own default does it.
         let dhcp = NicCfg { address: String::new(), ..primary };
-        assert!(vm_network_config(&[dhcp.clone()], false).is_none());
+        assert!(vm_network_config(std::slice::from_ref(&dhcp), false).is_none());
         // A CIS gold: networkd takes no router advertisements, even on one DHCP adapter.
         let cis = vm_network_config(&[dhcp], true).unwrap();
         assert!(cis.contains("accept-ra: false") && cis.contains("dhcp4: true"));

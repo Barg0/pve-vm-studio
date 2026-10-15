@@ -141,7 +141,7 @@ fn render_icons() {
     let js = std::fs::read_to_string("web/studio.js").expect("web/studio.js");
     let themes = themes(&js);
     assert!(themes.iter().any(|t| t.id == "proxmox_dark"), "the Proxmox dark theme is gone from web/studio.js");
-    let mut table = String::from("/// (id, name, dark, colours by key) - the studio's themes.\npub static THEMES: &[(&str, &str, bool, &[(&str, &str)])] = &[\n");
+    let mut table = String::from("/// (id, name, dark, colours by key) - the studio's themes.\n#[allow(clippy::type_complexity)]\npub static THEMES: &[(&str, &str, bool, &[(&str, &str)])] = &[\n");
     for t in &themes {
         let c: String = t.colours.iter().map(|(k, v)| format!("(\"{k}\", \"{v}\"), ")).collect();
         table += &format!("    (\"{}\", \"{}\", {}, &[{c}]),\n", t.id, t.name, t.dark);
@@ -202,6 +202,29 @@ fn regex_free_band(s: &str, t: &Theme) -> String {
     out
 }
 
+/// The studio's own image names (IMAGE_CATALOG in web/studio.js): every entry's `id` and
+/// the `label` after it - so job titles, logs and mails name an image as the page does.
+fn image_names(js: &str) -> Vec<(String, String)> {
+    let start = js.find("const IMAGE_CATALOG = [").expect("IMAGE_CATALOG in web/studio.js");
+    let end = start + js[start..].find("\n];").expect("the end of IMAGE_CATALOG");
+    let field = |s: &str, key: &str| -> Option<(String, usize)> {
+        let i = s.find(&format!("\n    {key}: \""))? + key.len() + 8;
+        let len = s[i..].find('"')?;
+        Some((s[i..i + len].to_owned(), i + len))
+    };
+    let mut out = Vec::new();
+    let mut rest = &js[start..end];
+    while let Some((id, at)) = field(rest, "id") {
+        rest = &rest[at..];
+        // Its own label: before the entry closes, never the next entry's.
+        let entry = &rest[..rest.find("\n  }").unwrap_or(rest.len())];
+        let (label, at) = field(entry, "label").unwrap_or_else(|| panic!("IMAGE_CATALOG entry {id} has no label"));
+        rest = &rest[at..];
+        out.push((id, label));
+    }
+    out
+}
+
 fn main() {
     let commit = git(&["rev-parse", "--short=7", "HEAD"]).unwrap_or_default();
     let dirty = !commit.is_empty() && git(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
@@ -210,4 +233,13 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/index");
     println!("cargo:rerun-if-changed=web/studio.js");
     render_icons();
+    let js = std::fs::read_to_string("web/studio.js").expect("web/studio.js");
+    let names = image_names(&js);
+    assert!(names.len() > 30, "IMAGE_CATALOG in web/studio.js reads as only {} entries", names.len());
+    let mut table = String::from("/// (id, label) - the studio's image names, from IMAGE_CATALOG in web/studio.js.\npub static IMAGE_NAMES: &[(&str, &str)] = &[\n");
+    for (id, label) in &names {
+        table += &format!("    ({id:?}, {label:?}),\n");
+    }
+    table += "];\n";
+    std::fs::write(std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("image_names.rs"), table).unwrap();
 }

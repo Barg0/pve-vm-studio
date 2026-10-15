@@ -543,7 +543,9 @@ async fn spawn_bakes(app: &AppState, run: &mut Run) -> Result<()> {
 /// It reads the new ISO only when it starts (window_bake_job) - it can never bake the old one.
 async fn queue_bake(app: &AppState, run: &Run, from: &str, after: Option<&str>) -> Result<String> {
     let old = golds::get(&app.db, from).await?.ok_or_else(|| anyhow!("gold {from} is gone"))?;
-    let title = format!("Bake {} {}", short_name(&old.image_id), run.to_build);
+    // The new gold has no id before its bake starts; the old one's ISO says the channel.
+    let iso = options(&old).map(|o| o.iso).unwrap_or_default();
+    let title = format!("Bake {}", crate::names::gold_from(&old.image_id, &run.to_build, &iso, "", false, ""));
     let params = json!({ "auto_update": run.id, "from": from, "after": after, "image": old.image_id, "build": run.to_build });
     let (a, rid, f) = (app.clone(), run.id.clone(), from.to_owned());
     app.jobs.spawn("bake", &title, "auto-update", params, move |log| window_bake_job(a, log, rid, f)).await
@@ -575,7 +577,7 @@ pub async fn window_bake_job(app: AppState, log: JobLog, run_id: String, from: S
     let img = now_imgs
         .iter()
         .find(|i| i.edition_id.eq_ignore_ascii_case(&was.edition_id) && i.installation_type == was.installation_type)
-        .ok_or_else(|| anyhow!("{new_iso} has no {} ({}) image", was.edition_id, was.installation_type))?;
+        .ok_or_else(|| anyhow!("{new_iso} has no {} image", crate::names::edition(&was.edition_id, &was.installation_type)))?;
     opt.iso = new_iso.clone();
     opt.index = img.index;
     opt.keep_current = true;
@@ -583,21 +585,6 @@ pub async fn window_bake_job(app: AppState, log: JobLog, run_id: String, from: S
     sqlx::query("UPDATE golds SET job_id = ? WHERE id = ?").bind(log.id()).bind(&gid).execute(&app.db).await?;
     log.line(format!("Gold {gid} from {new_iso} - it replaces {from} ({})", run.from_build)).await;
     api::windows_bake_job(app, log, gid, opt, img, path).await
-}
-
-/// Short names for narrow places: ws2025-datacenter-core -> WS2025 Core, w11-25h2 -> W11 25H2.
-pub fn short_name(id: &str) -> String {
-    id.split('-')
-        .filter(|t| *t != "datacenter")
-        .enumerate()
-        .map(|(i, t)| match t {
-            _ if i == 0 => t.to_uppercase(),
-            "standard" => "Std".into(),
-            _ if t.chars().any(|c| c.is_ascii_digit()) => t.to_uppercase(),
-            _ => t[..1].to_uppercase() + &t[1..],
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 /// The last step, as one job: the old ISO goes, then the golds beyond the kept number.
@@ -658,7 +645,7 @@ async fn cleanup(app: &AppState, log: &JobLog, run: &Run, keep: u32) -> Result<(
                 log.line(format!("Keeping {}: a design pins it", g.id)).await;
                 continue;
             }
-            log.run(format!("Removing gold {} ({})", g.id, g.image_id)).await;
+            log.run(format!("Removing gold {}", crate::names::gold(g))).await;
             golds::remove(&app.pve, &app.db, g, log).await?;
             crate::cis::remove(&app.config.data_dir, &g.id).await;
         }
@@ -712,6 +699,9 @@ struct State {
 /// works in a fixed order - fresh data, preflight, the studio's own update, virtio-win, WinPE,
 /// the Features on Demand check, then the ISOs one after another with each ISO's bakes beside the next one.
 pub async fn scheduler(app: AppState) {
+    // The Insider channels' last answers at once, then asked again in the background.
+    uup::load_offers(&app.db).await;
+    tokio::spawn(uup::offers_loop(app.web.clone(), app.db.clone()));
     tokio::time::sleep(std::time::Duration::from_secs(90)).await;
     let mut st = State::default();
     loop {
@@ -813,6 +803,10 @@ async fn tick(app: &AppState, st: &mut State) -> Result<()> {
             st.window_checked = Some((key, std::time::Instant::now()));
             if let Err(e) = crate::wu::refresh(&app.config.data_dir, std::time::Duration::ZERO).await {
                 tracing::warn!("Microsoft Update not asked: {e:#}");
+            }
+            // What the Insider channels offer now - behind a refresh already running.
+            if let Err(e) = uup::refresh_offers(&app.web, &app.db, true).await {
+                tracing::warn!("Insider channels not asked: {e:#}");
             }
             st.checked = Some(std::time::Instant::now());
             if let Err(e) = check(app).await {
@@ -1049,7 +1043,6 @@ pub async fn plan(app: &AppState) -> serde_json::Value {
     let block = |label: String, start: i64, secs: Option<i64>, fallback: i64, kind: &str| {
         json!({ "label": label, "start": start, "end": start + secs.unwrap_or(fallback), "known": secs.is_some(), "kind": kind })
     };
-    let short = short_name;
     // Before the ISOs: virtio-win, then WinPE, when they are due.
     let mut t = 0i64;
     let mut pre = Vec::new();
@@ -1080,7 +1073,7 @@ pub async fn plan(app: &AppState) -> serde_json::Value {
     for r in &runs {
         let name = uup::product(&r.product).map(|p| p.name).unwrap_or("Windows");
         let ready = if matches!(r.step.as_str(), "pending" | "iso") {
-            let mut b = block(format!("{} · {}", short(&r.product), r.to_build), ti, last_took(&app.db, "media", "media", &r.product).await, 5400, "iso");
+            let mut b = block(format!("{} · {}", crate::names::product(&r.product), r.to_build), ti, last_took(&app.db, "media", "media", &r.product).await, 5400, "iso");
             b["title"] = json!(format!("{name} {}", r.to_build));
             ti = b["end"].as_i64().unwrap_or(ti);
             iso.push(b);
@@ -1090,8 +1083,9 @@ pub async fn plan(app: &AppState) -> serde_json::Value {
         };
         for f in r.followers().iter().filter(|f| f.to.is_none() || f.job.is_some()) {
             let Ok(Some(g)) = golds::get(&app.db, &f.from).await else { continue };
-            let m: serde_json::Value = serde_json::from_str(&g.manifest).unwrap_or_default();
-            let full = m["displayName"].as_str().map(str::to_owned).unwrap_or_else(|| g.image_id.clone());
+            // The release and build the run makes - not the old gold's.
+            let iso = options(&g).map(|o| o.iso).unwrap_or_default();
+            let full = crate::names::gold_from(&g.image_id, &r.to_build, &iso, "", true, "");
             let took = match g.job_id.as_deref() {
                 Some(j) => app.jobs.get(j).await.ok().flatten().and_then(|row| {
                     let at = |t: &Option<String>| t.as_deref().and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok());
@@ -1100,7 +1094,7 @@ pub async fn plan(app: &AppState) -> serde_json::Value {
                 None => None,
             };
             let kind = if g.image_id.starts_with("w1") { "client" } else { "server" };
-            bakes.push((ready, json!({ "label": short(&g.image_id), "title": full, "kind": kind }), took));
+            bakes.push((ready, json!({ "label": crate::names::image_short(&g.image_id), "title": full, "kind": kind }), took));
         }
     }
     // The bakes into the slots beside the ISO lane, each at the earliest free one.
@@ -1219,11 +1213,10 @@ async fn next_window(app: &AppState) -> String {
 /// A gold as one line of a mail's list: its image, its id, its state.
 fn gold_row(g: &GoldRow, state: Option<(Tone, &str)>) -> mail::Row {
     let m: serde_json::Value = serde_json::from_str(&g.manifest).unwrap_or_default();
-    let name = m["displayName"].as_str().map(str::to_owned).unwrap_or_else(|| g.image_id.clone());
     mail::Row {
         icon: "gold-image",
-        name,
-        detail: m["id"].as_str().unwrap_or(&g.name).to_owned(),
+        name: crate::names::gold_long(g),
+        detail: crate::names::gold_id(g),
         right: m["build"].as_str().unwrap_or("").trim_start_matches("10.0.").to_owned(),
         state: state.map(|(t, s)| (t, s.to_owned())),
     }

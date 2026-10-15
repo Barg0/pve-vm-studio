@@ -191,7 +191,7 @@ pub fn sockets_for(node: Option<&NodeCpu>, cores: u32, client: bool) -> u32 {
     if client {
         s = s.min(2);
     }
-    while s > 1 && cores % s != 0 {
+    while s > 1 && !cores.is_multiple_of(s) {
         s -= 1;
     }
     s
@@ -231,7 +231,7 @@ mod tests {
         let old = node("pve-04", "Xeon X5670", "GenuineIntel", 2, "aes popcnt sse4_2 ssse3");
         assert_eq!(pick_cpu(&[a.clone(), old]).0, "x86-64-v2-AES");
         assert_eq!(security_flags(&[a.clone(), b], "x86-64-v3"), vec!["md-clear", "pcid", "spec-ctrl", "ssbd"]);
-        assert!(security_flags(&[a.clone()], "host").is_empty());
+        assert!(security_flags(std::slice::from_ref(&a), "host").is_empty());
         assert_eq!(cpu_value("host", true, &[], true), "host");
         assert_eq!(cpu_value("host", false, &[], true), "host,flags=-nested-virt");
         assert_eq!(cpu_value("x86-64-v3", true, &["md-clear", "pcid"], true), "x86-64-v3,flags=+md-clear;+pcid");

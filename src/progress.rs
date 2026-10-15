@@ -89,7 +89,7 @@ fn history(dir: &std::path::Path, anchor: &str, runs: usize) -> Vec<(String, f64
         .filter(|p| p.extension().is_some_and(|x| x == "steps"))
         .filter_map(|p| Some((std::fs::metadata(&p).ok()?.modified().ok()?, p)))
         .collect();
-    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.sort_by_key(|f| std::cmp::Reverse(f.0));
     let mut seen: Vec<Vec<(String, f64)>> = Vec::new();
     for (_, p) in files {
         if seen.len() >= runs {

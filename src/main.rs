@@ -24,6 +24,7 @@ mod logging;
 mod mail;
 mod maintenance;
 mod markers;
+mod names;
 mod notify;
 mod progress;
 mod pve;

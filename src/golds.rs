@@ -474,7 +474,7 @@ async fn bake_linux_inner(
     pr.stage(25.0, 27.0, "building the seed");
     let stamp = Utc::now().format("%Y%m%d-%H%M").to_string();
     let user_data = linux::bake_user_data(img, opt);
-    let seed_name = format!("pvs-seed-{}", working_name(&gold_id));
+    let seed_name = format!("pvs-seed-{}", working_name(gold_id));
     let cis_level = opt.cis_level(img.id);
     // A small disk labelled CIDATA (NoCloud reads it as it reads the ISO), attached once
     // the VM exists. A CIS bake carries the pvs-cis bundle on it as well.
@@ -507,7 +507,7 @@ async fn bake_linux_inner(
     pve.ensure_pool(GOLD_POOL, "PVE VM Studio: golds (templates) and the bakes that make them").await?;
     let vmid_guard = pve.vmid_guard().await;
     let vmid = pve.free_vmid_in(GOLD_IDS).await?;
-    let name = working_name(&gold_id);
+    let name = working_name(gold_id);
     let mut net0 = format!("virtio={bake_mac},bridge={}", p.bridge);
     if let Some(v) = p.vlan {
         net0 += &format!(",tag={v}");
@@ -650,9 +650,7 @@ async fn bake_linux_inner(
         .filter_map(|l| l.split_whitespace().nth(1))
         .collect();
     let kernel = report
-        .lines()
-        .filter(|l| l.starts_with("BAKE-KERNEL "))
-        .last()
+        .lines().rfind(|l| l.starts_with("BAKE-KERNEL "))
         .and_then(|l| l.split_whitespace().nth(1))
         .unwrap_or("")
         .to_owned();
@@ -661,12 +659,12 @@ async fn bake_linux_inner(
     pr.stage(99.0, 100.0, "making it a template");
     seed::detach(pve, node, vmid, linux::SEED_SLOT).await?;
 
-    let gold_name = self::gold_name(&gold_id);
+    let gold_name = self::gold_name(gold_id);
     // New-Vhdx's New-LinuxGoldManifest, then the keys every gold shares.
     let region = opt.region.as_ref();
     let r = |f: fn(&linux::Region) -> &String| region.map(|x| f(x).clone()).unwrap_or_default();
     let manifest = complete_manifest(
-        &gold_id,
+        gold_id,
         json!({
             "label": "",
             "osFamily": "linux",
@@ -688,7 +686,7 @@ async fn bake_linux_inner(
             "kernel": kernel,
             "updatesApplied": opt.updates,
             "features": opt.features,
-            "aptMirror": opt.mirror_uri(&img).unwrap_or_default(),
+            "aptMirror": opt.mirror_uri(img).unwrap_or_default(),
             "sourceUrl": img.url,
             "sourceFormat": img.url.rsplit('.').next().unwrap_or(""),
             "sourceChecksum": checksum,
@@ -738,11 +736,12 @@ async fn bake_linux_inner(
         .bind(gold_id)
         .execute(&ctx.db)
         .await?;
+    let named = get(&ctx.db, gold_id).await.ok().flatten().map(|g| crate::names::gold(&g)).unwrap_or_else(|| gold_name.clone());
     if missing.is_empty() {
-        log.ok(format!("Gold ready: {gold_name} (template {vmid}, kernel {kernel})")).await;
+        log.ok(format!("Gold ready: {named} - template {vmid}, kernel {kernel}")).await;
     } else {
         log.warn(format!(
-            "Gold ready: {gold_name} (template {vmid}) - packages that did not arrive: {}",
+            "Gold ready: {named} - template {vmid}; packages that did not arrive: {}",
             missing.join(" ")
         ))
         .await;

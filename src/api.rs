@@ -35,7 +35,7 @@ use crate::{update,
     tls::{self, AcmeSettings, ServerSettings, TlsSettings},
     virtio,
     vms::{self, VmSpec},
-    autoupdate, cas, mail, maintenance, media, notify, selfnet, uup, wim, windows, winpe,
+    autoupdate, cas, mail, maintenance, media, names, notify, selfnet, uup, wim, windows, winpe,
     AppState,
 };
 
@@ -126,6 +126,9 @@ pub fn router() -> Router<AppState> {
 struct SessionInfo {
     user: String,
     csrf: String,
+    /// The build that answers, 0.1.0 (9dd4f79): an open page that loaded another one offers
+    /// a reload after an update.
+    build: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -143,7 +146,7 @@ async fn realms(State(app): State<AppState>) -> ApiResult<Json<Vec<Realm>>> {
 }
 
 async fn session(user: User) -> Json<SessionInfo> {
-    Json(SessionInfo { user: user.session.user, csrf: user.session.csrf })
+    Json(SessionInfo { user: user.session.user, csrf: user.session.csrf, build: update::current_label() })
 }
 
 #[derive(Deserialize)]
@@ -185,7 +188,7 @@ async fn login(
     let (id, s) = app.sessions.create(ticket).await;
     tracing::info!("{} logged in", s.user);
     let jar = jar.add(session_cookie(id, !app.config.plain_http));
-    Ok((jar, Json(SessionInfo { user: s.user, csrf: s.csrf })))
+    Ok((jar, Json(SessionInfo { user: s.user, csrf: s.csrf, build: update::current_label() })))
 }
 
 async fn logout(State(app): State<AppState>, jar: CookieJar, user: User) -> impl IntoResponse {
@@ -845,6 +848,12 @@ async fn list_golds(State(app): State<AppState>, _user: User) -> ApiResult<impl 
                 v["build_full"] = json!(b);
             }
             v["language"] = json!(golds::language(g));
+            // The studio's names for it - the page shows these, never builds its own.
+            v["name_short"] = json!(names::gold(g));
+            let m: serde_json::Value = serde_json::from_str(&g.manifest).unwrap_or_default();
+            if let Some(e) = m["editionId"].as_str() {
+                v["edition_name"] = json!(names::edition(e, m["installationType"].as_str().unwrap_or("")));
+            }
             // The Insider channel it was baked from, by its ISO's name (outlives the ISO).
             let iso = serde_json::from_str::<windows::WinBakeOptions>(&g.options).map(|o| o.iso).unwrap_or_default();
             v["channel"] = json!(uup::insider_of_iso(&iso).map(|p| p.channel()).unwrap_or(""));
@@ -950,7 +959,7 @@ async fn start_bake(
         .jobs
         .spawn(
             "bake",
-            &format!("Bake {} ({})", img.name, golds::working_name(&gold_id)),
+            &format!("Bake {}", names::gold_from(img.id, "", "", &gold_id, false, img.name)),
             &user.session.user,
             json!({ "image": img.id, "gold": gold_id, "options": req.options }),
             move |log| golds::bake_linux(ctx, log, gid, img, opts, bake),
@@ -1019,7 +1028,7 @@ async fn remove_gold(State(app): State<AppState>, user: User, Path(id): Path<Str
         return Err(ApiError::bad_request(format!("{used} VM(s) in PVE are linked clones of {} - PVE keeps a template while a clone uses it; remove those VMs in PVE first", gold.name)));
     }
     let (pve, db, data) = (app.pve.clone(), app.db.clone(), app.config.data_dir.clone());
-    let title = format!("Remove {}", gold.name);
+    let title = format!("Remove {}", names::gold(&gold));
     let job = app
         .jobs
         .spawn("remove-gold", &title, &user.session.user, json!({ "gold": id }), move |log| remove_gold_job(pve, db, data, gold, log))
@@ -1457,7 +1466,7 @@ async fn new_self_signed(State(app): State<AppState>, user: User) -> ApiResult<i
         return Err(ApiError::bad_request("the studio runs with plain_http - it has no certificate to replace"));
     }
     let server: ServerSettings = settings::load(&app.db, "server").await?;
-    let (cert, key) = tls::self_signed(&tls::local_names(&server.fqdn)).map_err(anyhow::Error::from)?;
+    let (cert, key) = tls::self_signed(&tls::local_names(&server.fqdn))?;
     let paths = tls::Paths::new(&app.config.data_dir);
     let info = tls::install(&paths, app.tls.as_ref(), cert.as_bytes(), key.as_bytes()).await?;
     let mut s: TlsSettings = settings::load(&app.db, "tls").await?;
@@ -1802,7 +1811,7 @@ async fn start_windows_bake(
 /// policies, WinPE. Returns (gold, image, ISO path) - the bake form's, the window's.
 pub async fn prepare_windows_bake(app: &AppState, opt: &mut windows::WinBakeOptions) -> ApiResult<(String, wim::WimImage, std::path::PathBuf)> {
     opt.upgrade();
-    let path = iso_path(&app, &opt.iso).ok_or_else(|| ApiError::bad_request("not an ISO volume"))?;
+    let path = iso_path(app, &opt.iso).ok_or_else(|| ApiError::bad_request("not an ISO volume"))?;
     let images = wim::inspect(&path, &app.config.data_dir.join("wim-cache.json"))
         .await
         .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
@@ -1845,11 +1854,8 @@ pub async fn prepare_windows_bake(app: &AppState, opt: &mut windows::WinBakeOpti
 pub async fn spawn_windows_bake(app: &AppState, by: &str, mut opt: windows::WinBakeOptions, extra: serde_json::Value) -> ApiResult<(String, String)> {
     let (gold_id, img, path) = prepare_windows_bake(app, &mut opt).await?;
     let gid = gold_id.clone();
-    let title = format!(
-        "Bake {} ({})",
-        windows::virtual_edition(&opt.edition_upgrade).map(|v| v.display.to_owned()).unwrap_or_else(|| img.name.clone()),
-        golds::working_name(&gold_id)
-    );
+    let image_id = windows::gold_image_id(&img, &opt.edition_upgrade);
+    let title = format!("Bake {}", names::gold_from(&image_id, if img.version.is_empty() { &img.build } else { &img.version }, &opt.iso, &gold_id, false, &img.name));
     let mut params = json!({ "gold": gold_id, "iso": opt.iso, "index": opt.index });
     if let (Some(p), Some(e)) = (params.as_object_mut(), extra.as_object()) {
         p.extend(e.clone());
@@ -2137,16 +2143,30 @@ struct MediaQuery {
 
 /// Every product with its newest build, from one reading of the catalog.
 async fn media_products(State(app): State<AppState>, _user: User, axum::extract::Query(q): axum::extract::Query<MediaQuery>) -> ApiResult<impl IntoResponse> {
+    // Refresh asks the Insider channels again too - in the background, at most every quarter
+    // of an hour; the page shows the last answers meanwhile.
+    if q.fresh && uup::offers_age().is_none_or(|a| a >= 900) {
+        let (web, db) = (app.web.clone(), app.db.clone());
+        tokio::spawn(async move {
+            if let Err(e) = uup::refresh_offers(&web, &db, false).await {
+                tracing::warn!("Insider channels not asked: {e:#}");
+            }
+        });
+    }
     let mut out = Vec::new();
     for p in uup::PRODUCTS.iter().filter(|p| p.listed) {
-        // A channel asked live may not answer: that one product says why, the rest list.
-        let (builds, error) = match uup::product_builds(&app.web, p, q.fresh).await {
-            Ok(b) => (b, None),
-            Err(e) if p.ring.is_some() => (Vec::new(), Some(format!("{e:#}"))),
-            Err(e) => return Err(e.into()),
+        let builds = uup::product_builds(&app.web, p, q.fresh).await?;
+        // A channel that has not answered yet: asking (the page looks again), or why not.
+        let (asking, error) = match p.ring {
+            Some(_) if uup::offer(p).is_none() => {
+                let e = uup::offer_error(p);
+                (e.is_none(), e)
+            }
+            Some(_) => (false, uup::offer_error(p)),
+            None => (false, None),
         };
         let newest = builds.first().map(|b| json!({ "build": b.build, "created": b.created, "kind": uup::release_kind(p, &b.build, b.created) }));
-        out.push(json!({ "id": p.id, "name": p.name, "group": p.group, "kind": p.kind, "insider": p.insider, "support": p.support, "count": builds.len(), "newest": newest, "error": error }));
+        out.push(json!({ "id": p.id, "name": p.name, "group": p.group, "kind": p.kind, "insider": p.insider, "support": p.support, "count": builds.len(), "newest": newest, "error": error, "asking": asking }));
     }
     Ok(Json(json!({ "products": out, "checked": uup::catalog_age().await })))
 }
@@ -2615,7 +2635,7 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
             .unwrap_or_default(),
         // Azure Local runs its own hypervisor, Hotpatch needs VBS: nested whatever the
         // defaults say.
-        hotpatch: hotpatch,
+        hotpatch,
         nested: str_of("imageId") == "azl" || hotpatch || if own { s["nestedVirtualization"].as_bool().unwrap_or(hw.nested) } else { hw.nested },
         cpu_type: if cpu_type == "auto" { String::new() } else { cpu_type },
         security_flags: hw.security_flags != "off",

@@ -243,7 +243,7 @@ async fn uncab(b64: &str) -> Result<String> {
     let out = tokio::process::Command::new("cabextract").arg("--pipe").arg(&tmp).output().await;
     let _ = tokio::fs::remove_file(&tmp).await;
     let out = out?.stdout;
-    let utf16: Vec<u16> = out.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let utf16: Vec<u16> = out.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
     Ok(String::from_utf16_lossy(&utf16).trim_start_matches('\u{feff}').to_owned())
 }
 

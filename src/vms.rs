@@ -460,7 +460,7 @@ async fn deploy_inner(
         }
     }
     crate::tags::paint(pve, &[os_tag]).await;
-    let notes = vm_notes(&spec, &gold, &image_name);
+    let notes = vm_notes(spec, &gold, &image_name);
     // CPU type from the bake settings, so a gold baked under older defaults follows them too.
     // Balloon deleted, not 0: the device stays (PVE sees the guest's real memory use) with
     // its target at full memory, so nothing is ever taken back - static memory.
@@ -482,8 +482,7 @@ async fn deploy_inner(
     let cpu = crate::hardware::cpu_value(&cpu_type, spec.nested, &flags, crate::hardware::nested_flag(pve).await);
     let sockets = crate::hardware::sockets_for(here, spec.cores, client);
     log.line(format!(
-        "CPU {cpu} ({why}){}{}",
-        format!(", NUMA with {sockets} socket(s)"),
+        "CPU {cpu} ({why}), NUMA with {sockets} socket(s){}",
         if queues > 1 { format!(", {queues} network queues") } else { String::new() }
     ))
     .await;
@@ -841,7 +840,7 @@ async fn deploy_inner(
             }
             if guest_provision_result(pve, db, log, vm_id, &node, vmid).await? {
                 pr.stage(90.0, 93.0, "restarting");
-                log.run(format!("Restarting - {} asked for it", restart_reason(&spec))).await;
+                log.run(format!("Restarting - {} asked for it", restart_reason(spec))).await;
                 pve.run_task(
                     &format!("/nodes/{}/qemu/{vmid}/status/shutdown", crate::pve::enc(&node)),
                     form![("timeout", "300"), ("forceStop", "1")],
@@ -912,11 +911,10 @@ async fn deploy_inner(
         hotpatch_check(pve, db, log, vm_id, &node, vmid, &gold.image_id).await;
     }
     // Built: PVE refuses to remove it, or its disks, until protection is taken off.
-    if spec.protection {
-        if let Err(e) = pve.vm_set(&node, vmid, form![("protection", 1)]).await {
+    if spec.protection
+        && let Err(e) = pve.vm_set(&node, vmid, form![("protection", 1)]).await {
             log.warn(format!("Protection not set: {e:#}")).await;
         }
-    }
     sqlx::query("UPDATE vms SET status = 'ready', ip = ? WHERE id = ?").bind(&ip).bind(vm_id).execute(db).await?;
     *made = None;
     log.ok(format!(
@@ -1184,38 +1182,6 @@ async fn hotpatch_check(pve: &Pve, db: &SqlitePool, log: &JobLog, vm_id: &str, n
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn spec() -> VmSpec {
-        serde_json::from_value(serde_json::json!({
-            "name": "dc-01", "gold": "g", "bridge": "vmbr0", "user": "admin", "password": "Passw0rd!Passw0rd",
-            "nic_name": "LAN", "extra_nics": [{ "bridge": "vmbr1", "vlan": null, "name": "" }],
-            "data_disks": [{ "size_gb": 20, "letter": "", "file_system": "NTFS", "label": "" }, { "size_gb": 5, "file_system": "None" }],
-            "windows_features": ["AD-Domain-Services"], "app_compat": true,
-        }))
-        .unwrap()
-    }
-
-    #[test]
-    fn manifest_like_build_vms() {
-        let m = guest_manifest(&spec(), "BC:24:11:AA:BB:CC", &["BC:24:11:00:00:01".into()], "deferred");
-        assert_eq!(m["pendingWindowsFeatures"][0], "AD-Domain-Services");
-        assert_eq!(m["pendingCapabilities"][0], "ServerCore.AppCompatibility~~~~0.0.1.0");
-        assert_eq!(m["networkAdapters"][0]["name"], "LAN");
-        assert_eq!(m["networkAdapters"][0]["macAddress"], "BC-24-11-AA-BB-CC");
-        assert_eq!(m["networkAdapters"][1]["name"], "net1");
-        // The raw disk stays out; the first data disk is scsi1 = LUN 1, drive D:.
-        assert_eq!(m["dataDisks"].as_array().unwrap().len(), 1);
-        assert_eq!(m["dataDisks"][0]["scsiLocation"], 1);
-        assert_eq!(m["dataDisks"][0]["letter"], "d");
-        assert_eq!(m["dataDisks"][0]["label"], "Data D");
-        assert!(m["domainJoin"].is_null() && m["azureArc"].is_null());
-        assert!(crate::windows::needs_guest(&m));
-    }
-}
-
 /// The WinPE ISO the deploy pass boots, and the virtio-win ISO when that WinPE does not carry
 /// vioscsi itself (built before it did) - or None, and the VM takes the seed-CD path: no
 /// WinPE yet, or one on a node-local storage of another node.
@@ -1268,5 +1234,37 @@ async fn deploy_pass_dism_errors(pve: &Pve, log: &JobLog, node: &str, vmid: u32)
     let skip = errors.len().saturating_sub(15);
     for e in errors.into_iter().skip(skip) {
         log.warn(e).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec() -> VmSpec {
+        serde_json::from_value(serde_json::json!({
+            "name": "dc-01", "gold": "g", "bridge": "vmbr0", "user": "admin", "password": "Passw0rd!Passw0rd",
+            "nic_name": "LAN", "extra_nics": [{ "bridge": "vmbr1", "vlan": null, "name": "" }],
+            "data_disks": [{ "size_gb": 20, "letter": "", "file_system": "NTFS", "label": "" }, { "size_gb": 5, "file_system": "None" }],
+            "windows_features": ["AD-Domain-Services"], "app_compat": true,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn manifest_like_build_vms() {
+        let m = guest_manifest(&spec(), "BC:24:11:AA:BB:CC", &["BC:24:11:00:00:01".into()], "deferred");
+        assert_eq!(m["pendingWindowsFeatures"][0], "AD-Domain-Services");
+        assert_eq!(m["pendingCapabilities"][0], "ServerCore.AppCompatibility~~~~0.0.1.0");
+        assert_eq!(m["networkAdapters"][0]["name"], "LAN");
+        assert_eq!(m["networkAdapters"][0]["macAddress"], "BC-24-11-AA-BB-CC");
+        assert_eq!(m["networkAdapters"][1]["name"], "net1");
+        // The raw disk stays out; the first data disk is scsi1 = LUN 1, drive D:.
+        assert_eq!(m["dataDisks"].as_array().unwrap().len(), 1);
+        assert_eq!(m["dataDisks"][0]["scsiLocation"], 1);
+        assert_eq!(m["dataDisks"][0]["letter"], "d");
+        assert_eq!(m["dataDisks"][0]["label"], "Data D");
+        assert!(m["domainJoin"].is_null() && m["azureArc"].is_null());
+        assert!(crate::windows::needs_guest(&m));
     }
 }

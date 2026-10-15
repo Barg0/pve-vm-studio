@@ -188,6 +188,12 @@ pub fn virtual_edition(key: &str) -> Option<&'static VirtualEdition> {
     VIRTUAL_EDITIONS.iter().find(|v| v.key == key)
 }
 
+/// The name of a gold image id a virtual edition makes (w11-education is "Windows 11
+/// Education") - the ones the page's image list has no entry of its own for.
+pub fn virtual_label(image_id: &str) -> Option<&'static str> {
+    VIRTUAL_EDITIONS.iter().find(|v| !v.target.is_empty() && client_id(v.manifest) == image_id).map(|v| v.display)
+}
+
 /// Whether the studio offers this virtual edition for an index - the source New-Vhdx's
 /// hints name. DISM has the last word in pass 1 (/Get-TargetEditions).
 pub fn virtual_edition_fits(key: &str, img: &WimImage) -> bool {
@@ -1138,6 +1144,7 @@ pub struct WinBake<'a> {
 
 /// One boot of the bake VM, followed on its serial console until it powers itself off.
 /// Returns every PVS- marker it wrote; DISM's own percentages move the bar.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_pass(
     pve: &Pve,
     log: &JobLog,
@@ -1185,7 +1192,7 @@ pub(crate) async fn run_pass(
                     if let Some(pct) = part
                         .strip_prefix('[')
                         .and_then(|r| r.split('%').next())
-                        .and_then(|r| r.rsplit(|c: char| c == ' ' || c == '=').next())
+                        .and_then(|r| r.rsplit([' ', '=']).next())
                         .and_then(|n| n.parse::<f64>().ok())
                     {
                         if (pct - last_pct).abs() >= 1.0 {
@@ -1210,8 +1217,9 @@ pub(crate) async fn run_pass(
                         }
                         // One line per feature, capability or app is detail: the caller sums
                         // them up per Server Manager feature. So is a worker's verdict per
-                        // update, which the media build words itself.
-                        if ["PVS-FEATURE-", "PVS-CAP-", "PVS-APP-", "PVS-PROV-", "PVS-UPD-OK", "PVS-UPD-FAIL", "PVS-UPD-SKIP", "PVS-STOPPED"].iter().any(|p| part.starts_with(p)) || part == "PVS-SYSPREP-TAG" {
+                        // update, which the media build words itself, and every edition DISM
+                        // says an image can become - the bake states the one that matters.
+                        if ["PVS-FEATURE-", "PVS-CAP-", "PVS-APP-", "PVS-PROV-", "PVS-UPD-OK", "PVS-UPD-FAIL", "PVS-UPD-SKIP", "PVS-STOPPED", "PVS-TARGET "].iter().any(|p| part.starts_with(p)) || part == "PVS-SYSPREP-TAG" {
                             log.debug(crate::markers::text(part)).await;
                         } else {
                             log.line(crate::markers::text(part)).await;
@@ -1247,23 +1255,8 @@ pub(crate) async fn run_pass(
 /// ws2025-datacenter-desktop is "Windows Server 2025 Datacenter Desktop" (a gold's
 /// displayName is DISM's "Windows Server 2025 ServerDatacenter").
 pub fn server_label(image_id: &str) -> Option<String> {
-    let rest = image_id.strip_prefix("ws")?;
-    let (year, rest) = rest.split_once('-')?;
-    let (edition, kind) = rest.rsplit_once('-')?;
-    // Azure Edition after the experience: "Datacenter Core: Azure Edition".
-    let (edition, suffix) = match edition {
-        "datacenter" => ("Datacenter", ""),
-        "standard" => ("Standard", ""),
-        "datacenter-az" => ("Datacenter", ": Azure Edition"),
-        _ => return None,
-    };
-    let kind = match kind {
-        "core" => "Core",
-        "desktop" => "Desktop",
-        _ => return None,
-    };
-    let year = if year == "vnext" { "vNext" } else { year };
-    Some(format!("Windows Server {year} {edition} {kind}{suffix}"))
+    // The page's own name for it (IMAGE_CATALOG, read by build.rs) - one source for both.
+    crate::names::image(image_id).filter(|_| image_id.starts_with("ws")).map(str::to_owned)
 }
 
 /// The bake's passes as plans for run_pass, weighted in seconds as a Windows 11 bake took
@@ -1337,6 +1330,7 @@ pub(crate) async fn set_boot(pve: &Pve, node: &str, vmid: u32, order: &str) -> R
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn bake(
     b: WinBake<'_>,
     gold_id: &str,
@@ -1446,17 +1440,23 @@ pub async fn bake(
         // Asked now, before audit mode has cost twenty minutes: an index that cannot become
         // the edition will not become it after sysprep either.
         let targets: Vec<String> = m.iter().filter_map(|l| l.strip_prefix("PVS-TARGET ").map(|t| t.trim().to_owned())).collect();
+        // In the studio's words: "Pro can become Enterprise", never DISM's EditionIDs.
+        let from = crate::names::edition(&img.edition_id, &img.installation_type);
         let edition_target = match upgrade {
             Some(v) => match virtual_target(v.key, &targets) {
                 Some(t) => {
-                    log.ok(format!("Index {} can become '{t}' - continuing", img.index)).await;
+                    log.ok(format!("Edition check passed: {from} can become {}", crate::names::edition(&t, &img.installation_type))).await;
                     Some(t)
                 }
                 None => bail!(
-                    "index {} cannot be changed to {} - DISM lists no matching target (can become: {}). {}",
+                    "{from} (index {}) cannot become {}: {}. {}",
                     img.index,
                     v.display,
-                    if targets.is_empty() { "none".into() } else { targets.join(", ") },
+                    if targets.is_empty() {
+                        "DISM offers no other edition for it".to_owned()
+                    } else {
+                        format!("DISM offers only {}", targets.iter().map(|t| crate::names::edition(t, &img.installation_type)).collect::<Vec<_>>().join(", "))
+                    },
                     v.hint
                 ),
             },
@@ -1599,7 +1599,8 @@ pub async fn bake(
                 .bind(gold_id)
                 .execute(b.db)
                 .await?;
-            log.ok(format!("Gold ready: {gold_name} (template {vmid})")).await;
+            let named = golds::get(b.db, gold_id).await.ok().flatten().map(|g| crate::names::gold(&g)).unwrap_or_else(|| gold_name.clone());
+            log.ok(format!("Gold ready: {named} - template {vmid}")).await;
             Ok(())
         }
         Err(e) => {
