@@ -446,8 +446,10 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
                     if version.is_empty() {
                         version = v.unwrap_or_default();
                     }
+                    // Without case: the edition lists spell some packages differently from the
+                    // FoD list (SenseClient-Fod vs -FoD); the first spelling, the FoD list's, stays.
                     for p in list {
-                        if !listed.iter().any(|(n, _)| n == &p.0) {
+                        if !listed.iter().any(|(n, _)| n.eq_ignore_ascii_case(&p.0)) {
                             listed.push(p);
                         }
                     }
@@ -527,16 +529,15 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
         .await;
         if let Some(iso) = compare {
             let name = iso.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            let mut want: Vec<(String, u64)> = wanted.iter().map(|(c, f)| (c.to_lowercase(), f.size)).collect();
-            want.sort();
-            want.dedup();
-            let have = iso_cabs(iso).await?;
-            if want == have {
+            // As sets: a name the ISO holds twice (in two spellings) is still the same package.
+            let want: std::collections::BTreeSet<(String, u64)> = wanted.iter().map(|(c, f)| (c.to_lowercase(), f.size)).collect();
+            let have: std::collections::BTreeSet<(String, u64)> = iso_cabs(iso).await?.into_iter().collect();
+            let new = want.difference(&have).count();
+            let gone = have.difference(&want).count();
+            if new == 0 && gone == 0 {
                 log.ok(format!("{name} has every package of {} - nothing to build", build.title)).await;
                 return Ok(Outcome::Unchanged(build.uuid.clone()));
             }
-            let new = want.iter().filter(|w| !have.contains(w)).count();
-            let gone = have.iter().filter(|h| !want.contains(h)).count();
             log.line(format!("{name} differs from {}: {new} package(s) new or changed, {gone} no longer listed - building it again", build.title)).await;
         }
 
