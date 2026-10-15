@@ -825,6 +825,7 @@ function paintWinMedia() {
             `<button type="button" class="btn${kind === k ? " on" : ""}" data-wm-kind="${k}" aria-pressed="${kind === k}">${l}</button>`).join("")}</div></div>
         ${field(fieldLabel("validate.svg", "Search"), `<input id="wmSearch" type="search" placeholder="Build, month or date - 33438, 2026-08, Jul" value="${esc(wmUi.search)}">`)}
       </div>
+      ${prod.error ? warnBanner(esc(prod.error)) : ""}
       <div class="wm-filter-meta">${prod.insider ? `<span class="pill status warn">Insider Preview</span>` : `<span class="pill">Supported</span>`}
         <span class="hint">${esc(prod.support || "")}${all ? ` · ${all.length} build${all.length === 1 ? "" : "s"} in the catalog${builds.length !== all.length ? `, ${builds.length} shown` : ""}` : ""}${wmUi.wu[wmUi.product] && !wmUi.wu[wmUi.product].checked ? ` · <span class="wm-wu">Checking Microsoft Update…</span>${infoTip("Microsoft Update", "Which builds are Patch Tuesday (B) and out-of-band security releases comes from Microsoft Update. Until it has answered - about a minute and a half on a fresh install - the labels are estimates from the date (B?), and Stable shows none.")}` : ""}</span></div>
     </div>`;
@@ -1073,7 +1074,9 @@ function wireBakePlace(main) {
 function keepCurrentToggle(g) {
   const k = goldsUi.au && goldsUi.au.golds && goldsUi.au.golds[g.id];
   if (!k || g.os !== "windows" || g.status !== "ready") return "";
-  const tip = k.can ? `Follows ${k.product}, on ${k.build} now: every newer Patch Tuesday build gives a new ISO and a new gold, baked with this gold's settings in a maintenance window.` : k.why;
+  const tip = !k.can ? k.why : k.insider
+    ? `Follows ${k.product}, on ${k.build} now: every newer flight Microsoft offers there - a new base build too - gives a new ISO and a new gold, baked with this gold's settings in a maintenance window.`
+    : `Follows ${k.product}, on ${k.build} now: every newer Patch Tuesday build gives a new ISO and a new gold, baked with this gold's settings in a maintenance window.`;
   return toggle(`data-keep-current="${esc(g.id)}"`, `Keep current${infoTip("Keep current", tip)}`, !!k.on, !k.can && !k.on, "", "gold-keep");
 }
 
@@ -1091,7 +1094,8 @@ function goldRowHtml(t) {
   // "Windows 11 Enterprise 26H2": the release beside the name, the build big on the right.
   const rel = goldRelease(g);
   const title = full + (rel && !full.includes(rel) ? " " + rel : "");
-  const sub = [m.editionUpgrade ? "virtual edition from " + (m.sourceEdition || "") : /\s(Desktop|Core)(:|$)/.test(full) ? "" : exp].filter(Boolean).join(" · ");
+  // An Insider gold names its channel: all read "Insider Preview" as their release.
+  const sub = [m.editionUpgrade ? "virtual edition from " + (m.sourceEdition || "") : /\s(Desktop|Core)(:|$)/.test(full) ? "" : exp, g.channel || ""].filter(Boolean).join(" · ");
   const build = goldBuildNumber(g);
   const facts = win
     ? [["Language", goldLang(g) || m.imageLanguage], ["Disk", m.diskSizeGB ? m.diskSizeGB + " GB" : ""]]

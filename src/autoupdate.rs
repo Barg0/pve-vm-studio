@@ -3,8 +3,10 @@
 //! every follower is baked again from it with its own options, and the old ISO and the
 //! golds beyond the kept number go.
 //!
-//! A run never leaves the branch it started on: the same product, the same base build,
-//! Patch Tuesday ("B") releases only unless previews are allowed, nothing from Insider.
+//! A release run never leaves the branch it started on: the same product, the same base
+//! build, Patch Tuesday ("B") releases only unless previews are allowed. An Insider channel
+//! (Beta, Experimental, Future Platforms, Server vNext) follows the newest flight Microsoft
+//! offers there, a new base build included - that is what a channel is for.
 //! Work starts only inside a maintenance window (or when someone presses Start now); the
 //! check for new builds runs any time - it is cheap.
 
@@ -177,11 +179,15 @@ fn options(g: &GoldRow) -> Option<WinBakeOptions> {
     serde_json::from_str(&g.options).ok()
 }
 
-/// What makes two golds the same kind - one replaces the other: image, language, disk.
 /// Golds of one kind replace each other: image, release (a 25H2 gold is its own branch
-/// beside 26H2), language and disk size.
-fn kind(g: &GoldRow) -> (String, &'static str, String, u32) {
-    (g.image_id.clone(), golds::release(g).unwrap_or(""), golds::language(g).to_lowercase(), options(g).map(|o| o.disk_gb()).unwrap_or(0))
+/// beside 26H2), Insider channel (a Beta gold never replaces a Future Platforms one - all
+/// read "Insider Preview" as their release), language and disk size.
+type Kind = (String, &'static str, &'static str, String, u32);
+
+fn kind(g: &GoldRow) -> Kind {
+    // From the ISO's name in the bake options: it outlives the ISO, which a run deletes.
+    let channel = options(g).and_then(|o| uup::insider_of_iso(&o.iso)).map(|p| p.id).unwrap_or("");
+    (g.image_id.clone(), golds::release(g).unwrap_or(""), channel, golds::language(g).to_lowercase(), options(g).map(|o| o.disk_gb()).unwrap_or(0))
 }
 
 fn newer_gold(a: &GoldRow, b: &GoldRow) -> bool {
@@ -227,8 +233,8 @@ pub fn eligibility(g: &GoldRow, isos: &[MediaIso]) -> Result<(&'static uup::Prod
         .find(|i| i.volid == opt.iso)
         .ok_or("Baked from an ISO the studio did not build, or one that is gone - only ISOs built under Media know their product")?;
     let p = uup::product(&iso.product).ok_or("The ISO's product is not in the studio's list any more")?;
-    if p.insider {
-        return Err("Insider builds are never updated automatically".into());
+    if !p.listed {
+        return Err(format!("{} mixed several build lines and follows none - bake from an ISO of Beta, Experimental or Future Platforms to follow a channel", p.name));
     }
     Ok((p, iso.clone()))
 }
@@ -238,7 +244,7 @@ pub fn eligibility(g: &GoldRow, isos: &[MediaIso]) -> Result<(&'static uup::Prod
 pub async fn tracks(app: &AppState) -> Result<Vec<(MediaIso, Vec<GoldRow>)>> {
     let isos = api::live_media_isos(app).await;
     let all: Vec<GoldRow> = golds::list(&app.db).await?.into_iter().filter(|g| g.status == "ready" && g.os == "windows").collect();
-    let mut newest: HashMap<(String, &'static str, String, u32), GoldRow> = HashMap::new();
+    let mut newest: HashMap<Kind, GoldRow> = HashMap::new();
     for g in &all {
         let k = kind(g);
         if newest.get(&k).is_none_or(|n| newer_gold(g, n)) {
@@ -259,8 +265,12 @@ pub async fn tracks(app: &AppState) -> Result<Vec<(MediaIso, Vec<GoldRow>)>> {
 // ---- the check ----
 
 /// The build an ISO may move to: newer, on the same base build, and a Patch Tuesday ("B")
-/// release unless previews are allowed - the branch locks, in one place.
+/// release unless previews are allowed - the branch locks, in one place. An Insider channel
+/// has none: its newest flight, whatever its base build (its list is the channel's line).
 pub fn newest_fit<'a>(p: &uup::Product, builds: &'a [uup::Build], from: &str, previews: bool) -> Option<&'a uup::Build> {
+    if p.insider {
+        return builds.iter().filter(|b| version(&b.build) > version(from)).max_by_key(|b| version(&b.build));
+    }
     builds
         .iter()
         .filter(|b| version(&b.build) > version(from) && base(&b.build) == base(from))
@@ -276,7 +286,7 @@ pub async fn newer_for_untracked(app: &AppState) -> Result<Vec<(MediaIso, &'stat
     let mut out = Vec::new();
     for iso in api::live_media_isos(app).await.into_iter().filter(|i| !tracked.contains(&i.volid)) {
         let Some(p) = uup::product(&iso.product) else { continue };
-        if p.insider {
+        if !p.listed {
             continue;
         }
         let builds = uup::product_builds(&app.web, p, true).await.with_context(|| format!("asking UUP dump for {}", p.name))?;
@@ -1412,5 +1422,36 @@ mod tests {
         assert_eq!(winpe_state(&pe("v", "26100.1", "0.1.302-1", "local:iso/x.iso"), Some(newest), None), "outdated");
         assert_eq!(winpe_state(&pe("v", "29667.1000", "0.1.285-1", set), Some(newest), Some("0.1.302-1")), "virtio");
         assert_eq!(winpe_state(&pe("v", "29667.1000", "0.1.302-1", set), None, None), "unknown");
+    }
+
+    #[test]
+    fn a_channel_follows_its_newest_flight() {
+        let b = |build: &str| uup::Build { uuid: build.into(), title: String::new(), build: build.into(), arch: "amd64".into(), created: 0 };
+        // A new base build is the channel moving on - followed, not stopped.
+        let fp = [b("30010.1000"), b("29683.1000"), b("29680.1000")];
+        let p = uup::product("w11-future").unwrap();
+        assert_eq!(newest_fit(p, &fp, "29680.1000", false).unwrap().build, "30010.1000");
+        assert!(newest_fit(p, &fp, "30010.1000", false).is_none());
+        // The old Canary id is the same channel.
+        assert_eq!(newest_fit(uup::product("w11-canary").unwrap(), &fp, "29683.1000", false).unwrap().build, "30010.1000");
+        // A release stays on its base build.
+        let rel = [b("26300.9711"), b("26200.9550")];
+        assert!(newest_fit(uup::product("w11-25h2").unwrap(), &rel, "26200.9550", true).is_none());
+    }
+
+    #[test]
+    fn channels_are_kinds_of_their_own() {
+        let gold = |iso: &str| GoldRow {
+            image_id: "w11-pro".into(),
+            os: "windows".into(),
+            options: serde_json::json!({ "iso": iso, "index": 1, "region": { "locale": "en-US", "keyboard": "en-US", "timezone": "UTC" } }).to_string(),
+            ..Default::default()
+        };
+        let beta = kind(&gold("local:iso/enus-w11-beta-pro-26220.9606.iso"));
+        let fp = kind(&gold("local:iso/enus-w11-future-pro-29683.1000.iso"));
+        let canary = kind(&gold("local:iso/enus-w11-canary-pro-29671.1000.iso"));
+        assert_ne!(beta, fp);
+        assert_eq!(fp, canary, "a Canary gold is replaced by the Future Platforms one");
+        assert_eq!(kind(&gold("local:iso/enus-w11-pro-26300.9711.iso")).2, "");
     }
 }

@@ -845,6 +845,9 @@ async fn list_golds(State(app): State<AppState>, _user: User) -> ApiResult<impl 
                 v["build_full"] = json!(b);
             }
             v["language"] = json!(golds::language(g));
+            // The Insider channel it was baked from, by its ISO's name (outlives the ISO).
+            let iso = serde_json::from_str::<windows::WinBakeOptions>(&g.options).map(|o| o.iso).unwrap_or_default();
+            v["channel"] = json!(uup::insider_of_iso(&iso).map(|p| p.channel()).unwrap_or(""));
             v["build_version"] = json!(golds::build_version(g));
             v["used_by"] = json!(usage.get(&g.id).copied().unwrap_or(0));
             v["picked_by"] = json!(picked.get(&g.id).cloned().unwrap_or_default());
@@ -2135,10 +2138,15 @@ struct MediaQuery {
 /// Every product with its newest build, from one reading of the catalog.
 async fn media_products(State(app): State<AppState>, _user: User, axum::extract::Query(q): axum::extract::Query<MediaQuery>) -> ApiResult<impl IntoResponse> {
     let mut out = Vec::new();
-    for p in uup::PRODUCTS {
-        let builds = uup::product_builds(&app.web, p, q.fresh).await?;
+    for p in uup::PRODUCTS.iter().filter(|p| p.listed) {
+        // A channel asked live may not answer: that one product says why, the rest list.
+        let (builds, error) = match uup::product_builds(&app.web, p, q.fresh).await {
+            Ok(b) => (b, None),
+            Err(e) if p.ring.is_some() => (Vec::new(), Some(format!("{e:#}"))),
+            Err(e) => return Err(e.into()),
+        };
         let newest = builds.first().map(|b| json!({ "build": b.build, "created": b.created, "kind": uup::release_kind(p, &b.build, b.created) }));
-        out.push(json!({ "id": p.id, "name": p.name, "group": p.group, "kind": p.kind, "insider": p.insider, "support": p.support, "count": builds.len(), "newest": newest }));
+        out.push(json!({ "id": p.id, "name": p.name, "group": p.group, "kind": p.kind, "insider": p.insider, "support": p.support, "count": builds.len(), "newest": newest, "error": error }));
     }
     Ok(Json(json!({ "products": out, "checked": uup::catalog_age().await })))
 }
@@ -2152,7 +2160,7 @@ async fn media_builds(State(app): State<AppState>, _user: User, axum::extract::Q
         .iter()
         .take(60)
         .map(|b| {
-            let isos: Vec<&media::MediaIso> = built.iter().filter(|m| m.uuid == b.uuid || (m.product == p.id && m.build == b.build)).collect();
+            let isos: Vec<&media::MediaIso> = built.iter().filter(|m| m.uuid == b.uuid || (uup::product(&m.product).is_some_and(|mp| mp.id == p.id) && m.build == b.build)).collect();
             json!({ "uuid": b.uuid, "build": b.build, "title": b.title, "created": b.created, "kind": uup::release_kind(p, &b.build, b.created), "isos": isos })
         })
         .collect();
@@ -2814,7 +2822,7 @@ async fn get_auto_update(State(app): State<AppState>, _user: User) -> ApiResult<
     for g in golds::list(&app.db).await?.into_iter().filter(|g| g.os == "windows" && g.status == "ready") {
         let on = serde_json::from_str::<windows::WinBakeOptions>(&g.options).is_ok_and(|o| o.keep_current);
         let v = match autoupdate::eligibility(&g, &isos) {
-            Ok((p, iso)) => json!({ "on": on, "can": true, "product": p.name, "build": iso.build, "iso": iso.volid }),
+            Ok((p, iso)) => json!({ "on": on, "can": true, "product": p.name, "insider": p.insider, "build": iso.build, "iso": iso.volid }),
             Err(why) => json!({ "on": on, "can": false, "why": why }),
         };
         golds_out.insert(g.id.clone(), v);

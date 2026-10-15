@@ -35,7 +35,7 @@ use crate::{
 pub const GOLD_POOL: &str = "vm-studio";
 pub const GOLD_IDS: std::ops::RangeInclusive<u32> = 9000..=9999;
 
-#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Default, Serialize, sqlx::FromRow)]
 pub struct GoldRow {
     pub id: String,
     pub image_id: String,

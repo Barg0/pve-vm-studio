@@ -10,7 +10,7 @@
 
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
@@ -104,6 +104,12 @@ pub struct Product {
     pub group: &'static str,
     pub kind: Kind,
     pub insider: bool,
+    /// The Windows Insider channel it follows, as UUP dump's fetchupd asks Windows Update
+    /// for it (ring): its builds are the build line Microsoft offers there right now.
+    pub ring: Option<&'static str>,
+    /// Shown in the catalog and followed by Keep current. A hidden product only resolves
+    /// the ISOs and golds made under it.
+    pub listed: bool,
     pub support: &'static str,
     /// The short name in ISO file names: ws2025, w11-25h2.
     pub short: &'static str,
@@ -111,31 +117,134 @@ pub struct Product {
 }
 
 pub static PRODUCTS: &[Product] = &[
-    Product { id: "ws2025", name: "Windows Server 2025", group: "Windows Server", kind: Kind::Server, insider: false, short: "ws2025",
+    Product { id: "ws2025", name: "Windows Server 2025", group: "Windows Server", kind: Kind::Server, insider: false, ring: None, listed: true, short: "ws2025",
         support: "mainstream until 2029-11, extended until 2034-11", matches: |t| t.starts_with("Windows Server 2025 (") },
-    Product { id: "ws2022", name: "Windows Server 2022", group: "Windows Server", kind: Kind::Server, insider: false, short: "ws2022",
+    Product { id: "ws2022", name: "Windows Server 2022", group: "Windows Server", kind: Kind::Server, insider: false, ring: None, listed: true, short: "ws2022",
         support: "extended support until 2031-10", matches: |t| t.starts_with("Feature update to Microsoft server operating system, version 21H2 (") },
-    Product { id: "w11-26h2", name: "Windows 11, version 26H2", group: "Windows 11", kind: Kind::Client, insider: false, short: "w11-26h2",
+    Product { id: "w11-26h2", name: "Windows 11, version 26H2", group: "Windows 11", kind: Kind::Client, insider: false, ring: None, listed: true, short: "w11-26h2",
         support: "current release", matches: |t| t.starts_with("Windows 11, version 26H2 (") },
-    Product { id: "w11-26h1", name: "Windows 11, version 26H1", group: "Windows 11", kind: Kind::Client, insider: false, short: "w11-26h1",
+    Product { id: "w11-26h1", name: "Windows 11, version 26H1", group: "Windows 11", kind: Kind::Client, insider: false, ring: None, listed: true, short: "w11-26h1",
         support: "for new devices only", matches: |t| t.starts_with("Windows 11, version 26H1 (") },
-    Product { id: "w11-25h2", name: "Windows 11, version 25H2", group: "Windows 11", kind: Kind::Client, insider: false, short: "w11-25h2",
+    Product { id: "w11-25h2", name: "Windows 11, version 25H2", group: "Windows 11", kind: Kind::Client, insider: false, ring: None, listed: true, short: "w11-25h2",
         support: "Pro until 2027-10, Enterprise until 2028-10", matches: |t| t.starts_with("Windows 11, version 25H2 (") },
-    Product { id: "w11-24h2", name: "Windows 11, version 24H2", group: "Windows 11", kind: Kind::Client, insider: false, short: "w11-24h2",
+    Product { id: "w11-24h2", name: "Windows 11, version 24H2", group: "Windows 11", kind: Kind::Client, insider: false, ring: None, listed: true, short: "w11-24h2",
         support: "Enterprise until 2027-10", matches: |t| t.starts_with("Windows 11, version 24H2 (") },
-    Product { id: "w11-23h2", name: "Windows 11, version 23H2", group: "Windows 11", kind: Kind::Client, insider: false, short: "w11-23h2",
+    Product { id: "w11-23h2", name: "Windows 11, version 23H2", group: "Windows 11", kind: Kind::Client, insider: false, ring: None, listed: true, short: "w11-23h2",
         support: "Enterprise until 2026-11", matches: |t| t.starts_with("Windows 11, version 23H2 (") },
-    Product { id: "ws-insider", name: "Windows Server vNext", group: "Insider and vNext", kind: Kind::Server, insider: true, short: "ws-vnext",
+    Product { id: "ws-insider", name: "Windows Server vNext", group: "Insider and vNext", kind: Kind::Server, insider: true, ring: None, listed: true, short: "ws-vnext",
         support: "Insider Preview - not for production", matches: |t| t.starts_with("Windows Server Insider Preview ") },
-    Product { id: "w11-canary", name: "Windows 11 Insider, Canary", group: "Insider and vNext", kind: Kind::Client, insider: true, short: "w11-canary",
-        support: "Insider Preview - not for production",
-        matches: |t| t.starts_with("Windows 11 Insider Preview ") && t.contains("(rs_prerelease)") && t[27..].starts_with(|c: char| c.is_ascii_digit()) },
-    Product { id: "w11-dev", name: "Windows 11 Insider, Dev and Beta", group: "Insider and vNext", kind: Kind::Client, insider: true, short: "w11-dev",
+    // Windows 11 Insider by channel (Microsoft's names since 04/2026), each asked live.
+    Product { id: "w11-beta", name: "Windows 11 Insider, Beta", group: "Insider and vNext", kind: Kind::Client, insider: true, ring: Some("Beta"), listed: true, short: "w11-beta",
+        support: "Insider Preview - not for production", matches: insider_title },
+    Product { id: "w11-experimental", name: "Windows 11 Insider, Experimental", group: "Insider and vNext", kind: Kind::Client, insider: true, ring: Some("Dev:2"), listed: true, short: "w11-experimental",
+        support: "Insider Preview - not for production", matches: insider_title },
+    Product { id: "w11-future", name: "Windows 11 Insider, Future Platforms", group: "Insider and vNext", kind: Kind::Client, insider: true, ring: Some("Dev"), listed: true, short: "w11-future",
+        support: "Insider Preview - not for production", matches: insider_title },
+    // Before the channels: Dev and Beta mixed several build lines - it follows none.
+    Product { id: "w11-dev", name: "Windows 11 Insider, Dev and Beta", group: "Insider and vNext", kind: Kind::Client, insider: true, ring: None, listed: false, short: "w11-dev",
         support: "Insider Preview - not for production", matches: |t| t.starts_with("Windows 11 Insider Preview Feature Update (") },
 ];
 
+impl Product {
+    /// An Insider product's channel in a word or two - Beta, Experimental, Future Platforms,
+    /// vNext - for a gold's line; "" for a release.
+    pub fn channel(&self) -> &'static str {
+        if !self.insider {
+            return "";
+        }
+        if self.kind == Kind::Server {
+            return "vNext";
+        }
+        self.name.strip_prefix("Windows 11 Insider, ").unwrap_or(self.name)
+    }
+}
+
+/// A product by id. "w11-canary" is Future Platforms: Microsoft renamed Canary in 04/2026,
+/// and ISOs and golds made under the old id still resolve.
 pub fn product(id: &str) -> Option<&'static Product> {
+    let id = if id == "w11-canary" { "w11-future" } else { id };
     PRODUCTS.iter().find(|p| p.id == id)
+}
+
+/// The Insider product an ISO the studio built belongs to, by its file name
+/// (enus-w11-future-pro-29683.1000.iso, enus-ws-vnext-29683.1000.iso) - a canary ISO is
+/// Future Platforms.
+pub fn insider_of_iso(volid: &str) -> Option<&'static Product> {
+    let file = volid.rsplit('/').next()?;
+    if file.contains("-w11-canary-") {
+        return product("w11-future");
+    }
+    PRODUCTS.iter().filter(|p| p.insider).find(|p| file.contains(&format!("-{}-", p.short)))
+}
+
+/// A Windows 11 Insider flight as the catalog titles it: "Windows 11 Insider Preview Feature
+/// Update (26220.9606)" or "Windows 11 Insider Preview 29683.1000 (rs_prerelease)" - not a
+/// Quality Update, which is no install set.
+fn insider_title(t: &str) -> bool {
+    t.starts_with("Windows 11 Insider Preview Feature Update (")
+        || (t.starts_with("Windows 11 Insider Preview ") && t.contains("(rs_prerelease)") && t[27..].starts_with(|c: char| c.is_ascii_digit()))
+}
+
+/// The Windows 11 releases a channel is asked from, newest first. Not 26H1: Microsoft offers
+/// it on new devices only. Beta is offered from 25H2 but not from 26H2 (2026-10-14), so a
+/// channel without an answer is asked from the next one.
+const CHANNEL_BASES: [&str; 3] = ["w11-26h2", "w11-25h2", "w11-24h2"];
+
+/// What a channel offers right now: the Insider flight Windows Update gives a Windows 11
+/// client in that ring (UUP dump's fetchupd), asked from the newest release that answers.
+/// Kept for six hours; the catalog's rate limit allows about one question in ten seconds.
+pub async fn channel_offer(web: &reqwest::Client, p: &Product, fresh: bool) -> Result<Build> {
+    type Offers = std::collections::HashMap<&'static str, (std::time::Instant, Build)>;
+    static OFFERS: tokio::sync::Mutex<Option<Offers>> = tokio::sync::Mutex::const_new(None);
+    let ring = p.ring.ok_or_else(|| anyhow!("{} follows no Insider channel", p.name))?;
+    let mut cache = OFFERS.lock().await;
+    let max_age = if fresh { 900 } else { 6 * 3600 };
+    if let Some((at, b)) = cache.as_ref().and_then(|c| c.get(p.id))
+        && at.elapsed() < std::time::Duration::from_secs(max_age)
+    {
+        return Ok(b.clone());
+    }
+    let all = catalog(web, false).await?;
+    for base in CHANNEL_BASES.iter().filter_map(|id| product(id)) {
+        // Its newest build, read off the catalog directly (product_builds asks this function).
+        let Some(from) = all.iter().filter(|b| b.arch == "amd64" && (base.matches)(&b.title)).max_by_key(|b| build_num(&b.build)) else { continue };
+        let r = get(web, "fetchupd.php", &[("arch", "amd64"), ("ring", ring), ("build", &from.build), ("sku", "48")]).await?;
+        let offered = offered(p, &r);
+        if let Some(mut b) = offered {
+            b.created = all.iter().filter(|c| c.uuid == b.uuid).map(|c| c.created).min().unwrap_or_else(|| chrono::Utc::now().timestamp());
+            cache.get_or_insert_with(Default::default).insert(p.id, (std::time::Instant::now(), b.clone()));
+            return Ok(b);
+        }
+    }
+    bail!("Microsoft offers nothing in {} from any Windows 11 release - the channel query ({ring}) may have changed", p.name)
+}
+
+/// The newest flight of the product's kind in a fetchupd answer - beside it Windows Update
+/// lists what else that client would get (OOBE updates, .NET, the release itself).
+fn offered(p: &Product, r: &serde_json::Value) -> Option<Build> {
+    r["updateArray"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|u| {
+            let title = u["updateTitle"].as_str()?;
+            if !(p.matches)(title) {
+                return None;
+            }
+            Some(Build {
+                uuid: u["updateId"].as_str()?.to_owned(),
+                title: title.to_owned(),
+                build: u["foundBuild"].as_str()?.to_owned(),
+                arch: "amd64".into(),
+                // Its first appearance in the catalog, else now - fetchupd just found it.
+                created: 0,
+            })
+        })
+        .max_by_key(|b| build_num(&b.build))
+}
+
+fn build_num(b: &str) -> Vec<u64> {
+    b.split('.').map(|x| x.parse::<u64>().unwrap_or(0)).collect()
 }
 
 /// The whole catalog, asked once and kept for a quarter of an hour: one answer serves every
@@ -172,9 +281,26 @@ pub async fn catalog_age() -> Option<u64> {
 /// A product's full builds, highest build first, one entry per build number - its first
 /// appearance in the catalog: the catalog lists an old build again when it fetches it once
 /// more (26200.7985 of March, again on 2026-10-02), and that date is not its release.
+///
+/// A channel's builds are its current build line - the base build (26220, 29683) of what
+/// Microsoft offers there now - so a jump to a new base (29xxx to 30xxx) moves the list with it.
 pub async fn product_builds(web: &reqwest::Client, p: &Product, fresh: bool) -> Result<Vec<Build>> {
     let all = catalog(web, fresh).await?;
-    let mut out: Vec<Build> = all.iter().filter(|b| b.arch == "amd64" && (p.matches)(&b.title)).cloned().collect();
+    let offer = match p.ring {
+        Some(_) => Some(channel_offer(web, p, fresh).await?),
+        None => None,
+    };
+    let line = offer.as_ref().map(|o| o.build.split('.').next().unwrap_or("").to_owned());
+    let mut out: Vec<Build> = all
+        .iter()
+        .filter(|b| b.arch == "amd64" && (p.matches)(&b.title) && line.as_deref().is_none_or(|l| b.build.split('.').next() == Some(l)))
+        .cloned()
+        .collect();
+    if let Some(o) = offer
+        && !out.iter().any(|b| b.build == o.build)
+    {
+        out.push(o);
+    }
     out.sort_by(|a, b| a.created.cmp(&b.created));
     let mut seen = std::collections::HashSet::new();
     out.retain(|b| seen.insert(b.build.clone()));
@@ -535,6 +661,52 @@ pub async fn files_cached(web: &reqwest::Client, cache: &std::path::Path, uuid: 
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    /// fetchupd's answers of 2026-10-15, asked from 26300.9711 (26H2) - trimmed to updateArray.
+    fn answer(entries: &[(&str, &str, &str)]) -> serde_json::Value {
+        serde_json::json!({ "updateArray": entries.iter().map(|(b, id, t)| serde_json::json!({ "foundBuild": b, "updateId": id, "updateTitle": t })).collect::<Vec<_>>() })
+    }
+
+    #[test]
+    fn a_channel_takes_its_flight_from_the_answer() {
+        let oobe = ("26100.9544", "4080ccdd-2ca4-4159-9d58-580338279bdf", "Critical OOBE Update for Windows 11 - KB5128942 (26100.9544) (3)");
+        let net = ("26300.10008", "16df4c62-9d99-47e5-ac31-a5ae03d7e113", ".NET Framework Security Update for Windows 11 - KB5127694 (26300.10008)");
+        let dev = answer(&[oobe, ("29683.1000", "2fab9ee5-66d1-4532-8592-f48a223edf69", "Windows 11 Insider Preview 29683.1000 (rs_prerelease)"), net]);
+        let b = offered(product("w11-future").unwrap(), &dev).unwrap();
+        assert_eq!((b.build.as_str(), b.uuid.as_str()), ("29683.1000", "2fab9ee5-66d1-4532-8592-f48a223edf69"));
+        let dev2 = answer(&[oobe, ("26340.9616", "398e3bc2-9c3f-4d87-b40b-e54a46826056", "Windows 11 Insider Preview Feature Update (26340.9616)"), net]);
+        assert_eq!(offered(product("w11-experimental").unwrap(), &dev2).unwrap().build, "26340.9616");
+        // Beta from 26H2: only the release and other updates - nothing, so the next base is asked.
+        let beta = answer(&[("26300.9711", "2b22470a-8b6f-498f-9c88-66f7b9fb56b1", "Windows 11, version 26H2 (26300.9711)"), oobe, net]);
+        assert!(offered(product("w11-beta").unwrap(), &beta).is_none());
+        assert!(offered(product("w11-beta").unwrap(), &serde_json::json!({})).is_none());
+    }
+
+    #[test]
+    fn insider_titles_and_names() {
+        assert!(insider_title("Windows 11 Insider Preview Feature Update (26220.9606)"));
+        assert!(insider_title("Windows 11 Insider Preview 29683.1000 (rs_prerelease)"));
+        assert!(!insider_title("Windows 11 Insider Preview Quality Update (26340.9233)"), "no install set");
+        assert!(!insider_title("Windows Server Insider Preview 29683.1000 (rs_flight)"));
+        // Canary is Future Platforms since 04/2026: the old id resolves, and is not listed.
+        assert_eq!(product("w11-canary").unwrap().id, "w11-future");
+        assert!(PRODUCTS.iter().all(|p| p.id != "w11-canary"));
+        assert!(!product("w11-dev").unwrap().listed);
+        let listed: Vec<&str> = PRODUCTS.iter().filter(|p| p.insider && p.listed).map(|p| p.id).collect();
+        assert_eq!(listed, ["ws-insider", "w11-beta", "w11-experimental", "w11-future"]);
+        // The channel by the ISO's name - it outlives the ISO.
+        assert_eq!(insider_of_iso("local:iso/enus-w11-canary-pro-29671.1000.iso").unwrap().id, "w11-future");
+        assert_eq!(insider_of_iso("local:iso/enus-w11-beta-pro-26220.9606.iso").unwrap().id, "w11-beta");
+        assert_eq!(insider_of_iso("local:iso/enus-w11-experimental-26340.9616.iso").unwrap().id, "w11-experimental");
+        assert_eq!(insider_of_iso("local:iso/enus-ws-vnext-dc-core-29683.1000.iso").unwrap().id, "ws-insider");
+        assert!(insider_of_iso("local:iso/enus-w11-pro-26300.9711.iso").is_none());
+        assert!(insider_of_iso("local:iso/enus-ws2025-dc-core-26100.33650.iso").is_none());
+        let ch = |id: &str| product(id).unwrap().channel();
+        assert_eq!([ch("w11-beta"), ch("w11-experimental"), ch("w11-canary"), ch("ws-insider"), ch("w11-dev"), ch("w11-26h2")],
+            ["Beta", "Experimental", "Future Platforms", "vNext", "Dev and Beta", ""]);
+    }
+
     #[test]
     fn release_preview_is_no_patch_tuesday() {
         let p = super::product("w11-25h2").unwrap();

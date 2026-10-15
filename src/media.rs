@@ -2050,7 +2050,7 @@ mod tests {
         assert_eq!(iso_name(ws, "26100.33438", &e(&["SERVERSTANDARDCORE", "SERVERDATACENTERCORE"]), "en-us"), "enus-ws2025-core-26100.33438.iso");
         assert_eq!(iso_name(uup::product("w11-26h2").unwrap(), "26300.9550", &e(&["PROFESSIONAL"]), "en-us"), "enus-w11-pro-26300.9550.iso");
         assert_eq!(iso_name(uup::product("w11-26h2").unwrap(), "26300.9550", &e(&["PROFESSIONAL", "CORE"]), "en-us"), "enus-w11-26300.9550.iso");
-        assert_eq!(iso_name(uup::product("w11-canary").unwrap(), "28100.1", &e(&["PROFESSIONAL"]), "en-us"), "enus-w11-canary-pro-28100.1.iso");
+        assert_eq!(iso_name(uup::product("w11-future").unwrap(), "29683.1000", &e(&["PROFESSIONAL"]), "en-us"), "enus-w11-future-pro-29683.1000.iso");
     }
 
     #[test]
