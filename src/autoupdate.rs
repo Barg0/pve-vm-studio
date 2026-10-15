@@ -878,13 +878,11 @@ async fn tick(app: &AppState, st: &mut State) -> Result<()> {
             Err(e) => tracing::warn!("automatic virtio-win update to {rel} could not start: {e:#}"),
         }
     }
-    // WinPE carries virtio-win's storage driver: it waits for that download. A failed one
-    // does not stop it - WinPE is then built with the driver PVE has.
-    if in_flight(&app.db, "virtio").await {
-        return Ok(());
-    }
-
-    // 3. WinPE: every media build and bake boots it, so it is current first.
+    // 3. WinPE: every media build and bake boots it, so it is current first. It carries
+    // virtio-win's storage driver, so a new release makes it outdated too: it is queued right
+    // behind that download (both run alone, so nothing starts between them) and takes the
+    // driver when it runs. A failed download does not stop it - WinPE is then built with the
+    // driver PVE has.
     if open && au.keep_winpe_current {
         let pe: crate::winpe::WinPe = settings::load(&app.db, "winpe").await.unwrap_or_default();
         let vio_for_pe = if au.keep_virtio_current { vio.as_deref() } else { None };
@@ -899,7 +897,7 @@ async fn tick(app: &AppState, st: &mut State) -> Result<()> {
             }
         }
     }
-    if in_flight(&app.db, "winpe").await {
+    if in_flight(&app.db, "virtio").await || in_flight(&app.db, "winpe").await {
         return Ok(());
     }
 

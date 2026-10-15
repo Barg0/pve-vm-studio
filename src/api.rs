@@ -1637,7 +1637,15 @@ pub(crate) async fn virtio_job(app: AppState, log: crate::jobs::JobLog) -> anyho
     let release = virtio::resolve(&s.virtio).await?;
     log.line(format!("virtio-win {} resolves to {release}", s.virtio)).await;
     let storage = if s.iso_storage.is_empty() { p.iso_storage.clone() } else { s.iso_storage.clone() };
-    virtio::fetch(&app.pve, &log, &p.node, &storage, &release).await.map(|_| ())
+    let volid = virtio::fetch(&app.pve, &log, &p.node, &storage, &release).await?;
+    // Following a channel, the releases it pointed at before are replaced: they go (a VM
+    // that still has one attached keeps it). A pinned release leaves the others alone.
+    if matches!(s.virtio.as_str(), "stable" | "latest") {
+        for v in app.pve.storage_content(&p.node, &storage, "iso").await?.into_iter().filter(|v| v.volid != volid && virtio::is_ours(&v.volid)) {
+            winpe::drop_replaced(&app.pve, &log, &v.volid, "virtio-win").await;
+        }
+    }
+    Ok(())
 }
 
 // ---- Windows golds ----

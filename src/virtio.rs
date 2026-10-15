@@ -182,6 +182,11 @@ pub fn iso_name(release: &str) -> String {
     format!("virtio-win-{release}.iso")
 }
 
+/// A virtio-win ISO the studio downloads: virtio-win-<release>.iso.
+pub fn is_ours(volid: &str) -> bool {
+    volid.rsplit('/').next().is_some_and(|f| f.starts_with("virtio-win-") && f.ends_with(".iso"))
+}
+
 /// Makes sure the release's ISO is in the storage; returns its volid.
 pub async fn fetch(pve: &Pve, log: &JobLog, node: &str, storage: &str, release: &str) -> Result<String> {
     let name = iso_name(release);

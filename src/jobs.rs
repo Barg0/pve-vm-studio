@@ -331,8 +331,13 @@ impl Sched {
             return why.clone();
         }
         let Some(w) = self.waiting.iter().find(|w| w.id == id) else { return String::new() };
-        if self.running.iter().any(|r| r.exclusive) || self.waiting.iter().any(|x| x.exclusive && x.id != id) {
-            return "the studio's update goes first".into();
+        // A job that runs alone - the studio's update, virtio-win, WinPE - running, else the
+        // first one waiting ahead of it.
+        let alone = self.running.iter().find(|r| r.exclusive).map(|r| r.title.clone()).or_else(|| {
+            self.waiting.iter().filter(|x| x.exclusive && x.id != id && (!w.exclusive || x.seq < w.seq)).min_by_key(|x| x.seq).map(|x| x.title.clone())
+        });
+        if let Some(t) = alone {
+            return format!("waits for {t}");
         }
         if w.exclusive {
             return format!("{} running job(s) finish first", self.running.len());
@@ -598,8 +603,10 @@ impl Jobs {
                 skip = Some(format!("not started - the job it waited for {}", st.map(|(s,)| format!("is {s}")).unwrap_or_else(|| "is gone".into())));
             }
         }
-        // The studio's own update restarts it: it runs alone.
-        let exclusive = kind == "update";
+        // These run alone: the studio's own update restarts it; virtio-win and WinPE replace
+        // what every bake, deploy and media build boots, so none of those may run beside them
+        // (they queue and start after).
+        let exclusive = matches!(kind, "update" | "virtio" | "winpe");
         let (go_tx, mut go_rx) = tokio::sync::oneshot::channel::<Go>();
         let (seq, started_now) = {
             let mut s = self.sched.lock().unwrap();
@@ -978,10 +985,35 @@ mod tests {
         wait(&mut s, "b", None, false);
         // b waits behind the update, which waits for a.
         assert!(s.pump().is_empty());
-        assert_eq!(s.why("b"), "the studio's update goes first");
+        assert_eq!(s.why("b"), "waits for update");
         s.running.clear();
         assert_eq!(ids(s.pump()), ["update"]);
         assert!(s.pump().is_empty());
+    }
+
+    #[test]
+    fn virtio_then_winpe_then_the_rest() {
+        let mut s = sched(3);
+        wait(&mut s, "bake", None, false);
+        assert_eq!(ids(s.pump()), ["bake"]);
+        // The window queues both at once; a deploy asked for meanwhile queues behind them.
+        wait(&mut s, "virtio", None, true);
+        wait(&mut s, "winpe", None, true);
+        wait(&mut s, "deploy", None, false);
+        // The running bake finishes first - it is not stopped.
+        assert!(s.pump().is_empty());
+        assert_eq!(s.why("virtio"), "1 running job(s) finish first");
+        assert_eq!(s.why("winpe"), "waits for virtio");
+        assert_eq!(s.why("deploy"), "waits for virtio");
+        s.running.clear();
+        assert_eq!(ids(s.pump()), ["virtio"]);
+        assert!(s.pump().is_empty());
+        assert_eq!(s.why("deploy"), "waits for virtio");
+        s.running.clear();
+        assert_eq!(ids(s.pump()), ["winpe"]);
+        assert_eq!(s.why("deploy"), "waits for winpe");
+        s.running.clear();
+        assert_eq!(ids(s.pump()), ["deploy"]);
     }
 
     #[test]

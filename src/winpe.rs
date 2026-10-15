@@ -418,8 +418,60 @@ async fn finish(
         netkvm,
         curl: st.curl.map(|c| c.1).unwrap_or_default(),
     };
+    let old: WinPe = settings::load(db, "winpe").await.unwrap_or_default();
     settings::save(db, "winpe", &pe).await?;
+    // The one it replaces (another build, so another name) goes - unless a VM still has it
+    // in its config: a bake or deploy that started before booting it again would fail.
+    if !old.volid.is_empty() && old.volid != pe.volid && is_ours(&old.volid) {
+        drop_replaced(pve, log, &old.volid, "WinPE").await;
+    }
     Ok(pe)
+}
+
+/// A WinPE ISO the studio made: winpe-<build>.iso.
+fn is_ours(volid: &str) -> bool {
+    volid.rsplit('/').next().is_some_and(|f| f.starts_with("winpe-") && f.ends_with(".iso"))
+}
+
+/// The first VM whose config names the volume, if any.
+async fn used_by(pve: &Pve, volid: &str) -> Result<Option<u32>> {
+    for r in pve.resources().await?.iter().filter(|r| r.kind == "qemu") {
+        let (Some(node), Some(vmid)) = (r.node.as_deref(), r.vmid) else { continue };
+        let cfg = pve.vm_config(node, vmid).await?;
+        if cfg.values().any(|v| v.as_str().is_some_and(|s| s.split(',').next() == Some(volid))) {
+            return Ok(Some(vmid));
+        }
+    }
+    Ok(None)
+}
+
+/// Deletes a replaced ISO (an older WinPE or virtio-win) on whichever node's storage holds
+/// it; a VM that still has it in its config, or a failure, keeps it (logged - the new one is
+/// in place either way).
+pub(crate) async fn drop_replaced(pve: &Pve, log: &JobLog, volid: &str, what: &str) {
+    match used_by(pve, volid).await {
+        Ok(Some(vmid)) => {
+            log.warn(format!("{volid} stays: VM {vmid} still has it attached - delete it under Media once that VM is done")).await;
+            return;
+        }
+        Err(e) => {
+            log.warn(format!("{volid} stays: could not check which VMs use it ({e:#})")).await;
+            return;
+        }
+        Ok(None) => {}
+    }
+    let storage = volid.split(':').next().unwrap_or_default();
+    let Ok(res) = pve.resources().await else { return };
+    for s in res.iter().filter(|r| r.kind == "storage" && r.storage.as_deref() == Some(storage)) {
+        let Some(node) = s.node.as_deref() else { continue };
+        if pve.storage_content(node, storage, "iso").await.is_ok_and(|v| v.iter().any(|v| v.volid == volid)) {
+            match pve.delete_volume(node, volid).await {
+                Ok(()) => log.ok(format!("Deleted the {what} it replaces, {volid}")).await,
+                Err(e) => log.warn(format!("{volid} stays: deleting it failed ({e:#})")).await,
+            }
+            return;
+        }
+    }
 }
 
 /// Our part of a Setup environment image: startnet.cmd and winpeshl.ini (WinPE runs our
@@ -570,6 +622,16 @@ pub async fn build_uup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_our_isos_are_replaced() {
+        assert!(is_ours("local:iso/winpe-29683.1000.iso"));
+        assert!(!is_ours("local:iso/26100.1.LOF.iso"));
+        assert!(!is_ours("local:iso/fod-w11-26100.iso"));
+        assert!(crate::virtio::is_ours("local:iso/virtio-win-0.1.285.iso"));
+        assert!(!crate::virtio::is_ours("local:iso/winpe-29683.1000.iso"));
+        assert!(!crate::virtio::is_ours("local:iso/virtio-win-0.1.285.img"));
+    }
 
     #[test]
     fn tool_percentages() {
