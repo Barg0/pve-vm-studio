@@ -1034,7 +1034,7 @@ function goldBuildHtml(g, build) {
     ? `<span class="gold-build"><span class="base">${esc(build.slice(0, i + 1))}</span>${esc(build.slice(i + 1))}</span>`
     : `<span class="gold-build">${esc(build)}</span>`;
 }
-const ACTIVATION = { "kms-client": "KMS client key (GVLK)", retail: "Retail key", mak: "MAK", none: "None" };
+const ACTIVATION = { "kms-client": "KMS client key (GVLK)", preview: "Insider preview key", retail: "Retail key", mak: "MAK", none: "None" };
 const BAKE_OPTION = { rdp: "Remote Desktop", ping: "Answers ping", suppressServerManagerAtLogon: "No Server Manager at sign-in",
   blockSignInInputMethods: "STIG sign-in keyboard", suppressWelcomeExperience: "No welcome experience", suppressFirstSignInAnimation: "No first sign-in animation",
   edgeBaseline: "Edge baseline", preferIPv4: "Prefer IPv4", preventDeviceEncryption: "No auto device encryption", vmPowerPlan: "VM power plan" };

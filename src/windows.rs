@@ -49,31 +49,62 @@ use crate::{
 
 /// The KMS client (GVLK) keys Microsoft publishes. A GVLK activates against a KMS when
 /// there is one; either way it selects the edition and keeps OOBE off its key page.
+/// https://learn.microsoft.com/windows-server/get-started/kms-client-activation-keys
+/// Client keys hold for every build: Windows 11 24H2 shares 26100 with Server 2025.
 pub fn gvlk(edition_id: &str, build: &str) -> Option<&'static str> {
-    let year = server_year(build);
-    Some(match (edition_id, year) {
-        ("ServerDatacenter", Some(2025)) => "D764K-2NDRG-47T6Q-P8T8W-YP6DF",
-        ("ServerStandard", Some(2025)) => "TVRH6-WHNXV-R9WG3-9XRFY-MY832",
-        ("ServerDatacenter", Some(2022)) => "WX4NM-KYWYW-QJJR4-XV3QB-6VM33",
-        ("ServerStandard", Some(2022)) => "VDYBN-27WPP-V4HQT-9VMD4-VMK7H",
-        ("ServerDatacenter", Some(2019)) => "WMDGN-G9PQG-XVVXX-R3X43-63DFG",
-        ("ServerStandard", Some(2019)) => "N69G4-B89J2-4G8F4-WWYCC-J464C",
-        ("ServerDatacenter", Some(2016)) => "CB7KF-BWN84-R7R2Y-793K2-8XDDG",
-        ("ServerStandard", Some(2016)) => "WC2BQ-8NRM3-FDDYY-2BFGV-KHKQY",
-        ("Professional", None) => "W269N-WFGWX-YVC9B-4J6C9-T83GX",
-        ("ProfessionalN", None) => "MH37W-N47XK-V7XM9-C7227-GCQG9",
-        ("Enterprise", None) => "NPPR9-FWDCX-D2C8J-H872K-2YT43",
-        ("EnterpriseN", None) => "DPH2V-TTNVB-4X9Q3-TJR4H-KHJW4",
-        ("Education", None) => "NW6C2-QMPVW-D7KKK-3GKT6-VCFB2",
-        ("EducationN", None) => "2WH4N-8QGBV-H22JP-CT43Q-MDWWJ",
-        ("ProfessionalWorkstation", None) => "NRG8B-VKK3Q-CXVCJ-9G2XF-6Q84J",
-        ("ProfessionalWorkstationN", None) => "9FNHH-K3HBT-3W4TD-6383H-6XYWF",
-        ("ProfessionalEducation", None) => "6TP4R-GNPTD-KYYHQ-7B7DP-J447Y",
-        ("ProfessionalEducationN", None) => "YVWGF-BXNMC-HTQYQ-CPQ99-66QFC",
+    let client = match edition_id {
+        "Professional" => Some("W269N-WFGWX-YVC9B-4J6C9-T83GX"),
+        "ProfessionalN" => Some("MH37W-N47XK-V7XM9-C7227-GCQG9"),
+        "Enterprise" => Some("NPPR9-FWDCX-D2C8J-H872K-2YT43"),
+        "EnterpriseN" => Some("DPH2V-TTNVB-4X9Q3-TJR4H-KHJW4"),
+        "EnterpriseG" => Some("YYVX9-NTFWV-6MDM3-9PT4T-4M68B"),
+        "EnterpriseGN" => Some("44RPN-FTY23-9VTTB-MP9BX-T84FV"),
+        "Education" => Some("NW6C2-QMPVW-D7KKK-3GKT6-VCFB2"),
+        "EducationN" => Some("2WH4N-8QGBV-H22JP-CT43Q-MDWWJ"),
+        "ProfessionalWorkstation" => Some("NRG8B-VKK3Q-CXVCJ-9G2XF-6Q84J"),
+        "ProfessionalWorkstationN" => Some("9FNHH-K3HBT-3W4TD-6383H-6XYWF"),
+        "ProfessionalEducation" => Some("6TP4R-GNPTD-KYYHQ-7B7DP-J447Y"),
+        "ProfessionalEducationN" => Some("YVWGF-BXNMC-HTQYQ-CPQ99-66QFC"),
+        // Enterprise LTSC 2024 (and 2021/2019), IoT Enterprise LTSC 2024 (and 2021).
+        "EnterpriseS" => Some("M7XTQ-FN8P6-TTKYV-9D4CC-J462D"),
+        "EnterpriseSN" => Some("92NFX-8DJQP-P6BBQ-THF9C-7CG2H"),
+        "IoTEnterpriseS" => Some("KBN8V-HFGQ4-MGXVD-347P6-PDQGT"),
         // Multi-session: DISM names it ServerRdsh or EnterpriseMultiSession.
-        ("ServerRdsh" | "EnterpriseMultiSession", None) => "CPWHC-NT2C7-VYW78-DHDB2-PG3GK",
+        "ServerRdsh" | "EnterpriseMultiSession" => Some("CPWHC-NT2C7-VYW78-DHDB2-PG3GK"),
+        _ => None,
+    };
+    if client.is_some() {
+        return client;
+    }
+    // Azure Edition: DISM's ServerTurbine, ServerTurbineCor for Core.
+    let edition = edition_id.strip_suffix("Cor").filter(|e| e.starts_with("ServerTurbine")).unwrap_or(edition_id);
+    Some(match (edition, server_year(build)?) {
+        ("ServerTurbine", 2025) => "XGN3F-F394H-FD2MY-PP6FD-8MCRC",
+        ("ServerTurbine", 2022) => "NTBV8-9K7Q8-V27C6-M2BTV-KHMXV",
+        ("ServerDatacenter", 2025) => "D764K-2NDRG-47T6Q-P8T8W-YP6DF",
+        ("ServerStandard", 2025) => "TVRH6-WHNXV-R9WG3-9XRFY-MY832",
+        ("ServerDatacenter", 2022) => "WX4NM-KYWYW-QJJR4-XV3QB-6VM33",
+        ("ServerStandard", 2022) => "VDYBN-27WPP-V4HQT-9VMD4-VMK7H",
+        ("ServerDatacenter", 2019) => "WMDGN-G9PQG-XVVXX-R3X43-63DFG",
+        ("ServerStandard", 2019) => "N69G4-B89J2-4G8F4-WWYCC-J464C",
+        ("ServerDatacenter", 2016) => "CB7KF-BWN84-R7R2Y-793K2-8XDDG",
+        ("ServerStandard", 2016) => "WC2BQ-8NRM3-FDDYY-2BFGV-KHKQY",
         _ => return None,
     })
+}
+
+/// The key a gold is baked with, and what the manifest calls it: Microsoft's published
+/// preview key on a Windows Server Insider build (vNext; Azure Edition takes none), else the
+/// KMS client key. https://learn.microsoft.com/windows-server/get-started/get-started-with-windows-server-insiders-preview
+pub fn bake_key(edition_id: &str, build: &str, insider: bool) -> Option<(&'static str, &'static str)> {
+    if insider && server_year(build).is_none() {
+        return match edition_id {
+            "ServerStandard" => Some(("MFY9F-XBN2F-TYFMP-CCV49-RMYVH", "preview")),
+            "ServerDatacenter" => Some(("2KNJJ-33Y9H-2GXGX-KMQWH-G6H67", "preview")),
+            _ => gvlk(edition_id, build).map(|k| (k, "kms-client")),
+        };
+    }
+    gvlk(edition_id, build).map(|k| (k, "kms-client"))
 }
 
 pub fn server_year(build: &str) -> Option<u32> {
@@ -739,7 +770,7 @@ echo PVS-POLICY power > COM1
 
 /// WinPE pass 2, on the generalized gold: prove generalize worked, then locale, time zone,
 /// policies and the product key - offline, after generalize, in New-Vhdx's order.
-pub fn pe2_cmd(img: &WimImage, region: &WinRegion, features: &[String], edition_target: Option<&str>) -> String {
+pub fn pe2_cmd(img: &WimImage, region: &WinRegion, features: &[String], edition_target: Option<&str>, insider: bool) -> String {
     let client = img.installation_type == "Client";
     let locale = &region.locale;
     let input = input_locale(if region.keyboard.is_empty() { locale } else { &region.keyboard });
@@ -761,8 +792,8 @@ pub fn pe2_cmd(img: &WimImage, region: &WinRegion, features: &[String], edition_
         ),
         None => String::new(),
     };
-    let key = match gvlk(edition_target.unwrap_or(&img.edition_id), &img.build) {
-        Some(k) => format!("call :dism /Image:W:\\ /Set-ProductKey:{k} || goto :fail\necho PVS-KEY > COM1"),
+    let key = match bake_key(edition_target.unwrap_or(&img.edition_id), &img.build, insider) {
+        Some((k, _)) => format!("call :dism /Image:W:\\ /Set-ProductKey:{k} || goto :fail\necho PVS-KEY > COM1"),
         None => "echo PVS-NO-KEY > COM1".into(),
     };
     crlf(&format!(
@@ -1481,7 +1512,7 @@ pub async fn bake(
             b.work,
             &s2,
             "PVSSEED",
-            &[("pvs/pe.cmd", &pe2_cmd(img, &opt.region, &opt.features, edition_target.as_deref())), ("pvs/gold.xml", &gold_unattend())],
+            &[("pvs/pe.cmd", &pe2_cmd(img, &opt.region, &opt.features, edition_target.as_deref(), !agent)), ("pvs/gold.xml", &gold_unattend())],
         )
         .await?;
         seed::detach(pve, node, vmid, "sata3").await?;
@@ -1568,8 +1599,8 @@ pub async fn bake(
                     "evaluation": edition_target.as_deref().unwrap_or(&img.edition_id).ends_with("Eval"),
                     "generalized": true,
                     // [diff] Hyper-V has "avma" (host-based activation); PVE has no AVMA,
-                    // so a gold carries the KMS client key or nothing.
-                    "activation": if gvlk(edition_target.as_deref().unwrap_or(&img.edition_id), &img.build).is_some() { "kms-client" } else { "none" },
+                    // so a gold carries the KMS client key, a Server Insider its preview key, or nothing.
+                    "activation": bake_key(edition_target.as_deref().unwrap_or(&img.edition_id), &img.build, !agent).map_or("none", |(_, kind)| kind),
                     "requiresTpm": client,
                     "secureBootTemplate": "MicrosoftWindows",
                     "bakeOptions": bake_options,
@@ -2116,6 +2147,42 @@ mod tests {
     }
 
     /// Only an Insider ISO with a build that is no release bakes without the agent.
+    #[test]
+    fn gvlk_table() {
+        // Windows 11 24H2 shares its build with Server 2025.
+        assert_eq!(gvlk("Professional", "26100"), Some("W269N-WFGWX-YVC9B-4J6C9-T83GX"));
+        assert_eq!(gvlk("Enterprise", "26200"), Some("NPPR9-FWDCX-D2C8J-H872K-2YT43"));
+        assert_eq!(gvlk("EnterpriseS", "26100"), Some("M7XTQ-FN8P6-TTKYV-9D4CC-J462D"));
+        assert_eq!(gvlk("IoTEnterpriseS", "26100"), Some("KBN8V-HFGQ4-MGXVD-347P6-PDQGT"));
+        // Azure Edition, Desktop and Core.
+        assert_eq!(gvlk("ServerTurbine", "26100"), Some("XGN3F-F394H-FD2MY-PP6FD-8MCRC"));
+        assert_eq!(gvlk("ServerTurbineCor", "26100"), Some("XGN3F-F394H-FD2MY-PP6FD-8MCRC"));
+        assert_eq!(gvlk("ServerTurbineCor", "20348"), Some("NTBV8-9K7Q8-V27C6-M2BTV-KHMXV"));
+        assert_eq!(gvlk("ServerDatacenter", "20348"), Some("WX4NM-KYWYW-QJJR4-XV3QB-6VM33"));
+        // An unknown server build, Home, an evaluation: none.
+        assert_eq!(gvlk("ServerDatacenter", "29683"), None);
+        assert_eq!(gvlk("Core", "26100"), None);
+        assert_eq!(gvlk("ServerDatacenterEval", "26100"), None);
+    }
+
+    #[test]
+    fn bake_keys() {
+        // Server Insider: Microsoft's preview keys; Azure Edition takes none.
+        assert_eq!(bake_key("ServerStandard", "29683", true), Some(("MFY9F-XBN2F-TYFMP-CCV49-RMYVH", "preview")));
+        assert_eq!(bake_key("ServerDatacenter", "29683", true), Some(("2KNJJ-33Y9H-2GXGX-KMQWH-G6H67", "preview")));
+        assert_eq!(bake_key("ServerTurbine", "29683", true), None);
+        // A release keeps its KMS client key, Insider or not; an unknown build that is no
+        // Insider gets nothing.
+        assert_eq!(bake_key("ServerDatacenter", "26100", true), Some(("D764K-2NDRG-47T6Q-P8T8W-YP6DF", "kms-client")));
+        assert_eq!(bake_key("ServerDatacenter", "29683", false), None);
+        // Windows 11 Insider: the client GVLK, as before.
+        assert_eq!(bake_key("Professional", "29683", true), Some(("W269N-WFGWX-YVC9B-4J6C9-T83GX", "kms-client")));
+        let img = WimImage { edition_id: "ServerStandard".into(), installation_type: "Server Core".into(), build: "29683".into(), ..Default::default() };
+        let region = WinRegion { locale: "en-US".into(), keyboard: "en-US".into(), timezone: "UTC".into() };
+        assert!(pe2_cmd(&img, &region, &[], None, true).contains("/Set-ProductKey:MFY9F-XBN2F-TYFMP-CCV49-RMYVH"));
+        assert!(pe2_cmd(&img, &region, &[], None, false).contains("PVS-NO-KEY"));
+    }
+
     #[test]
     fn insider_only() {
         let canary = crate::uup::product("w11-canary");
