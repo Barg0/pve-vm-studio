@@ -6856,7 +6856,12 @@ function goldsOfImage(imageId, lang, release) {
   const l = String(lang || "").toLowerCase();
   return readyGolds().filter(g => g.image_id === imageId && (!l || goldLang(g).toLowerCase() === l) && (!release || goldRelease(g) === release)).sort(compareGolds);
 }
-function goldOf(imageId, lang, release) { return goldsOfImage(imageId, lang, release)[0] || null; }
+/* No release named is the newest release, not the newest build: an Insider flight outnumbers
+   every release, so it is only taken when the image has nothing else (golds.rs resolve). */
+function goldOf(imageId, lang, release) {
+  const list = goldsOfImage(imageId, lang, release);
+  return (release ? list[0] : list.find(g => goldRelease(g) !== INSIDER_RELEASE) || list[0]) || null;
+}
 /* A pinned gold id wins (Build-Vms' -GoldId), then the language and the release, then the
    newest build. */
 function goldFor(s) {

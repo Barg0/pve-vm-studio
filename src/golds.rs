@@ -156,16 +156,21 @@ pub fn release(g: &GoldRow) -> Option<&'static str> {
 }
 
 /// The gold a VM builds from: a pinned one, else the newest build of its image - in its
-/// language and its release (25H2, 26H2) when the design names them.
+/// language and its release (25H2, 26H2) when the design names them. No release named means
+/// the newest release, not the newest build: an Insider flight (29683) outnumbers every
+/// release, so it is only taken when the image has nothing else.
 pub fn resolve<'a>(golds: &'a [GoldRow], image: &str, lang: &str, pin: &str, rel: &str) -> Option<&'a GoldRow> {
     if !pin.is_empty() {
         return golds.iter().find(|g| g.status == "ready" && g.id == pin);
     }
-    golds
-        .iter()
-        .filter(|g| g.status == "ready" && g.image_id == image && (lang.is_empty() || language(g).eq_ignore_ascii_case(lang)))
-        .filter(|g| rel.is_empty() || release(g).is_some_and(|r| r.eq_ignore_ascii_case(rel)))
-        .max_by(|a, b| build_version(a).cmp(&build_version(b)).then_with(|| a.created_at.cmp(&b.created_at)))
+    let newest = |insider: bool| {
+        golds
+            .iter()
+            .filter(|g| g.status == "ready" && g.image_id == image && (lang.is_empty() || language(g).eq_ignore_ascii_case(lang)))
+            .filter(|g| if rel.is_empty() { insider || release(g) != Some(INSIDER) } else { release(g).is_some_and(|r| r.eq_ignore_ascii_case(rel)) })
+            .max_by(|a, b| build_version(a).cmp(&build_version(b)).then_with(|| a.created_at.cmp(&b.created_at)))
+    };
+    newest(false).or_else(|| newest(true))
 }
 
 /// What a gold was made with, for the sidecar fields every bake shares (Complete-GoldImage):
@@ -989,6 +994,12 @@ mod tests {
         assert_eq!(resolve(&golds, "w11-enterprise", "", "", "").map(|g| g.id.as_str()), Some("b26"));
         assert_eq!(resolve(&golds, "w11-enterprise", "", "", "25H2").map(|g| g.id.as_str()), Some("c25"));
         assert!(resolve(&golds, "w11-enterprise", "", "", "24H2").is_none());
+        // An Insider gold of the same image: the newest build, but not the newest release.
+        let mut with_insider = golds.clone();
+        with_insider.push(g("i29", "10.0.29683.1000"));
+        assert_eq!(resolve(&with_insider, "w11-enterprise", "", "", "").map(|g| g.id.as_str()), Some("b26"));
+        assert_eq!(resolve(&with_insider, "w11-enterprise", "", "", "Insider Preview").map(|g| g.id.as_str()), Some("i29"));
+        assert_eq!(resolve(&[g("i29", "29683.1000")], "w11-enterprise", "", "", "").map(|g| g.id.as_str()), Some("i29"));
         let mut server = g("s", "10.0.26100.33438");
         server.image_id = "ws2025-datacenter-core".into();
         assert_eq!(release(&server), None);
