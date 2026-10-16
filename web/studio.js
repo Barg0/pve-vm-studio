@@ -381,7 +381,7 @@ const BLADES = [
   { id: "general",    group: "VMs",           scope: "lab",    label: "VM settings",        icon: "settings.svg",   desc: "Naming, the local account generator and where new VMs go." },
   { id: "networks",   group: "VMs",           scope: "lab",    label: "Networks",           icon: "vnet.svg",       desc: "Reusable subnets on a bridge or SDN VNet: VLAN, gateway, DNS. Bind VMs to one and IPs get range-checked." },
   { id: "servers",    group: "VMs",           scope: "lab",    label: "Virtual machines",   icon: "vm.svg",         desc: "The VMs themselves: start from a template, then gold, CPU/memory, disks, adapters, roles, local account." },
-  { id: "licenses",   group: "VMs",           scope: "lab",    label: "Windows licenses",   icon: "key.svg",        desc: "A product key per Windows gold image - installed and activated on every VM built from it." },
+  { id: "licenses",   group: "VMs",           scope: "lab",    label: "Windows licenses",   icon: "key.svg",        desc: "A product key per Windows edition - installed and activated on every VM of it." },
   { id: "domainjoin", group: "VMs",           scope: "lab",    label: "Domain Join",        icon: "identity.svg",   desc: "Join accounts defined once, then attached to VMs — one per tier or OU, with a target OU per machine." },
   { id: "azurearc",   group: "VMs",           scope: "lab",    label: "Azure Arc",          icon: "arc.svg",        desc: "Arc landing zones — subscription, tenant, resource group, region, credentials." },
   { id: "deploy",     group: "VMs",           scope: "lab",    subhead: "Build", label: "Deploy",             icon: "deploy.svg",     desc: "Preflight, then build: every check, the design against what exists, and what gets built.", server: true },
@@ -7105,11 +7105,23 @@ function effectiveLicense(s) {
   return w && licenseFits(w, s) && productKeyOk(w.productKey) ? w : null;
 }
 function productKeyOk(k) { return /^[A-Za-z0-9]{5}(-[A-Za-z0-9]{5}){4}$/.test(String(k || "").trim()); }
-/* One row per Windows edition with a ready gold (plus the licence's own, if its golds are
-   gone), grouped like the VM card's image picker. */
+/* The editions a key can activate: every Windows edition of the catalog, baked or not.
+   Pre-release (vNext), Azure Edition, multi-session and Azure Local take no key. */
+function licensableEditions() {
+  return [...new Set(IMAGE_CATALOG.filter(img => !isLinuxImage(img) && !img.noServerRoles && !/^wsvnext-|-az-|-ms$/.test(img.id)).map(img => licenseEditionOf(img.id)))];
+}
+/* "·· 7QX4M" - the key's last five characters, as slmgr /dli shows them. */
+function licenseKeyTail(w) { return productKeyOk(w.productKey) ? "·· " + String(w.productKey).trim().slice(-5).toUpperCase() : ""; }
+/* The licences carrying the same key as this one. */
+function licenseKeyTwins(w) {
+  const k = String(w.productKey || "").trim().toUpperCase();
+  return productKeyOk(k) ? (state.windowsLicenses || []).filter(x => x !== w && String(x.productKey || "").trim().toUpperCase() === k) : [];
+}
+/* One row per licensable Windows edition (plus the licence's own, if it is no longer one),
+   grouped like the VM card's image picker. The golds say what is baked of each. */
 function licenseEditionGroups(w) {
   const golds = readyGolds().filter(g => { const img = findImage(g.image_id); return img.id === g.image_id && !isLinuxImage(img); });
-  const editions = [...new Set(golds.map(g => licenseEditionOf(g.image_id)).concat(w.edition ? [w.edition] : []))];
+  const editions = [...new Set(licensableEditions().concat(w.edition ? [w.edition] : []))];
   const groups = [];
   editions.map(ed => {
     const mine = golds.filter(g => licenseEditionOf(g.image_id) === ed);
@@ -7151,11 +7163,12 @@ function renderLicensesBlade() {
               <span class="card-chevron">${chevron()}</span>
               <div class="card-icon"><img src="${img ? imageIconSrc(img) : iconSrc("key.svg")}"></div>
               <div>
-                <div class="card-title">${w.edition ? esc(licenseTitle(w.edition)) : "Pick an edition"}</div>
-                <div class="card-meta">${w.productKey ? (productKeyOk(w.productKey) ? "key set" : "key not valid") : "no key"} · ${vms.length} VM(s) attached</div>
+                <div class="card-title">${w.edition ? esc(licenseTitle(w.edition)) : "Pick an edition"}${licenseKeyTail(w) ? ` <span class="key-tail">${licenseKeyTail(w)}</span>` : ""}</div>
+                <div class="card-meta">${w.productKey ? (productKeyOk(w.productKey) ? "key set" : "key not valid") : "no key"} · ${vms.length} VM${vms.length === 1 ? "" : "s"}</div>
               </div>
             </div>
             <div class="card-actions">
+              ${licenseKeyTwins(w).length ? `<span class="pill status warn" title="${esc("The same key is on " + licenseKeyTwins(w).map(x => x.edition ? licenseTitle(x.edition) : "another licence").join(", "))}">Key used twice</span>` : ""}
               <button class="btn icon danger-text" type="button" title="Remove licence" aria-label="Remove licence" data-del-wl="${esc(w._id)}">${trashIcon()}</button>
             </div>
           </div>
@@ -7165,10 +7178,10 @@ function renderLicensesBlade() {
                 const groups = licenseEditionGroups(w), open = state.imagePickerOpen === "wl:" + w._id;
                 const cur = groups.flatMap(g => g.rows).find(r => r.edition === w.edition);
                 return `<div class="picker ${open ? "open" : ""}">
-                <button type="button" class="picker-btn${w.edition ? "" : " is-invalid"}" data-image-picker-toggle="wl:${esc(w._id)}" aria-expanded="${open ? "true" : "false"}"${groups.length ? "" : " disabled"}>
+                <button type="button" class="picker-btn${w.edition ? "" : " is-invalid"}" data-image-picker-toggle="wl:${esc(w._id)}" aria-expanded="${open ? "true" : "false"}">
                   <img src="${cur ? imageIconSrc(cur.img) : iconSrc("key.svg")}" alt="">
-                  <span class="picker-label">${w.edition ? esc(licenseTitle(w.edition)) : groups.length ? "Pick an edition" : "No Windows gold yet - bake one under Golds"}</span>
-                  ${cur && cur.golds.length ? kindPills(cur.kinds) : w.edition ? `<span class="pill status off">No gold</span>` : ""}
+                  <span class="picker-label">${w.edition ? esc(licenseTitle(w.edition)) : "Pick an edition"}</span>
+                  ${cur && cur.golds.length ? kindPills(cur.kinds) : ""}
                   <span class="picker-chevron">${chevron()}</span>
                 </button>
                 ${open ? `<div class="picker-list" role="listbox">${groups.map(g => `
@@ -7176,14 +7189,18 @@ function renderLicensesBlade() {
                   ${g.rows.map(row => `<button type="button" role="option" aria-selected="${row.edition === w.edition}" class="${row.edition === w.edition ? "selected" : ""}" data-wl-edition="${esc(w._id)}" data-edition="${esc(row.edition)}">
                     <img src="${imageIconSrc(row.img)}" alt="">
                     <span class="opt-body"><span class="opt-label">${esc(licenseTitle(row.edition))}</span>
-                      <span class="opt-meta">${row.golds.length ? `${row.golds.length} gold${row.golds.length === 1 ? "" : "s"} · ${esc(goldBuildNumber(row.golds.slice().sort(compareGolds)[0]))}` : "no gold baked now"}</span></span>
-                    ${row.golds.length ? kindPills(row.kinds) : `<span class="pill status off">No gold</span>`}
+                      ${(() => {
+                        const keys = (state.windowsLicenses || []).filter(x => x.edition === row.edition).length;
+                        const meta = [row.golds.length ? `${row.golds.length} gold${row.golds.length === 1 ? "" : "s"} · ${goldBuildNumber(row.golds.slice().sort(compareGolds)[0])}` : "", keys ? `${keys} key${keys === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
+                        return meta ? `<span class="opt-meta">${esc(meta)}</span>` : "";
+                      })()}</span>
+                    ${row.golds.length ? kindPills(row.kinds) : ""}
                   </button>`).join("")}`).join("")}
                   <button type="button" class="opt-footer" data-goto="golds"><img src="${iconSrc("gold-image.svg")}" alt=""> Bake another gold…</button>
                 </div>` : ""}
               </div>`;
               })())}
-              ${field(`<span class="field-label">Product key ${infoTip("Product key", "Installed over the gold's KMS client key on every VM built from this image, then activated online at first boot (slmgr /ipk, then /ato). A failed activation is logged in C:\\Windows\\Temp\\pvs-firstboot.log and does not hold the VM up. MAK, retail or a KMS host key - the key must match the image's edition.")}</span>`,
+              ${field(`<span class="field-label">Product key ${infoTip("Product key", "Installed over the gold's KMS client key on every VM of this edition it is attached to, then activated online at first boot (slmgr /ipk, then /ato). A failed activation is logged in C:\\Windows\\Temp\\pvs-firstboot.log and does not hold the VM up. MAK, retail or a KMS host key - the key must match the edition.")}</span>`,
                 `<div class="edit-field">
                 <input type="${keyShown ? "text" : "password"}" class="mono keep-border key-input${keyBad ? " is-invalid" : ""}" data-wl="${esc(w._id)}" data-wk="productKey" data-name-input="wlkey:${esc(w._id)}" value="${esc(w.productKey || "")}" placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" spellcheck="false" autocomplete="off" maxlength="29"${keyUnlocked ? "" : " readonly"}>
                 <button class="btn icon" type="button" data-pw-toggle="wlkey:${esc(w._id)}"${keyUnlocked || !w.productKey ? " disabled" : ""}
@@ -7202,14 +7219,14 @@ function renderLicensesBlade() {
               ${vms.map(s => {
                 const fits = licenseFits(w, s);
                 return `<div class="cl-row">${vmGridCell(s)}
-                <div>${fits ? `<span class="hint">${esc(findImage(s.imageId).label)}</span>` : `<span class="pill status warn" title="Builds from ${esc(findImage(s.imageId).label)} - this key is not used">Other gold</span>`}</div><div></div>
+                <div>${fits ? `<span class="hint">${esc(findImage(s.imageId).label)}</span>` : `<span class="pill status warn" title="Builds from ${esc(findImage(s.imageId).label)} - this key is not used">Other edition</span>`}</div><div></div>
                 <div class="cl-detach"><button class="btn icon danger-text" type="button" title="Detach ${esc(serverDisplayName(s))}" aria-label="Detach ${esc(serverDisplayName(s))}" data-wl-detach="${esc(s._id)}">${trashIcon()}</button></div>
               </div>`;
               }).join("")}
             </div>` : `<p class="hint" style="margin:10px 0 0">No VMs attached - this key goes nowhere.</p>`}
           </div>
         </article>`;
-      }).join("") || `<div class="empty-state"><div class="ue-icon"><img src="${iconSrc("key.svg")}"></div><h3>No Windows licences yet</h3><p>Add a product key for a Windows gold image; its VMs get it at first boot.</p>
+      }).join("") || `<div class="empty-state"><div class="ue-icon"><img src="${iconSrc("key.svg")}"></div><h3>No Windows licences yet</h3><p>Add a product key for a Windows edition; its VMs get it at first boot.</p>
         <div class="ue-actions">${addBtn}</div></div>`}
     </div>`;
 }
@@ -10800,7 +10817,7 @@ function openMemberPicker(mode, targetId) {
     const w = (state.windowsLicenses || []).find(x => x._id === targetId);
     if (!w) return;
     selected = serversForLicense(w).map(s => s.name);
-    title = "Windows licence · " + (w.edition ? licenseTitle(w.edition) : "no edition");
+    title = "Windows licence · " + (w.edition ? licenseTitle(w.edition) : "no edition") + (licenseKeyTail(w) ? " " + licenseKeyTail(w) : "");
   } else if (mode === "cluster") {
     const c = clusterSettings();
     selected = serversForCluster().map(s => s.name);
@@ -10823,7 +10840,7 @@ function openMemberPicker(mode, targetId) {
     : mode === "cluster"
     ? "Select the virtual machines to add to the host failover cluster."
     : mode === "license"
-    ? "Select the VMs that get this key. A VM has one licence; VMs built from another gold are greyed out."
+    ? "Select the VMs that get this key. A VM has one licence; picking one that is on another key moves it here. VMs of another edition are greyed out."
     : "Select virtual machines to attach. A VM can belong to only one account/principal.";
   document.getElementById("memberPickerFilter").value = "";
   renderMemberPickerList();
@@ -10856,9 +10873,18 @@ function renderMemberPickerList() {
       <span class="op-check">✓</span>
       <img src="${iconSrcBand("vm.svg", serverGlyphBand(server))}" width="16" height="16">
       <span class="op-name">${esc(n)}</span>
+      ${licenseElsewhere(ctx, server)}
       ${pill}
     </button>`;
   }).join("") : '<div class="hint" style="padding:14px">No named virtual machines yet. Add VMs first.</div>';
+}
+/* In a licence's picker: the other licence a VM is on now - picking it moves it here. */
+function licenseElsewhere(ctx, server) {
+  if (ctx.mode !== "license" || !server.windowsLicense || !server.windowsLicense.licenseId) return "";
+  const w = (state.windowsLicenses || []).find(x => x._id === ctx.targetId);
+  const other = (state.windowsLicenses || []).find(x => x.id === server.windowsLicense.licenseId);
+  if (!other || other === w) return "";
+  return `<span class="op-on" title="Picking it moves it here">on ${esc(licenseKeyTail(other) || (other.edition ? licenseTitle(other.edition) : "another licence"))}</span>`;
 }
 /* Band to the theme variable that carries it: client blue, server green, Linux yellow,
    Azure Local purple, a custom gold on the Deploy band like its icon. */
