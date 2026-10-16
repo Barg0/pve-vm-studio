@@ -1426,11 +1426,12 @@ async function bladeGolds(main, stale) {
       ["keep", "VMs built as full copies keep running", copies],
       ["move", "Designed VMs move to the next gold", moved],
     ], "Remove")) return;
-    let started = 0;
-    for (const id of ids) { try { await api("DELETE", "/golds/" + encodeURIComponent(id)); started++; } catch (e) { toast(e.message, true); } }
+    const started = [];
+    for (const id of ids) { try { started.push((await api("DELETE", "/golds/" + encodeURIComponent(id))).id); } catch (e) { toast(e.message, true); } }
     goldsUi.cleanup = false;
-    toast(`${started} removal job(s) started`);
-    state.blade = "jobs"; render();
+    toast(`${started.length} removal job(s) started`);
+    // The first removal is the one that runs first.
+    if (started.length) openJob(started[0]); else { state.blade = "jobs"; render(); }
   });
   main.querySelectorAll("[data-label-edit]").forEach(b => b.addEventListener("click", () => { goldsUi.labelEdit = b.dataset.labelEdit; rerender(); }));
   main.querySelectorAll(".gold-card [data-copy]").forEach(b => b.addEventListener("click", async () => {
@@ -1708,7 +1709,8 @@ async function bladeDeploy(main, stale) {
     try {
       const r = await api("POST", `/labs/${encodeURIComponent(lab.id)}/deploy`, { names });
       toast(`${r.jobs.length} build job(s) started`);
-      state.blade = "jobs"; render();
+      // The first build is the one that runs first; the rest queue behind it.
+      if (r.jobs.length) openJob(r.jobs[0].job); else { state.blade = "jobs"; render(); }
     } catch (e) { toast(e.message, true); }
   };
   dpEd.deploy = deploy;
