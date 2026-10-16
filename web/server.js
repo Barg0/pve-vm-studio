@@ -1529,6 +1529,9 @@ async function bladeGolds(main, stale) {
   });
 }
 
+/* One policy toggle of the Windows bake form, its tip beside the label. */
+const winPolicyToggle = f => toggle(`id="wiF_${esc(f.id)}"`, `${esc(f.label)}${f.tip ? infoTip(f.label, f.tip) : ""}`, winForm.features.includes(f.id));
+
 /* The policies the selected index can take: Server Manager is a server's, the welcome
    experience and the first sign-in animation a client's. */
 /* The policies that reach the picked image: client or server ones, and Edge not on Server Core. */
@@ -1622,7 +1625,9 @@ async function fillWinBake(catalog, stale) {
       ${field(fieldLabel("language.svg", "Time zone"), `<select id="wiTz">${opts(info.timezones.map(z => [z.id, `${z.id} · ${z.iana}`]), winForm.timezone)}</select>`)}
     </div>
     <div class="field-group">Policies baked in</div>
-    <div class="toggle-grid">${winPolicies(info).map(f => toggle(`id="wiF_${esc(f.id)}"`, `${esc(f.label)}${f.tip ? infoTip(f.label, f.tip) : ""}`, winForm.features.includes(f.id))).join("")}</div>
+    <div class="toggle-grid">${winPolicies(info).filter(f => !f.experimental).map(winPolicyToggle).join("")}</div>
+    ${winPolicies(info).some(f => f.experimental) ? `<div class="exp-card"><div class="exp-head"><span class="pill role experimental">Experimental</span></div>
+      <div class="toggle-grid">${winPolicies(info).filter(f => f.experimental).map(winPolicyToggle).join("")}</div></div>` : ""}
     ${actions(`<span class="hint gs-actions-note">WinPE pass 1 (apply${winForm.edition ? ", check the edition target" : ""}) · audit mode (virtio, agent, sysprep) · WinPE pass 2 (verify${winForm.edition ? ", change the edition" : ""}, region, policies, key)</span>`,
       act("wiStart", "gold-image.svg", "Bake", true))}`;
   const keepWin = () => {

@@ -42,7 +42,6 @@ const TEXT: &[(&str, &str)] = &[
     ("NO-KEY", "No product key for this edition"),
     ("PERSONAL", "Personalization default"),
     ("PERSONAL-FAIL", "Personalization default not set"),
-    ("NO-USRCLASS", "The Default user has no UsrClass.dat - the classic context menu is not set"),
     ("PASS2-OK", "Pass 2 done"),
     ("PASS2-FAILED", "Pass 2 failed"),
     ("DEPLOY-START", "Deploy pass started"),
@@ -198,7 +197,7 @@ pub fn tag(line: &str) -> Tag {
         "PE-NO-SEED" | "EDITION-NOT-CHANGED" | "PASS1-FAILED" | "NOT-GENERALIZED" | "PASS2-FAILED" | "DEPLOY-FAILED"
         | "NO-VIOSCSI" | "NO-OS-DISK" | "NO-INSTALL-WIM" | "NO-WINDOWS" | "NO-BOOTLOADER" | "NO-FIRSTBOOT" | "NO-VIRTIO-CD"
         | "NO-CURL" | "NO-STUDIO" | "NO-SCRATCH-DISK" | "SCRATCH-FAILED" | "WORKER-FAILED" | "LAYOUT-FAILED" => Tag::Error,
-        "NO-SYSPREP-TAG" | "DISK-READONLY" | "PERSONAL-FAIL" | "NO-USRCLASS" | "INITRD-FAILED" | "RELABEL-FAILED" => Tag::Warn,
+        "NO-SYSPREP-TAG" | "DISK-READONLY" | "PERSONAL-FAIL" | "INITRD-FAILED" | "RELABEL-FAILED" => Tag::Warn,
         "PASS1-START" | "PASS2-START" | "DEPLOY-START" | "DEPLOY-OK" | "DISK" | "OS-DISK" | "BCDBOOT-WITH" | "TARGET"
         | "NO-QGA" | "SYSPREP-TAG" | "SYSPREP-TAG-GONE" | "FALLBACK" | "STOPPED" | "UPD" | "UPD-OK" | "UPD-FAIL" | "UPD-SKIP"
         | "CLEANUP" | "HEALTH" | "PROV-OK" | "PROV-FAIL" | "APPS-DONE" | "FIRSTBOOT"
