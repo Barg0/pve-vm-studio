@@ -1059,7 +1059,7 @@ function goldBuildHtml(g, build) {
 const ACTIVATION = { "kms-client": "KMS client key (GVLK)", preview: "Insider preview key", retail: "Retail key", mak: "MAK", none: "None" };
 const BAKE_OPTION = { rdp: "Remote Desktop", ping: "Answers ping", suppressServerManagerAtLogon: "No Server Manager at sign-in",
   blockSignInInputMethods: "STIG sign-in keyboard", suppressWelcomeExperience: "No welcome experience", suppressFirstSignInAnimation: "No first sign-in animation",
-  edgeBaseline: "Edge baseline", preferIPv4: "Prefer IPv4", preventDeviceEncryption: "No auto device encryption", vmPowerPlan: "VM power plan", personalizationDefaults: "Personalization defaults" };
+  edgeBaseline: "Edge baseline", preferIPv4: "Prefer IPv4", preventDeviceEncryption: "No auto device encryption", vmPowerPlan: "VM power plan" };
 const shortHash = h => h ? `${h.slice(0, 8)}…${h.slice(-4)}` : "";
 function goldKv(rows) {
   return `<dl class="gold-kv">${rows.filter(r => r && r[1] !== undefined && r[1] !== "").map(([k, v, raw]) =>
@@ -1472,7 +1472,7 @@ async function bladeGolds(main, stale) {
     if (g.os === "windows") {
       const bo = m.bakeOptions;
       const policies = bo ? [["rdp", "rdp"], ["ping", "ping"], ["blockSignInInputMethods", "signinkeyboard"], ["suppressServerManagerAtLogon", "svrmgr"],
-        ["suppressWelcomeExperience", "welcome"], ["suppressFirstSignInAnimation", "firstlogon"], ["edgeBaseline", "edge"], ["preferIPv4", "preferipv4"], ["personalizationDefaults", "personalization"],
+        ["suppressWelcomeExperience", "welcome"], ["suppressFirstSignInAnimation", "firstlogon"], ["edgeBaseline", "edge"], ["preferIPv4", "preferipv4"]
         // A gold from before these two were toggles had both, always.
         ["preventDeviceEncryption", "noencrypt", true], ["vmPowerPlan", "power", true]].filter(([k, , was]) => bo[k] ?? was).map(([, f]) => f) : m.policies;
       const editionKey = { EnterpriseMultiSession: "MultiSession", DatacenterAzureEdition: "AzureEdition", Enterprise: "Enterprise", Education: "Education",
@@ -1625,9 +1625,7 @@ async function fillWinBake(catalog, stale) {
       ${field(fieldLabel("language.svg", "Time zone"), `<select id="wiTz">${opts(info.timezones.map(z => [z.id, `${z.id} · ${z.iana}`]), winForm.timezone)}</select>`)}
     </div>
     <div class="field-group">Policies baked in</div>
-    <div class="toggle-grid">${winPolicies(info).filter(f => !f.experimental).map(winPolicyToggle).join("")}</div>
-    ${winPolicies(info).some(f => f.experimental) ? `<div class="exp-card"><div class="exp-head"><span class="pill role experimental">Experimental</span></div>
-      <div class="toggle-grid">${winPolicies(info).filter(f => f.experimental).map(winPolicyToggle).join("")}</div></div>` : ""}
+    <div class="toggle-grid">${winPolicies(info).map(winPolicyToggle).join("")}</div>
     ${actions(`<span class="hint gs-actions-note">WinPE pass 1 (apply${winForm.edition ? ", check the edition target" : ""}) · audit mode (virtio, agent, sysprep) · WinPE pass 2 (verify${winForm.edition ? ", change the edition" : ""}, region, policies, key)</span>`,
       act("wiStart", "gold-image.svg", "Bake", true))}`;
   const keepWin = () => {

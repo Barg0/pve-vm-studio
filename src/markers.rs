@@ -40,8 +40,6 @@ const TEXT: &[(&str, &str)] = &[
     ("LOCALE", "Language and keyboard"),
     ("KEY", "Product key set"),
     ("NO-KEY", "No product key for this edition"),
-    ("PERSONAL", "Personalization default"),
-    ("PERSONAL-FAIL", "Personalization default not set"),
     ("PASS2-OK", "Pass 2 done"),
     ("PASS2-FAILED", "Pass 2 failed"),
     ("DEPLOY-START", "Deploy pass started"),
@@ -191,13 +189,13 @@ pub fn tag(line: &str) -> Tag {
         // Exit codes: 0, or 3010 (done, restart pending).
         "VIRTIO" | "QGA" => if matches!(args, "0" | "3010") { Tag::Ok } else { Tag::Warn },
         "PE-START" | "PARTITIONED" | "APPLIED" | "DRIVERS" | "BCDBOOT" | "EDITION" | "PASS1-OK" | "AUDIT-START"
-        | "GENERALIZED" | "ANSWERFILE" | "TIMEZONE" | "LOCALE" | "POLICY" | "PERSONAL" | "KEY" | "PASS2-OK" | "FIRSTBOOT-OK"
+        | "GENERALIZED" | "ANSWERFILE" | "TIMEZONE" | "LOCALE" | "POLICY" | "KEY" | "PASS2-OK" | "FIRSTBOOT-OK"
         | "WORKER-START" | "ONLINE" | "WORKER-OK"
         | "OK" | "REGION" | "KEYMAP" | "CIS-BUNDLE" | "CIS-SNAPD-PURGED" | "INITRD-REBUILT" | "LAYOUT" | "RELABEL" => Tag::Ok,
         "PE-NO-SEED" | "EDITION-NOT-CHANGED" | "PASS1-FAILED" | "NOT-GENERALIZED" | "PASS2-FAILED" | "DEPLOY-FAILED"
         | "NO-VIOSCSI" | "NO-OS-DISK" | "NO-INSTALL-WIM" | "NO-WINDOWS" | "NO-BOOTLOADER" | "NO-FIRSTBOOT" | "NO-VIRTIO-CD"
         | "NO-CURL" | "NO-STUDIO" | "NO-SCRATCH-DISK" | "SCRATCH-FAILED" | "WORKER-FAILED" | "LAYOUT-FAILED" => Tag::Error,
-        "NO-SYSPREP-TAG" | "DISK-READONLY" | "PERSONAL-FAIL" | "INITRD-FAILED" | "RELABEL-FAILED" => Tag::Warn,
+        "NO-SYSPREP-TAG" | "DISK-READONLY" | "INITRD-FAILED" | "RELABEL-FAILED" => Tag::Warn,
         "PASS1-START" | "PASS2-START" | "DEPLOY-START" | "DEPLOY-OK" | "DISK" | "OS-DISK" | "BCDBOOT-WITH" | "TARGET"
         | "NO-QGA" | "SYSPREP-TAG" | "SYSPREP-TAG-GONE" | "FALLBACK" | "STOPPED" | "UPD" | "UPD-OK" | "UPD-FAIL" | "UPD-SKIP"
         | "CLEANUP" | "HEALTH" | "PROV-OK" | "PROV-FAIL" | "APPS-DONE" | "FIRSTBOOT"
@@ -241,8 +239,6 @@ mod tests {
         assert_eq!(tag("PVS-PASS1-START SRC=E:\\sources\\install.wim VIO=F: INDEX=2"), Tag::Debug);
         assert_eq!(tag("PVS-NO-OS-DISK"), Tag::Error);
         assert_eq!(tag("PVS-NO-KEY"), Tag::Info);
-        assert_eq!(tag("PVS-PERSONAL dark mode"), Tag::Ok);
-        assert_eq!(tag("PVS-PERSONAL-FAIL dark mode"), Tag::Warn);
         assert_eq!(tag("PVS-FEATURE-OK Hyper-V"), Tag::Debug);
         assert_eq!(tag("BAKE-PKG htop MISSING"), Tag::Warn);
         assert_eq!(tag("BAKE-PKG htop ok"), Tag::Debug);

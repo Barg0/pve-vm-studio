@@ -405,136 +405,37 @@ impl WinBakeOptions {
 }
 
 /// One of New-Vhdx's offline policies (doc §4): its id, the toggle's label, where it applies
-/// ("" every image, "client", "server", "desktop" = every image but Server Core), the tip, and
-/// whether it is experimental - not proven on every image yet: the form puts those in a box of
-/// their own under the policies.
+/// ("" every image, "client", "server", "desktop" = every image but Server Core) and the tip.
 pub struct WinFeature {
     pub id: &'static str,
     pub label: &'static str,
     pub scope: &'static str,
     pub tip: &'static str,
-    pub experimental: bool,
 }
 
 /// New-Vhdx's -EnableRdp ... -SetVmPowerPlan, same defaults in the form.
 pub static WIN_FEATURES: &[WinFeature] = &[
     WinFeature { id: "rdp", label: "Remote Desktop", scope: "",
-        tip: "Remote Desktop on, with Network Level Authentication, and the firewall open for it on TCP and UDP 3389.", experimental: false },
+        tip: "Remote Desktop on, with Network Level Authentication, and the firewall open for it on TCP and UDP 3389." },
     WinFeature { id: "ping", label: "Answer ping", scope: "",
-        tip: "Inbound ICMPv4 and ICMPv6 echo requests allowed in the firewall.", experimental: false },
+        tip: "Inbound ICMPv4 and ICMPv6 echo requests allowed in the firewall." },
     WinFeature { id: "svrmgr", label: "No Server Manager at logon", scope: "server",
-        tip: "Machine policy DoNotOpenAtLogon: Server Manager no longer opens by itself when an administrator signs in.", experimental: false },
+        tip: "Machine policy DoNotOpenAtLogon: Server Manager no longer opens by itself when an administrator signs in." },
     WinFeature { id: "preferipv4", label: "Prefer IPv4", scope: "",
-        tip: "DisabledComponents 0x20 (Tcpip6 parameters): Windows prefers IPv4 over IPv6 - ::ffff:0:0/96 ranks above ::/0 in its prefix policies - and IPv6 stays on. Microsoft's recommendation instead of turning IPv6 off. Check on a VM with: netsh interface ipv6 show prefixpolicies.", experimental: false },
+        tip: "DisabledComponents 0x20 (Tcpip6 parameters): Windows prefers IPv4 over IPv6 - ::ffff:0:0/96 ranks above ::/0 in its prefix policies - and IPv6 stays on. Microsoft's recommendation instead of turning IPv6 off. Check on a VM with: netsh interface ipv6 show prefixpolicies." },
     WinFeature { id: "signinkeyboard", label: "Sign-in keyboard (STIG)", scope: "",
-        tip: "BlockUserInputMethodsForSignIn (STIG WN12-CC-000048): the sign-in screen keeps the baked keyboard - per-user input methods do not appear there.", experimental: false },
+        tip: "BlockUserInputMethodsForSignIn (STIG WN12-CC-000048): the sign-in screen keeps the baked keyboard - per-user input methods do not appear there." },
     WinFeature { id: "edge", label: "Edge baseline", scope: "desktop",
-        tip: "Microsoft Edge machine policy: Google as the default and only search engine, no first-run experience, no mini menu, a cleared new tab page, required diagnostic data only. A domain GPO overrides it later.", experimental: false },
+        tip: "Microsoft Edge machine policy: Google as the default and only search engine, no first-run experience, no mini menu, a cleared new tab page, required diagnostic data only. A domain GPO overrides it later." },
     WinFeature { id: "noencrypt", label: "No auto device encryption", scope: "client",
-        tip: "PreventDeviceEncryption: Windows does not turn BitLocker on by itself after OOBE - a VM with Secure Boot and a vTPM qualifies for it. BitLocker is meant to be armed by policy after deployment.", experimental: false },
+        tip: "PreventDeviceEncryption: Windows does not turn BitLocker on by itself after OOBE - a VM with Secure Boot and a vTPM qualifies for it. BitLocker is meant to be armed by policy after deployment." },
     WinFeature { id: "power", label: "VM power plan", scope: "client",
-        tip: "High performance, display off and sleep set to never, hibernation off - as machine policy, so a domain GPO overrides it later.", experimental: false },
+        tip: "High performance, display off and sleep set to never, hibernation off - as machine policy, so a domain GPO overrides it later." },
     WinFeature { id: "welcome", label: "No welcome experience", scope: "client",
-        tip: "Policy DisableWindowsSpotlightWindowsWelcomeExperience: no Getting Started / Welcome screen at logon.", experimental: false },
+        tip: "Policy DisableWindowsSpotlightWindowsWelcomeExperience: no Getting Started / Welcome screen at logon." },
     WinFeature { id: "firstlogon", label: "No first sign-in animation", scope: "client",
-        tip: "EnableFirstLogonAnimation 0: the first logon lands straight on the desktop, without \"Hi\" and \"We're getting things ready\".", experimental: false },
-    WinFeature { id: "personalization", label: "Personalization defaults", scope: "desktop",
-        tip: "Written into the Default user's profile, so every new user starts with them and can change them: dark mode for Windows and apps, accent color from the wallpaper, file extensions shown, File Explorer opens to This PC, no item check boxes, no Task View button, search as an icon. Windows 11 and Server 2025 also: Start centered, and the classic context menu for every user (machine-wide). Server 2016 to 2022 also: every tray icon shown.", experimental: true },
+        tip: "EnableFirstLogonAnimation 0: the first logon lands straight on the desktop, without \"Hi\" and \"We're getting things ready\"." },
 ];
-
-/// One Personalization default's value: a DWORD, or a string.
-#[derive(Clone, Copy)]
-enum Val {
-    Dword(u32),
-    Sz(&'static str),
-}
-
-/// Personalization defaults, one per line of the bake log: what it is called there, and its
-/// values as (key under the Default user's NTUSER.DAT, value, data). The Windows 11 family
-/// (build 22000 on - Server 2025 too) and the Windows 10 family (Server 2016 to 2022) differ;
-/// the classic context menu is not here - it is machine-wide, in SOFTWARE.
-fn personalization(gen11: bool) -> Vec<(&'static str, Vec<(&'static str, &'static str, Val)>)> {
-    const PERSONALIZE: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
-    const ADVANCED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
-    const SEARCH: &str = r"Software\Microsoft\Windows\CurrentVersion\Search";
-    let mut dark = vec![(PERSONALIZE, "SystemUsesLightTheme", Val::Dword(0)), (PERSONALIZE, "AppsUseLightTheme", Val::Dword(0))];
-    if gen11 {
-        // Without a current theme Windows applies its default one (light) at the first sign-in
-        // and the two values above go with it; Windows' own "Windows (dark)" keeps them.
-        // Tested on 26300 (2026-10-16).
-        dark.push((r"Software\Microsoft\Windows\CurrentVersion\Themes", "CurrentTheme", Val::Sz(DARK_THEME)));
-    }
-    let mut v = vec![
-        ("dark mode", dark),
-        ("accent color from the wallpaper", vec![(r"Control Panel\Desktop", "AutoColorization", Val::Dword(1))]),
-        ("file extensions shown", vec![(ADVANCED, "HideFileExt", Val::Dword(0))]),
-        ("File Explorer opens to This PC", vec![(ADVANCED, "LaunchTo", Val::Dword(1))]),
-        ("no item check boxes", vec![(ADVANCED, "AutoCheckSelect", Val::Dword(0))]),
-        ("no Task View button", vec![(ADVANCED, "ShowTaskViewButton", Val::Dword(0))]),
-        // Without the cache value Taskbar.dll takes the user for one with no preference at the
-        // first sign-in and sets the search box (TryMigrateSearchConditionally).
-        ("search as an icon", vec![(SEARCH, "SearchboxTaskbarMode", Val::Dword(1)), (SEARCH, "SearchboxTaskbarModeCache", Val::Dword(1))]),
-    ];
-    if gen11 {
-        v.push(("Start centered", vec![(ADVANCED, "TaskbarAl", Val::Dword(1))]));
-    } else {
-        v.push(("every tray icon shown", vec![(r"Software\Microsoft\Windows\CurrentVersion\Explorer", "EnableAutoTray", Val::Dword(0))]));
-    }
-    v
-}
-
-/// Windows' own dark theme, as CurrentTheme names it.
-const DARK_THEME: &str = r"C:\Windows\resources\Themes\dark.theme";
-
-/// The class File Explorer's new context menu is: on Explorer's list of blocked shell
-/// extensions it is not loaded, and Explorer shows the full menu. Machine-wide - the class's
-/// own key belongs to TrustedInstaller, the list does not.
-const CLASSIC_MENU: &str = "{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}";
-
-/// Windows 11, Server 2025 and later: build 22000 on.
-fn gen11(build: &str) -> bool {
-    build.split('.').next().and_then(|b| b.parse::<u32>().ok()).is_some_and(|b| b >= 22000)
-}
-
-/// One reg add and its read-back: PFAIL set when reg query's third column is not the data.
-/// WinPE has no findstr, so cmd reads the column itself.
-fn reg_set_checked(hive_key: &str, name: &str, v: Val) -> String {
-    let (t, d, want) = match v {
-        Val::Dword(n) => ("REG_DWORD", n.to_string(), format!("0x{n:x}")),
-        Val::Sz(s) => ("REG_SZ", format!("\"{s}\""), s.to_owned()),
-    };
-    format!(
-        "reg add \"{hive_key}\" /v {name} /t {t} /d {d} /f > COM1 2>&1\n\
-         set V=\n\
-         for /f \"skip=2 tokens=3\" %%a in ('reg query \"{hive_key}\" /v {name} 2^>nul') do set V=%%a\n\
-         if /i not \"%V%\"==\"{want}\" set PFAIL=1\n\
-         reg query \"{hive_key}\" /v {name} > nul 2>&1 || set PFAIL=1\n"
-    )
-}
-
-/// Personalization defaults, offline: written into the Default user's NTUSER.DAT - every
-/// profile is copied from it - and each one read back; the classic context menu goes into
-/// SOFTWARE (loaded as KSOFT by then). Nothing runs at sign-in.
-fn pass2_personalization(gen11: bool) -> String {
-    let mut p = String::from("reg load HKLM\\KUSER W:\\Users\\Default\\NTUSER.DAT > COM1 2>&1 || (echo PVS-PERSONAL-FAIL the Default user's profile > COM1 & goto :fail)\n");
-    for (label, values) in personalization(gen11) {
-        p += "set PFAIL=\n";
-        for (key, name, v) in values {
-            if matches!(v, Val::Sz(DARK_THEME)) {
-                p += "if not exist W:\\Windows\\Resources\\Themes\\dark.theme set PFAIL=1\n";
-            }
-            p += &reg_set_checked(&format!("HKLM\\KUSER\\{key}"), name, v);
-        }
-        p += &format!("if defined PFAIL (echo PVS-PERSONAL-FAIL {label} > COM1) else (echo PVS-PERSONAL {label} > COM1)\n");
-    }
-    p += "reg unload HKLM\\KUSER > COM1 2>&1\n";
-    if gen11 {
-        p += "set PFAIL=\n";
-        p += &reg_set_checked(r"HKLM\KSOFT\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked", CLASSIC_MENU, Val::Sz(""));
-        p += "if defined PFAIL (echo PVS-PERSONAL-FAIL classic context menu > COM1) else (echo PVS-PERSONAL classic context menu > COM1)\n";
-    }
-    p
-}
 
 /// A reg.exe /d value, quoted for a cmd.exe line: inner quotes as \" for reg.exe, and every
 /// cmd metacharacter that the \" pairs leave outside cmd's own quoting escaped with ^.
@@ -875,11 +776,6 @@ pub fn pe2_cmd(img: &WimImage, region: &WinRegion, features: &[String], edition_
     let input = input_locale(if region.keyboard.is_empty() { locale } else { &region.keyboard });
     let tz = &region.timezone;
     let policies = pass2_policies(features, client, img.installation_type == "Server Core");
-    let personal = if features.iter().any(|f| f == "personalization") && img.installation_type != "Server Core" {
-        pass2_personalization(gen11(&img.build))
-    } else {
-        String::new()
-    };
     // New-Vhdx's Convert-ToVirtualEdition: after generalize, before the customization - a
     // base edition generalizes cleanly and takes the change afterwards; the staged work
     // completes in specialize on the VM's first boot. Read back with /Get-CurrentEdition,
@@ -946,7 +842,7 @@ reg load HKLM\KSOFT W:\Windows\System32\config\SOFTWARE > COM1 2>&1 || goto :fai
 {policies}rem The answer file: whatever audit mode left cached goes, the pointer Setup searches
 rem first goes, and the gold's own file takes Panther's place.
 reg delete "HKLM\KSYS\Setup" /v UnattendFile /f >nul 2>&1
-{personal}reg unload HKLM\KSOFT > COM1 2>&1
+reg unload HKLM\KSOFT > COM1 2>&1
 reg unload HKLM\KSYS > COM1 2>&1
 if exist W:\Windows\Panther\Unattend rmdir /s /q W:\Windows\Panther\Unattend
 if exist W:\Windows\System32\Sysprep\unattend.xml del /f /q W:\Windows\System32\Sysprep\unattend.xml
@@ -1664,7 +1560,7 @@ pub async fn bake(
         Ok((vmid, gold_name, edition_target)) => {
             // New-Vhdx's New-WindowsGoldManifest, then the keys every gold shares.
             let has = |f: &str| opt.features.iter().any(|x| x == f);
-            let mut bake_options = json!({ "rdp": has("rdp"), "ping": has("ping"), "blockSignInInputMethods": has("signinkeyboard"), "preferIPv4": has("preferipv4"), "edgeBaseline": has("edge") && img.installation_type != "Server Core", "personalizationDefaults": has("personalization") && img.installation_type != "Server Core" });
+            let mut bake_options = json!({ "rdp": has("rdp"), "ping": has("ping"), "blockSignInInputMethods": has("signinkeyboard"), "preferIPv4": has("preferipv4"), "edgeBaseline": has("edge") && img.installation_type != "Server Core" });
             if client {
                 bake_options["preventDeviceEncryption"] = json!(has("noencrypt"));
                 bake_options["vmPowerPlan"] = json!(has("power"));
@@ -2277,31 +2173,6 @@ mod tests {
         let region = WinRegion { locale: "en-US".into(), keyboard: "en-US".into(), timezone: "UTC".into() };
         assert!(pe2_cmd(&img, &region, &[], None, true).contains("/Set-ProductKey:MFY9F-XBN2F-TYFMP-CCV49-RMYVH"));
         assert!(pe2_cmd(&img, &region, &[], None, false).contains("PVS-NO-KEY"));
-    }
-
-    #[test]
-    fn personalization_defaults_by_family() {
-        let region = WinRegion { locale: "en-US".into(), keyboard: "en-US".into(), timezone: "UTC".into() };
-        let on = ["personalization".to_owned()];
-        // Windows 11 and Server 2025: Start centered, dark.theme as the current theme, the classic menu machine-wide.
-        let w11 = pe2_cmd(&img("Enterprise", "Client", "26300"), &region, &on, None, false);
-        assert!(w11.contains(r"reg load HKLM\KUSER W:\Users\Default\NTUSER.DAT"));
-        assert!(w11.contains("/v TaskbarAl /t REG_DWORD /d 1"));
-        assert!(w11.contains(r#"reg add "HKLM\KSOFT\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked" /v {86ca1aa0-34aa-4e8b-a509-50c905bae2a2} /t REG_SZ /d "" /f"#));
-        assert!(w11.contains("/v SearchboxTaskbarModeCache /t REG_DWORD /d 1") && w11.contains(r#"/v CurrentTheme /t REG_SZ /d "C:\Windows\resources\Themes\dark.theme""#));
-        // The menu goes into SOFTWARE while pass 2 still has it loaded.
-        assert!(w11.find("Shell Extensions\\Blocked").unwrap() < w11.find("reg unload HKLM\\KSOFT").unwrap());
-        assert!(!w11.contains("EnableAutoTray"));
-        assert!(pe2_cmd(&img("ServerDatacenter", "Server", "26100"), &region, &on, None, false).contains("Shell Extensions\\Blocked"));
-        // Server 2022 is build 20348: the Windows 10 family - tray icons, no classic menu.
-        let s22 = pe2_cmd(&img("ServerDatacenter", "Server", "20348"), &region, &on, None, false);
-        assert!(s22.contains("/v EnableAutoTray /t REG_DWORD /d 0"));
-        assert!(!s22.contains("Shell Extensions") && !s22.contains("TaskbarAl") && !s22.contains("CurrentTheme"));
-        // Server Core has no desktop; off is off.
-        assert!(!pe2_cmd(&img("ServerDatacenter", "Server Core", "26100"), &region, &on, None, false).contains("KUSER"));
-        assert!(!pe2_cmd(&img("Enterprise", "Client", "26300"), &region, &[], None, false).contains("KUSER"));
-        // Each value is read back against what was written.
-        assert!(w11.contains(r#"if /i not "%V%"=="0x1" set PFAIL=1"#) && w11.contains(r#"if /i not "%V%"=="0x0" set PFAIL=1"#));
     }
 
     #[test]

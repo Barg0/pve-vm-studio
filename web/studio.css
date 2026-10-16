@@ -714,10 +714,6 @@
   /* A state that stops a build (no gold, a full storage): the kind pill's hairline in red. */
   .pill.role.danger { --c: var(--danger); }
   .pill.role.virtual { --c: var(--band-ident, var(--flag-nested)); }
-  /* Bake options not proven on every image yet: their own dashed box, marked once. */
-  .pill.role.experimental { --c: var(--accent); }
-  .exp-card { margin-top: 14px; padding: 10px 12px 12px; border: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--accent) 4%, transparent); }
-  .exp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 
   .pill.status {
     --c: var(--fg-muted);

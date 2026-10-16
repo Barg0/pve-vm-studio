@@ -1791,7 +1791,7 @@ async fn windows_images(State(app): State<AppState>, _user: User, axum::extract:
         "default_timezone": windows::windows_tz_for(
             std::fs::read_to_string("/etc/timezone").unwrap_or_default().trim()
         ),
-        "features": windows::WIN_FEATURES.iter().map(|f| json!({ "id": f.id, "label": f.label, "scope": f.scope, "tip": f.tip, "experimental": f.experimental })).collect::<Vec<_>>(),
+        "features": windows::WIN_FEATURES.iter().map(|f| json!({ "id": f.id, "label": f.label, "scope": f.scope, "tip": f.tip })).collect::<Vec<_>>(),
     })))
 }
 
