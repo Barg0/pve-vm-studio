@@ -132,9 +132,22 @@ $id("logoutBtn").addEventListener("click", async () => {
 
 /* ---------- the studio was updated: reload ----------
    An open page keeps running the version it loaded. It remembers which build answered then
-   and asks again every 20 seconds: another build means the studio was updated (by anyone,
-   or the automatic update) - the strip offers a reload. No answer means it is restarting. */
-const studioBuild = { loaded: "", timer: null, updated: "", down: false, gen: 0 };
+   and asks again every 20 seconds - every 1.5 while an update runs or the studio does not
+   answer, and at once when the jobs show a new update or fail: another build means the studio
+   was updated (by anyone, or the automatic update) - the strip offers a reload. No answer
+   means it is restarting. */
+const studioBuild = { loaded: "", timer: null, updated: "", down: false, gen: 0, fast: false };
+/* While an update job runs, the restart is seconds away: ask every 1.5 s, so both the
+   restart and the new build show at once. */
+function buildCheckNow() {
+  if (!studioBuild.loaded || studioBuild.updated || studioBuild.down) return;
+  clearTimeout(studioBuild.timer); studioBuild.timer = setTimeout(watchBuild, 300);
+}
+function buildWatchFast(on) {
+  if (on === studioBuild.fast || studioBuild.updated) return;
+  studioBuild.fast = on;
+  if (on && studioBuild.loaded) { clearTimeout(studioBuild.timer); studioBuild.timer = setTimeout(watchBuild, 1500); }
+}
 function buildWords(now, was) {
   const parse = b => { const m = /^(\S+)(?: \(([^)]+)\))?$/.exec(b || ""); return m ? { v: m[1], c: m[2] || "" } : { v: b || "", c: "" }; };
   const n = parse(now), w = parse(was);
@@ -173,8 +186,9 @@ async function watchBuild() {
     if (s.build && s.build !== studioBuild.loaded) studioBuild.updated = s.build;
   } catch { studioBuild.down = true; }
   if (gen !== studioBuild.gen) return;
+  if (studioBuild.updated) studioBuild.fast = false;
   paintReloadStrip();
-  studioBuild.timer = setTimeout(watchBuild, studioBuild.down ? 5000 : 20000);
+  studioBuild.timer = setTimeout(watchBuild, studioBuild.fast || studioBuild.down ? 1500 : 20000);
 }
 
 async function signedIn(s) {
@@ -206,7 +220,7 @@ async function signedIn(s) {
 let navPoll = null;
 function startNavPoll() {
   if (navPoll) return;
-  let lastRun = "", tick = 0;
+  let lastRun = "", tick = 0, seenUpdates = null;
   navPoll = setInterval(async () => {
     if (document.hidden || !session.user) return;
     // The design is one for everyone: what another session saved shows up here within
@@ -223,6 +237,11 @@ function startNavPoll() {
     try {
       const jobs = await api("GET", "/jobs");
       cluster.jobs = jobs;
+      buildWatchFast(jobs.some(j => j.kind === "update" && (j.status === "running" || j.status === "queued")));
+      // An update can start and end between two looks (it takes seconds): a new one asks now.
+      const ups = jobs.filter(j => j.kind === "update").map(j => j.id);
+      if (seenUpdates && ups.some(id => !seenUpdates.has(id))) buildCheckNow();
+      seenUpdates = new Set(ups);
       const run = jobs.filter(j => j.status === "running" || j.status === "queued").map(j => j.id).sort().join(",");
       // A job that ended may have left a notification; the bell also looks every 15 s.
       if (run !== lastRun || tick % 3 === 0) bellLoad();
@@ -231,7 +250,10 @@ function startNavPoll() {
         cluster.golds = await api("GET", "/golds");
       }
       renderNav();
-    } catch { /* signed out or offline - the next tick tries again */ }
+    } catch {
+      // Signed out, offline - or the studio restarting: the build check looks now.
+      buildCheckNow();
+    }
   }, 5000);
 }
 
@@ -3549,7 +3571,7 @@ async function bladeStudio(main, stale) {
   on("verCheck", "click", async () => { try { await api("GET", "/studio/version?fresh=1"); renderServerBlade("studio", main); } catch (e) { toast(e.message, true); } });
   on("verUpdate", "click", async e => {
     const tag = e.currentTarget.dataset.tag;
-    try { const { id } = await api("POST", "/studio/update", { tag }); openJob(id); } catch (err) { toast(err.message, true); }
+    try { const { id } = await api("POST", "/studio/update", { tag }); buildWatchFast(true); openJob(id); } catch (err) { toast(err.message, true); }
   });
   main.querySelectorAll("[data-ver-channel]").forEach(b => b.addEventListener("click", async () => {
     try {
