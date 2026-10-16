@@ -489,7 +489,9 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
         ud.lines(&["          \"break\",", "          { \"type\": \"colors\", \"paddingLeft\": 2 },", "          \"break\",", "          \"break\"", "        ]", "      }"]);
     }
     if has("prompt") {
-        // Appended, so it is the last word on PS1 in skel's .bashrc.
+        // Appended, so it is the last word on PS1 in skel's .bashrc. First in PROMPT_COMMAND:
+        // Fedora's and the EL rebuilds' /etc/bashrc put a title printf there, and after it $?
+        // would be the printf's.
         ud.lines(&[
             "  - path: /etc/skel/.bashrc",
             "    append: true",
@@ -507,7 +509,7 @@ pub fn bake_user_data(img: &LinuxImage, opt: &BakeOptions) -> String {
             "      case \"$PROMPT_COMMAND\" in",
             "          *__pvs_prompt*) ;;",
             "          \"\") PROMPT_COMMAND=__pvs_prompt ;;",
-            "          *) PROMPT_COMMAND=\"$PROMPT_COMMAND; __pvs_prompt\" ;;",
+            "          *) PROMPT_COMMAND=\"__pvs_prompt; $PROMPT_COMMAND\" ;;",
             "      esac",
         ]);
     }
