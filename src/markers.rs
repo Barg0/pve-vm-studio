@@ -3,6 +3,8 @@
 //! BAKE-PKG fastfetch ok): they are the studio's protocol and stay as they are - existing
 //! WinPE ISOs and golds speak them. The job log shows this text instead.
 
+use crate::jobs::Tag;
+
 /// (marker without its prefix, what the log says)
 const TEXT: &[(&str, &str)] = &[
     // WinPE, both bake passes and the deploy pass
@@ -38,6 +40,9 @@ const TEXT: &[(&str, &str)] = &[
     ("LOCALE", "Language and keyboard"),
     ("KEY", "Product key set"),
     ("NO-KEY", "No product key for this edition"),
+    ("PERSONAL", "Personalization default"),
+    ("PERSONAL-FAIL", "Personalization default not set"),
+    ("NO-USRCLASS", "The Default user has no UsrClass.dat - the classic context menu is not set"),
     ("PASS2-OK", "Pass 2 done"),
     ("PASS2-FAILED", "Pass 2 failed"),
     ("DEPLOY-START", "Deploy pass started"),
@@ -171,6 +176,40 @@ pub fn text(line: &str) -> String {
     if args.is_empty() { head } else { format!("{head}: {args}") }
 }
 
+/// The marker's tag in the job log. Never `run`: a run line opens a step in the job's step
+/// list, and the steps are the host's. What a guest starts is `debug` - the step's progress
+/// row says it live - what it finished is `ok`, a stop it goes to :fail for is `error` - so the log's jump to the first error lands
+/// on the cause, not on the job's last line. Detail the host sums up itself (one line per
+/// feature, app or update), lines that repeat the host's own `run` line and the guest's
+/// drive letters are `debug`. A marker not listed stays `info`: new ones are seen.
+pub fn tag(line: &str) -> Tag {
+    let rest = line.strip_prefix("PVS-").or_else(|| line.strip_prefix("BAKE-")).unwrap_or(line);
+    let (key, args) = rest.split_once(' ').map(|(k, a)| (k, a.trim())).unwrap_or((rest, ""));
+    if line.starts_with("BAKE-") && args.ends_with("MISSING") {
+        return Tag::Warn;
+    }
+    match key {
+        // Exit codes: 0, or 3010 (done, restart pending).
+        "VIRTIO" | "QGA" => if matches!(args, "0" | "3010") { Tag::Ok } else { Tag::Warn },
+        "PE-START" | "PARTITIONED" | "APPLIED" | "DRIVERS" | "BCDBOOT" | "EDITION" | "PASS1-OK" | "AUDIT-START"
+        | "GENERALIZED" | "ANSWERFILE" | "TIMEZONE" | "LOCALE" | "POLICY" | "PERSONAL" | "KEY" | "PASS2-OK" | "FIRSTBOOT-OK"
+        | "WORKER-START" | "ONLINE" | "WORKER-OK"
+        | "OK" | "REGION" | "KEYMAP" | "CIS-BUNDLE" | "CIS-SNAPD-PURGED" | "INITRD-REBUILT" | "LAYOUT" | "RELABEL" => Tag::Ok,
+        "PE-NO-SEED" | "EDITION-NOT-CHANGED" | "PASS1-FAILED" | "NOT-GENERALIZED" | "PASS2-FAILED" | "DEPLOY-FAILED"
+        | "NO-VIOSCSI" | "NO-OS-DISK" | "NO-INSTALL-WIM" | "NO-WINDOWS" | "NO-BOOTLOADER" | "NO-FIRSTBOOT" | "NO-VIRTIO-CD"
+        | "NO-CURL" | "NO-STUDIO" | "NO-SCRATCH-DISK" | "SCRATCH-FAILED" | "WORKER-FAILED" | "LAYOUT-FAILED" => Tag::Error,
+        "NO-SYSPREP-TAG" | "DISK-READONLY" | "PERSONAL-FAIL" | "NO-USRCLASS" | "INITRD-FAILED" | "RELABEL-FAILED" => Tag::Warn,
+        "PASS1-START" | "PASS2-START" | "DEPLOY-START" | "DEPLOY-OK" | "DISK" | "OS-DISK" | "BCDBOOT-WITH" | "TARGET"
+        | "NO-QGA" | "SYSPREP-TAG" | "SYSPREP-TAG-GONE" | "FALLBACK" | "STOPPED" | "UPD" | "UPD-OK" | "UPD-FAIL" | "UPD-SKIP"
+        | "CLEANUP" | "HEALTH" | "PROV-OK" | "PROV-FAIL" | "APPS-DONE" | "FIRSTBOOT"
+        | "PKG" | "DIAG" | "GROW-READY" | "KIWI-REPART-OFF"
+        | "SYSPREP-START" | "COPY-IN" | "INDEX" | "COMMIT" | "WINRE" | "EDGE" | "APPS" | "BOOT" | "EXPORT" | "COPY-OUT"
+        | "CIS-REBOOT" | "CIS-CHECKING" | "CIS-SEALING" => Tag::Debug,
+        k if ["FEATURE-", "CAP-", "APP-", "GUARD-"].iter().any(|p| k.starts_with(p)) => Tag::Debug,
+        _ => Tag::Info,
+    }
+}
+
 /// Several markers for an error message.
 pub fn list(markers: &[String]) -> String {
     markers.iter().map(|m| text(m)).collect::<Vec<_>>().join("; ")
@@ -192,5 +231,22 @@ mod tests {
         assert!(!text("PVS-UPD-FAIL x.msu 5").contains("PVS"));
         assert_eq!(text("PVS-UPD 2 cleanup"), "Cleaning up: image 2");
         assert_eq!(text("PVS-UPD-OK winre cleanup"), "Cleaned up: WinRE");
+    }
+
+    #[test]
+    fn markers_tag_by_what_they_say() {
+        assert_eq!(tag("PVS-APPLIED"), Tag::Ok);
+        assert_eq!(tag("PVS-VIRTIO 0"), Tag::Ok);
+        assert_eq!(tag("PVS-VIRTIO 1603"), Tag::Warn);
+        assert_eq!(tag("PVS-SYSPREP-START"), Tag::Debug);
+        assert_eq!(tag("PVS-PASS1-START SRC=E:\\sources\\install.wim VIO=F: INDEX=2"), Tag::Debug);
+        assert_eq!(tag("PVS-NO-OS-DISK"), Tag::Error);
+        assert_eq!(tag("PVS-NO-KEY"), Tag::Info);
+        assert_eq!(tag("PVS-PERSONAL dark mode"), Tag::Ok);
+        assert_eq!(tag("PVS-PERSONAL-FAIL dark mode"), Tag::Warn);
+        assert_eq!(tag("PVS-FEATURE-OK Hyper-V"), Tag::Debug);
+        assert_eq!(tag("BAKE-PKG htop MISSING"), Tag::Warn);
+        assert_eq!(tag("BAKE-PKG htop ok"), Tag::Debug);
+        assert_eq!(tag("PVS-SOMETHING-NEW"), Tag::Info);
     }
 }

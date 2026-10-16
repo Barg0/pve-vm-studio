@@ -335,7 +335,7 @@ pub async fn deploy(pve: Pve, db: SqlitePool, work: std::path::PathBuf, log: Job
     if result.is_err() {
         if let Some((node, vmid)) = made {
             match pve.vm_destroy(&node, vmid).await {
-                Ok(()) => log.line(format!("Removed the half-built VM {vmid}")).await,
+                Ok(()) => log.ok(format!("Removed the half-built VM {vmid}")).await,
                 Err(e) => log.warn(format!("Could not remove VM {vmid}: {e:#}")).await,
             }
         }
@@ -481,7 +481,7 @@ async fn deploy_inner(
     }
     let cpu = crate::hardware::cpu_value(&cpu_type, spec.nested, &flags, crate::hardware::nested_flag(pve).await);
     let sockets = crate::hardware::sockets_for(here, spec.cores, client);
-    log.line(format!(
+    log.info(format!(
         "CPU {cpu} ({why}), NUMA with {sockets} socket(s){}",
         if queues > 1 { format!(", {queues} network queues") } else { String::new() }
     ))
@@ -525,7 +525,7 @@ async fn deploy_inner(
         }
     }
     if spec.nested || !spec.extra_nics.is_empty() || spec.startup_delay > 0 {
-        log.run(format!(
+        log.ok(format!(
             "{} adapter(s){}{}",
             1 + spec.extra_nics.len(),
             if spec.nested { ", nested virtualization (CPU type host)" } else { "" },
@@ -541,11 +541,11 @@ async fn deploy_inner(
     if spec.vtpm {
         let storage = if spec.storage.is_empty() { gold.storage.clone() } else { spec.storage.clone() };
         pve.vm_set_task(&node, vmid, form![("tpmstate0", format!("{storage}:1,version=v2.0"))], |_| {}).await?;
-        log.run("TPM 2.0 added").await;
+        log.ok("TPM 2.0 added").await;
     }
     if let Some(gb) = spec.disk_gb.filter(|gb| *gb > gold_disk_gb) {
         pve.vm_resize(&node, vmid, "scsi0", &format!("{gb}G")).await?;
-        log.run(format!("System disk grown to {gb} GiB")).await;
+        log.ok(format!("System disk grown to {gb} GiB")).await;
     }
     for (i, d) in spec.data_disks.iter().enumerate() {
         let storage = if d.storage.is_empty() { gold.storage.clone() } else { d.storage.clone() };
@@ -558,7 +558,7 @@ async fn deploy_inner(
         )
         .await
         .with_context(|| format!("adding data disk {slot}"))?;
-        log.run(format!("Data disk {slot}: {} GiB on {storage}", d.size_gb)).await;
+        log.ok(format!("Data disk {slot}: {} GiB on {storage}", d.size_gb)).await;
     }
 
     // ---- Windows: the WinPE deploy pass, when WinPE can boot here ----
@@ -576,7 +576,7 @@ async fn deploy_inner(
         Some(d) if win && pass_media.is_some() && d.mode != "deferred" => "specialize",
         Some(d) if win => {
             if d.mode == "specialize" {
-                log.line("The join is deferred to after first boot - without the WinPE deploy pass the answer file does not reach specialize").await;
+                log.info("The join is deferred to after first boot - without the WinPE deploy pass the answer file does not reach specialize").await;
             }
             "deferred"
         }
@@ -595,7 +595,7 @@ async fn deploy_inner(
     };
     let (server_dism, server_online) = (feature_plan.dism.clone(), feature_plan.online.clone());
     if !server_dism.is_empty() {
-        log.line(format!(
+        log.info(format!(
             "Roles and features offline as {} DISM feature(s){}",
             server_dism.len(),
             if server_online.is_empty() { String::new() } else { format!("; at first boot: {}", server_online.join(", ")) }
@@ -749,11 +749,11 @@ async fn deploy_inner(
         }
         if let Some(f) = &spec.fod {
             drives.push(("sata3", f.volid.clone()));
-            log.run(format!("Features on Demand from {}", f.volid)).await;
+            log.debug(format!("Features on Demand from {}", f.volid)).await;
         }
         if let Some(src) = &sxs_iso {
             drives.push(("sata4", src.clone()));
-            log.run(format!(".NET 3.5 payload from {src}")).await;
+            log.debug(format!(".NET 3.5 payload from {src}")).await;
         }
         let set: crate::pve::Form = drives.iter().map(|(k, v)| ((*k).to_owned(), format!("{v},media=cdrom"))).collect();
         pve.vm_set(&node, vmid, set).await?;
@@ -791,7 +791,7 @@ async fn deploy_inner(
             log.ok(format!("{} installed offline", c.trim())).await;
         }
         for c in m.iter().filter_map(|l| l.strip_prefix("PVS-CAP-SKIP ")) {
-            log.line(format!("{} - no FoD ISO for this family, GuestProvision installs it online", c.trim())).await;
+            log.info(format!("{} - no FoD ISO for this family, GuestProvision installs it online", c.trim())).await;
         }
         for f in spec.client_features.iter().filter(|f| ok("PVS-FEATURE-OK", f)) {
             log.ok(format!("{f} enabled offline")).await;
@@ -1092,7 +1092,8 @@ async fn guest_provision_result(pve: &Pve, db: &SqlitePool, log: &JobLog, vm_id:
     // results onto the VM's record, where Connect and the mail read them.
     if let Some(apps) = st["wingetApps"].as_array().filter(|a| !a.is_empty()) {
         let ok = apps.iter().filter(|a| a["success"].as_bool() == Some(true)).count();
-        log.line(format!("WinGet: {ok} of {} application(s) installed", apps.len())).await;
+        let tag = if ok == apps.len() { crate::jobs::Tag::Ok } else { crate::jobs::Tag::Warn };
+        log.tag(tag, format!("WinGet: {ok} of {} application(s) installed", apps.len())).await;
         for a in apps {
             let id = a["id"].as_str().unwrap_or("?");
             if a["success"].as_bool() == Some(true) {
@@ -1188,7 +1189,7 @@ async fn hotpatch_check(pve: &Pve, db: &SqlitePool, log: &JobLog, vm_id: &str, n
 async fn deploy_pass_media(pve: &Pve, db: &SqlitePool, log: &JobLog, node: &str, manifest: &serde_json::Value) -> Result<Option<(String, Option<String>)>> {
     let pe: crate::winpe::WinPe = crate::settings::load(db, "winpe").await?;
     if pe.volid.is_empty() {
-        log.line("No WinPE built yet (Media) - capabilities, features and app removal wait for the guest, the seed CD carries the answer file").await;
+        log.warn("No WinPE built yet (Media) - capabilities, features and app removal wait for the guest, the seed CD carries the answer file").await;
         return Ok(None);
     }
     if pe.node != node {
@@ -1202,7 +1203,7 @@ async fn deploy_pass_media(pve: &Pve, db: &SqlitePool, log: &JobLog, node: &str,
     if !pe.vioscsi.is_empty() {
         return Ok(Some((pe.volid, None)));
     }
-    log.line("This WinPE was built without vioscsi - the virtio ISO rides along (rebuild WinPE under Media to drop it)").await;
+    log.info("This WinPE was built without vioscsi - the virtio ISO rides along (rebuild WinPE under Media to drop it)").await;
     let win: crate::virtio::WindowsSettings = crate::settings::load(db, "windows").await?;
     let release = match manifest["virtio"].as_str().filter(|r| !r.is_empty()) {
         Some(r) => r.to_owned(),
@@ -1227,7 +1228,7 @@ async fn deploy_pass_dism_errors(pve: &Pve, log: &JobLog, node: &str, vmid: u32)
         }
     }
     if errors.is_empty() {
-        log.line(format!("No DISM errors in {file} (or the guest agent could not read it)")).await;
+        log.info(format!("No DISM errors in {file} (or the guest agent could not read it)")).await;
         return;
     }
     log.warn(format!("Offline servicing failures - the last DISM errors from {file}:")).await;

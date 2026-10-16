@@ -435,7 +435,74 @@ pub static WIN_FEATURES: &[WinFeature] = &[
         tip: "Policy DisableWindowsSpotlightWindowsWelcomeExperience: no Getting Started / Welcome screen at logon." },
     WinFeature { id: "firstlogon", label: "No first sign-in animation", scope: "client",
         tip: "EnableFirstLogonAnimation 0: the first logon lands straight on the desktop, without \"Hi\" and \"We're getting things ready\"." },
+    WinFeature { id: "personalization", label: "Personalization defaults", scope: "desktop",
+        tip: "Written into the Default user's profile, so every new user starts with them and can change them: dark mode for Windows and apps, accent color from the wallpaper, file extensions shown, File Explorer opens to This PC, no item check boxes, no Task View button, search as an icon. Windows 11 and Server 2025 also: Start centered, the classic context menu. Server 2016 to 2022 also: every tray icon shown." },
 ];
+
+/// Personalization defaults, one per line of the bake log: what it is called there, and its
+/// values as (key under the Default user's NTUSER.DAT, value, DWORD). The Windows 11 family
+/// (build 22000 on - Server 2025 too) and the Windows 10 family (Server 2016 to 2022) differ
+/// at the end; the classic context menu is not here - it lives in UsrClass.dat.
+fn personalization(gen11: bool) -> Vec<(&'static str, Vec<(&'static str, &'static str, u32)>)> {
+    const PERSONALIZE: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+    const ADVANCED: &str = r"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced";
+    let mut v = vec![
+        ("dark mode", vec![(PERSONALIZE, "SystemUsesLightTheme", 0), (PERSONALIZE, "AppsUseLightTheme", 0)]),
+        ("accent color from the wallpaper", vec![(r"Control Panel\Desktop", "AutoColorization", 1)]),
+        ("file extensions shown", vec![(ADVANCED, "HideFileExt", 0)]),
+        ("File Explorer opens to This PC", vec![(ADVANCED, "LaunchTo", 1)]),
+        ("no item check boxes", vec![(ADVANCED, "AutoCheckSelect", 0)]),
+        ("no Task View button", vec![(ADVANCED, "ShowTaskViewButton", 0)]),
+        ("search as an icon", vec![(r"Software\Microsoft\Windows\CurrentVersion\Search", "SearchboxTaskbarMode", 1)]),
+    ];
+    if gen11 {
+        v.push(("Start centered", vec![(ADVANCED, "TaskbarAl", 1)]));
+    } else {
+        v.push(("every tray icon shown", vec![(r"Software\Microsoft\Windows\CurrentVersion\Explorer", "EnableAutoTray", 0)]));
+    }
+    v
+}
+
+/// The classic context menu: an empty InprocServer32 for this class, per user, makes File
+/// Explorer fall back to the full menu. HKCU\Software\Classes is UsrClass.dat, whose root is
+/// the Classes key - NTUSER.DAT's Software\Classes is never read for it.
+const CLASSIC_MENU: &str = r"CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32";
+
+/// Windows 11, Server 2025 and later: build 22000 on.
+fn gen11(build: &str) -> bool {
+    build.split('.').next().and_then(|b| b.parse::<u32>().ok()).is_some_and(|b| b >= 22000)
+}
+
+/// Personalization defaults, offline: written into the Default user's hives - every profile
+/// is copied from them - and each one read back. Nothing runs at sign-in. WinPE has no
+/// findstr, so cmd reads reg query's third column itself.
+fn pass2_personalization(gen11: bool) -> String {
+    let mut p = String::from("reg load HKLM\\KUSER W:\\Users\\Default\\NTUSER.DAT > COM1 2>&1 || (echo PVS-PERSONAL-FAIL the Default user's profile > COM1 & goto :fail)\n");
+    for (label, values) in personalization(gen11) {
+        p += "set PFAIL=\n";
+        for (key, name, d) in values {
+            p += &format!(
+                "reg add \"HKLM\\KUSER\\{key}\" /v {name} /t REG_DWORD /d {d} /f > COM1 2>&1\n\
+                 set V=\n\
+                 for /f \"skip=2 tokens=3\" %%a in ('reg query \"HKLM\\KUSER\\{key}\" /v {name} 2^>nul') do set V=%%a\n\
+                 if not \"%V%\"==\"0x{d:x}\" set PFAIL=1\n"
+            );
+        }
+        p += &format!("if defined PFAIL (echo PVS-PERSONAL-FAIL {label} > COM1) else (echo PVS-PERSONAL {label} > COM1)\n");
+    }
+    p += "reg unload HKLM\\KUSER > COM1 2>&1\n";
+    if gen11 {
+        p += &format!(
+            "if not exist W:\\Users\\Default\\AppData\\Local\\Microsoft\\Windows\\UsrClass.dat (echo PVS-NO-USRCLASS > COM1 & goto :personaldone)\n\
+             reg load HKLM\\KCLASSES W:\\Users\\Default\\AppData\\Local\\Microsoft\\Windows\\UsrClass.dat > COM1 2>&1 || (echo PVS-PERSONAL-FAIL classic context menu > COM1 & goto :personaldone)\n\
+             reg add \"HKLM\\KCLASSES\\{CLASSIC_MENU}\" /ve /t REG_SZ /d \"\" /f > COM1 2>&1\n\
+             reg query \"HKLM\\KCLASSES\\{CLASSIC_MENU}\" /ve > nul 2>&1 && (echo PVS-PERSONAL classic context menu > COM1) || (echo PVS-PERSONAL-FAIL classic context menu > COM1)\n\
+             reg unload HKLM\\KCLASSES > COM1 2>&1\n\
+             :personaldone\n"
+        );
+    }
+    p
+}
 
 /// A reg.exe /d value, quoted for a cmd.exe line: inner quotes as \" for reg.exe, and every
 /// cmd metacharacter that the \" pairs leave outside cmd's own quoting escaped with ^.
@@ -776,6 +843,11 @@ pub fn pe2_cmd(img: &WimImage, region: &WinRegion, features: &[String], edition_
     let input = input_locale(if region.keyboard.is_empty() { locale } else { &region.keyboard });
     let tz = &region.timezone;
     let policies = pass2_policies(features, client, img.installation_type == "Server Core");
+    let personal = if features.iter().any(|f| f == "personalization") && img.installation_type != "Server Core" {
+        pass2_personalization(gen11(&img.build))
+    } else {
+        String::new()
+    };
     // New-Vhdx's Convert-ToVirtualEdition: after generalize, before the customization - a
     // base edition generalizes cleanly and takes the change afterwards; the staged work
     // completes in specialize on the VM's first boot. Read back with /Get-CurrentEdition,
@@ -844,7 +916,7 @@ rem first goes, and the gold's own file takes Panther's place.
 reg delete "HKLM\KSYS\Setup" /v UnattendFile /f >nul 2>&1
 reg unload HKLM\KSOFT > COM1 2>&1
 reg unload HKLM\KSYS > COM1 2>&1
-if exist W:\Windows\Panther\Unattend rmdir /s /q W:\Windows\Panther\Unattend
+{personal}if exist W:\Windows\Panther\Unattend rmdir /s /q W:\Windows\Panther\Unattend
 if exist W:\Windows\System32\Sysprep\unattend.xml del /f /q W:\Windows\System32\Sysprep\unattend.xml
 copy /y %SEED%\pvs\gold.xml W:\Windows\Panther\unattend.xml > COM1 2>&1 || goto :fail
 if not exist W:\Windows\PVS\firstboot.cmd (echo PVS-NO-FIRSTBOOT > COM1 & goto :fail)
@@ -1246,15 +1318,7 @@ pub(crate) async fn run_pass(
                             last_pct = -1.0;
                             pr.within(done / total, format!("{label}: {doing}"));
                         }
-                        // One line per feature, capability or app is detail: the caller sums
-                        // them up per Server Manager feature. So is a worker's verdict per
-                        // update, which the media build words itself, and every edition DISM
-                        // says an image can become - the bake states the one that matters.
-                        if ["PVS-FEATURE-", "PVS-CAP-", "PVS-APP-", "PVS-PROV-", "PVS-UPD-OK", "PVS-UPD-FAIL", "PVS-UPD-SKIP", "PVS-STOPPED", "PVS-TARGET "].iter().any(|p| part.starts_with(p)) || part == "PVS-SYSPREP-TAG" {
-                            log.debug(crate::markers::text(part)).await;
-                        } else {
-                            log.line(crate::markers::text(part)).await;
-                        }
+                        log.tag(crate::markers::tag(part), crate::markers::text(part)).await;
                         markers.push(part.to_owned());
                     } else {
                         log.debug(format!("| {part}")).await;
@@ -1568,7 +1632,7 @@ pub async fn bake(
         Ok((vmid, gold_name, edition_target)) => {
             // New-Vhdx's New-WindowsGoldManifest, then the keys every gold shares.
             let has = |f: &str| opt.features.iter().any(|x| x == f);
-            let mut bake_options = json!({ "rdp": has("rdp"), "ping": has("ping"), "blockSignInInputMethods": has("signinkeyboard"), "preferIPv4": has("preferipv4"), "edgeBaseline": has("edge") && img.installation_type != "Server Core" });
+            let mut bake_options = json!({ "rdp": has("rdp"), "ping": has("ping"), "blockSignInInputMethods": has("signinkeyboard"), "preferIPv4": has("preferipv4"), "edgeBaseline": has("edge") && img.installation_type != "Server Core", "personalizationDefaults": has("personalization") && img.installation_type != "Server Core" });
             if client {
                 bake_options["preventDeviceEncryption"] = json!(has("noencrypt"));
                 bake_options["vmPowerPlan"] = json!(has("power"));
@@ -1638,7 +1702,7 @@ pub async fn bake(
             if let Some(vmid) = made
                 && pve.vm_destroy(node, vmid).await.is_ok()
             {
-                log.line(format!("Removed bake VM {vmid}")).await;
+                log.ok(format!("Removed bake VM {vmid}")).await;
             }
             let _ = sqlx::query("UPDATE golds SET status = 'failed' WHERE id = ?").bind(gold_id).execute(b.db).await;
             Err(e)
@@ -2181,6 +2245,28 @@ mod tests {
         let region = WinRegion { locale: "en-US".into(), keyboard: "en-US".into(), timezone: "UTC".into() };
         assert!(pe2_cmd(&img, &region, &[], None, true).contains("/Set-ProductKey:MFY9F-XBN2F-TYFMP-CCV49-RMYVH"));
         assert!(pe2_cmd(&img, &region, &[], None, false).contains("PVS-NO-KEY"));
+    }
+
+    #[test]
+    fn personalization_defaults_by_family() {
+        let region = WinRegion { locale: "en-US".into(), keyboard: "en-US".into(), timezone: "UTC".into() };
+        let on = ["personalization".to_owned()];
+        // Windows 11 and Server 2025: Start centered and the classic menu in UsrClass.dat.
+        let w11 = pe2_cmd(&img("Enterprise", "Client", "26300"), &region, &on, None, false);
+        assert!(w11.contains(r"reg load HKLM\KUSER W:\Users\Default\NTUSER.DAT"));
+        assert!(w11.contains("/v TaskbarAl /t REG_DWORD /d 1"));
+        assert!(w11.contains(r"HKLM\KCLASSES\CLSID\{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}\InprocServer32"));
+        assert!(!w11.contains("EnableAutoTray"));
+        assert!(pe2_cmd(&img("ServerDatacenter", "Server", "26100"), &region, &on, None, false).contains("KCLASSES"));
+        // Server 2022 is build 20348: the Windows 10 family - tray icons, no classic menu.
+        let s22 = pe2_cmd(&img("ServerDatacenter", "Server", "20348"), &region, &on, None, false);
+        assert!(s22.contains("/v EnableAutoTray /t REG_DWORD /d 0"));
+        assert!(!s22.contains("KCLASSES") && !s22.contains("TaskbarAl"));
+        // Server Core has no desktop; off is off.
+        assert!(!pe2_cmd(&img("ServerDatacenter", "Server Core", "26100"), &region, &on, None, false).contains("KUSER"));
+        assert!(!pe2_cmd(&img("Enterprise", "Client", "26300"), &region, &[], None, false).contains("KUSER"));
+        // Each value is read back against what was written.
+        assert!(w11.contains(r#"if not "%V%"=="0x1" set PFAIL=1"#) && w11.contains(r#"if not "%V%"=="0x0" set PFAIL=1"#));
     }
 
     #[test]

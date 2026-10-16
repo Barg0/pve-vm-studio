@@ -244,6 +244,8 @@ tr.muted-row td { color: var(--fg-muted); }
 tr.wi-virtual td { color: var(--fg-muted); }
 tr.wi-virtual.selected td { color: var(--fg); }
 .wi-arrow { color: var(--fg-muted); margin-right: 4px; }
+/* The edition cell: the name on the left, a lab-only glyph at the cell's right edge, centered on the row. */
+.wi-ed { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 
 /* Windows bake: what every Windows gold is baked with, as two compact parts beside the ISO. */
 /* Laid out like a label.field beside it - same label, same 3 px gap, same 32 px row - so

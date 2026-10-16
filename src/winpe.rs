@@ -254,7 +254,7 @@ async fn stage_esd(log: &JobLog, pr: &mut Progress, dir: &Path, esd: &Path) -> R
         bail!("{} has {count} image(s); an edition's ESD has Setup media, WinRE and the install image", esd.display());
     }
     log.run("Building the Setup environment from the ESD").await;
-    log.line("Applying the Setup media (ESD image 1)").await;
+    log.debug("Applying the Setup media (ESD image 1)").await;
     // Applying the Setup media is quick; WinRE's export is most of this stage.
     let parts = [10.0, 90.0];
     pr.part(&parts, 0, "the Setup media");
@@ -270,7 +270,7 @@ async fn stage_esd(log: &JobLog, pr: &mut Progress, dir: &Path, esd: &Path) -> R
         bail!("the ESD's Setup media has no efi/microsoft/boot/efisys_noprompt.bin");
     }
     let build = image_build(log, esd, "2").await?;
-    log.line(format!("Exporting WinRE (ESD image 2, build {build}) as the Setup environment")).await;
+    log.debug(format!("Exporting WinRE (ESD image 2, build {build}) as the Setup environment")).await;
     let pe = dir.join("pe.wim");
     let pe_s = pe.display().to_string();
     pr.part(&parts, 1, "WinRE");

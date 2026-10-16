@@ -261,7 +261,7 @@ pub async fn run(web: reqwest::Client, data: PathBuf, log: JobLog, jobs: crate::
             break;
         }
         if !said {
-            log.line(format!("Waiting for {others} running job(s) to finish - the restart would cut them off")).await;
+            log.info(format!("Waiting for {others} running job(s) to finish - the restart would cut them off")).await;
             log.progress("Studio update", None, "waiting for the running jobs");
             said = true;
         }

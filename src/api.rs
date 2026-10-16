@@ -615,12 +615,12 @@ async fn start_cluster_check(State(app): State<AppState>, user: User) -> ApiResu
 /// The cluster check's work - also what a queued one runs after a restart.
 pub(crate) async fn cluster_check(pve: crate::pve::Pve, log: crate::jobs::JobLog) -> anyhow::Result<()> {
     let v = pve.version().await?;
-    log.line(format!("Proxmox VE {}-{}, reached with the studio's token", v.version, v.release)).await;
+    log.info(format!("Proxmox VE {}-{}, reached with the studio's token", v.version, v.release)).await;
 
     let status = pve.cluster_status().await?;
     match status.iter().find(|s| s.kind == "cluster") {
         Some(c) => {
-            log.line(format!(
+            log.info(format!(
                 "Cluster {}: {} node(s), {}",
                 c.name,
                 c.nodes.unwrap_or(0),
@@ -628,17 +628,17 @@ pub(crate) async fn cluster_check(pve: crate::pve::Pve, log: crate::jobs::JobLog
             ))
             .await
         }
-        None => log.line("Single node, no cluster").await,
+        None => log.info("Single node, no cluster").await,
     }
 
     let resources = pve.resources().await?;
     for n in resources.iter().filter(|r| r.kind == "node") {
         let name = n.node.as_deref().unwrap_or("?");
         if n.status.as_deref() != Some("online") {
-            log.line(format!("Node {name}: offline")).await;
+            log.warn(format!("Node {name}: offline")).await;
             continue;
         }
-        log.line(format!(
+        log.info(format!(
             "Node {name}: {} CPUs, {} of {} GiB RAM in use",
             n.maxcpu.unwrap_or(0.0),
             gib(n.mem),
@@ -646,12 +646,12 @@ pub(crate) async fn cluster_check(pve: crate::pve::Pve, log: crate::jobs::JobLog
         ))
         .await;
         for b in pve.bridges(name).await? {
-            log.line(format!("  bridge {}{}", b.iface, b.cidr.map(|c| format!(" ({c})")).unwrap_or_default()))
+            log.info(format!("  bridge {}{}", b.iface, b.cidr.map(|c| format!(" ({c})")).unwrap_or_default()))
                 .await;
         }
         for s in resources.iter().filter(|r| r.kind == "storage" && r.node.as_deref() == Some(name)) {
             let content = s.content.as_deref().unwrap_or("");
-            log.line(format!(
+            log.info(format!(
                 "  storage {} [{}]: {} of {} GiB free, holds {}{}",
                 s.storage.as_deref().unwrap_or("?"),
                 s.plugintype.as_deref().unwrap_or("?"),
@@ -666,12 +666,12 @@ pub(crate) async fn cluster_check(pve: crate::pve::Pve, log: crate::jobs::JobLog
     }
 
     let vnets = pve.vnets().await;
-    log.line(format!("{} SDN VNet(s)", vnets.len())).await;
+    log.info(format!("{} SDN VNet(s)", vnets.len())).await;
 
     let templates = resources.iter().filter(|r| r.kind == "qemu" && r.template == Some(1)).count();
     let vms = resources.iter().filter(|r| r.kind == "qemu" && r.template != Some(1)).count();
-    log.line(format!("{vms} VM(s), {templates} template(s)")).await;
-    log.line("Cluster check done").await;
+    log.info(format!("{vms} VM(s), {templates} template(s)")).await;
+    log.ok("Cluster check done").await;
     Ok(())
 }
 
@@ -1581,7 +1581,7 @@ pub(crate) async fn fod_job(app: AppState, log: crate::jobs::JobLog, key: String
         match fod::studio_built(&have).then(|| iso_path(&app, &have)).flatten() {
             Some(path) => Some(path),
             None => {
-                log.ok(format!("{} has no Features on Demand ISO the studio built - nothing to check", src.name)).await;
+                log.info(format!("{} has no Features on Demand ISO the studio built - nothing to check", src.name)).await;
                 return Ok(());
             }
         }
@@ -1647,7 +1647,7 @@ pub(crate) async fn virtio_job(app: AppState, log: crate::jobs::JobLog) -> anyho
     let bake: BakeSettings = settings::load(&app.db, "bake").await?;
     let p = bake.resolve(&app.pve).await?;
     let release = virtio::resolve(&s.virtio).await?;
-    log.line(format!("virtio-win {} resolves to {release}", s.virtio)).await;
+    log.ok(format!("virtio-win {} resolves to {release}", s.virtio)).await;
     let storage = if s.iso_storage.is_empty() { p.iso_storage.clone() } else { s.iso_storage.clone() };
     let volid = virtio::fetch(&app.pve, &log, &p.node, &storage, &release).await?;
     // Following a channel, the releases it pointed at before are replaced: they go (a VM
@@ -1882,7 +1882,7 @@ pub(crate) async fn windows_bake_job(app: AppState, log: crate::jobs::JobLog, gi
             .bind(&gid)
             .execute(&db)
             .await?;
-        log.run(format!(
+        log.info(format!(
             "Baking {} (index {} of {}) on {}: disk on {}",
             img.name, img.index, opt.iso, p.node, p.disk_storage
         ))
@@ -1902,7 +1902,7 @@ pub(crate) async fn windows_bake_job(app: AppState, log: crate::jobs::JobLog, gi
         let product = isos.iter().find(|i| i.volid == opt.iso).and_then(|i| crate::uup::product(&i.product));
         let agent = !windows::insider_image(&img, product);
         if !agent {
-            log.line("Windows Insider build: no guest agent - its VMs deploy through the WinPE deploy pass and are not followed once they start").await;
+            log.info("Windows Insider build: no guest agent - its VMs deploy through the WinPE deploy pass and are not followed once they start").await;
         }
         windows::bake(
             windows::WinBake { pve: &pve, db: &db, log: &log, work: &work },

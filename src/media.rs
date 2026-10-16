@@ -919,7 +919,7 @@ pub(crate) async fn run_worker(
     let result = async {
         let cmd = script(&url, &link.pin);
         let seed_disk = SeedDisk::build_bytes(work, &seed_name, "PVSSEED", &[("pvs/pe.cmd", cmd.as_bytes()), ("pvs/curl.exe", w.curl)]).await?;
-        log.ok(format!("Worker fetches from the studio at {} over {}", link.base.replace("{ip}", &ip), if link.pin.is_empty() { "HTTP" } else { "HTTPS, the studio's key pinned" })).await;
+        log.info(format!("Worker fetches from the studio at {} over {}", link.base.replace("{ip}", &ip), if link.pin.is_empty() { "HTTP" } else { "HTTPS, the studio's key pinned" })).await;
         let size: WorkerSettings = settings::load(db, "worker").await?;
         golds::check_node_memory(pve, log, &p.node, size.memory_mb).await?;
         pve.ensure_pool(GOLD_POOL, "PVE VM Studio: golds (templates) and the bakes that make them").await?;
@@ -931,7 +931,7 @@ pub(crate) async fn run_worker(
             net0 += &format!(",tag={v}");
         }
         let vm_name = format!("worker-{short}");
-        log.line(format!(
+        log.info(format!(
             "Creating worker VM {vmid} ({vm_name}): WinPE {}, {} GB memory, {} cores, {} GB scratch disk on {}",
             w.pe.build,
             size.memory_mb / 1024,
@@ -1075,7 +1075,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         let install_s = install.display().to_string();
         let target_rev = req.build.rsplit('.').next().unwrap_or_default().to_owned();
         if let Some(c) = &ck {
-            log.line(format!("Continuing the interrupted build: {} - kept in its work folder", c.done())).await;
+            log.info(format!("Continuing the interrupted build: {} - kept in its work folder", c.done())).await;
         }
 
         if ck.is_none() {
@@ -1150,7 +1150,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         })
         .await;
         for line in plan.lines() {
-            log.line(line).await;
+            log.info(line).await;
         }
         if !plan.blocking.is_empty() {
             bail!(
@@ -1190,7 +1190,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         cabs_to_esd(log, &dir, &cabs).await?;
 
         let tree = dir.join("iso");
-        log.line("Applying the Setup media (ESD image 1)").await;
+        log.debug("Applying the Setup media (ESD image 1)").await;
         pr.part(&parts, p_setup, "the Setup media");
         crate::winpe::run_progress(log, "wimlib-imagex", &["apply", &first_s, "1", &tree.display().to_string(), "--no-acls", "--no-attributes"], |f| pr.within(f, format!("the Setup media · {:.0}%", f * 100.0))).await?;
         // The Setup dynamic update: its files into sources\ - before boot.wim takes Setup from there.
@@ -1208,7 +1208,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
         pr.part(&parts, p_winre, "WinRE");
         crate::winpe::run_progress(log, "wimlib-imagex", &["export", &first_s, "2", &winre_s, "--compress=maximum", "--boot"], |f| pr.within(f, format!("WinRE · {:.0}%", f * 100.0))).await?;
 
-        log.line("Building boot.wim: WinPE and the Setup environment").await;
+        log.debug("Building boot.wim: WinPE and the Setup environment").await;
         pr.part(&parts, p_boot, "boot.wim");
         let n = build_boot_wim(log, &tree, &winre).await?;
         log.ok(format!("boot.wim: WinPE and the Setup environment ({n} Setup files)")).await;
@@ -1234,7 +1234,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             } else {
                 format!("{} {flag}", if img_name.contains("Windows 11") || prod.id.starts_with("w11") { "Windows 11" } else { "Windows" })
             };
-            log.line(format!("Exporting {name} into install.wim")).await;
+            log.debug(format!("Exporting {name} into install.wim")).await;
             let mut args = vec!["export", meta_s.as_str(), "3", install_s.as_str(), name.as_str(), name.as_str(), "--compress=LZX"];
             if prod.kind == Kind::Client {
                 args.push(refs.as_str());
@@ -1307,13 +1307,13 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                     extra.apps = plan.per_image.clone();
                     apps_root = Some((root, want));
                 } else {
-                    log.line("No inbox app list in this set's metadata - the images keep only what their edition carries").await;
+                    log.info("No inbox app list in this set's metadata - the images keep only what their edition carries").await;
                 }
             } else {
-                log.line("The set has no AggregatedMetadata - no inbox app list, the images keep only what their edition carries").await;
+                log.info("The set has no AggregatedMetadata - no inbox app list, the images keep only what their edition carries").await;
             }
             if !extra.edge {
-                log.line("The set has no Edge.wim - Microsoft Edge is not added").await;
+                log.info("The set has no Edge.wim - Microsoft Edge is not added").await;
             }
         }
         let has_apps = extra.apps.iter().any(|a| !a.is_empty());
@@ -1375,7 +1375,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                     // (chain_names is the one-call chain's upd/lcu folder).
                     image_names.push(format!("{dir}/{}", u.name));
                 }
-                log.line(format!("Cumulative chain {} - one DISM call each, the checkpoint first",
+                log.info(format!("Cumulative chain {} - one DISM call each, the checkpoint first",
                     ordered.iter().filter_map(|u| kb_of(&u.name)).collect::<Vec<_>>().join(" -> "))).await;
             } else if chain.len() > 1 {
                 tokio::fs::create_dir_all(share.join("upd/lcu")).await?;
@@ -1386,7 +1386,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                 if let Some(t) = &target {
                     image_names.push(format!("lcu/{t}"));
                 }
-                log.line(format!("Cumulative chain {} - DISM gets {} alone, the checkpoint(s) beside it",
+                log.info(format!("Cumulative chain {} - DISM gets {} alone, the checkpoint(s) beside it",
                     chain.iter().filter_map(|u| kb_of(&u.name)).collect::<Vec<_>>().join(" -> "),
                     target.as_deref().and_then(kb_of).unwrap_or_default())).await;
             }
@@ -1446,7 +1446,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                 && let Some(ssu) = &standalone_ssu
                 && let Some(n) = image_names.iter().find(|n| base(n) == *ssu)
             {
-                log.line(format!("WinRE's servicing stack: {ssu}")).await;
+                log.debug(format!("WinRE's servicing stack: {ssu}")).await;
                 ssu_name = Some(n.clone());
             }
             if ssu_name.is_none()
@@ -1459,10 +1459,10 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
             {
                 let msu = share.join("upd").join(lcu.replace('/', std::path::MAIN_SEPARATOR_STR));
                 if let Some(name) = extract_ssu(log, &msu, &share.join("upd")).await? {
-                    log.line(format!("WinRE's servicing stack: {name}, out of {}", lcu.rsplit('/').next().unwrap_or(lcu))).await;
+                    log.debug(format!("WinRE's servicing stack: {name}, out of {}", lcu.rsplit('/').next().unwrap_or(lcu))).await;
                     ssu_name = Some(name);
                 } else {
-                    log.line("No servicing stack inside the cumulative update - WinRE gets the Safe OS update alone").await;
+                    log.info("No servicing stack inside the cumulative update - WinRE gets the Safe OS update alone").await;
                 }
             }
             (chain_names, image_names, winre_names, ssu_name, scratch_gb)
@@ -1531,7 +1531,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                 what.push(format!("{} inbox app(s)", extra.apps.iter().map(Vec::len).max().unwrap_or(0)));
             }
             log.run(format!("Worker: {} into {} image(s){} - a WinPE VM applies them with DISM", what.join(", "), base.len(), if extra.boot.is_empty() { "" } else { " and boot.wim" })).await;
-            log.line("DISM: about 15-30 min per image, health scan included; about 20 more for the apps, 20 for boot.wim").await;
+            log.info("DISM: about 15-30 min per image, health scan included; about 20 more for the apps, 20 for boot.wim").await;
             let app_minutes: u64 = extra.apps.iter().map(|a| a.len() as u64).sum::<u64>() / 2 + if extra.edge { 5 * base.len() as u64 } else { 0 };
             let minutes = 60 + 60 * base.len() as u64 + if winre_names.is_empty() { 0 } else { 20 } + app_minutes + if extra.boot.is_empty() { 0 } else { 40 };
             let spec = WorkerSpec {
@@ -1604,7 +1604,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                     }
                     ["PVS-UPD-OK", at, name] => log.ok(format!("{} into {}: installed", update_label(name), where_label(at))).await,
                     // 0x800F081E: the package has nothing for this image.
-                    ["PVS-UPD-SKIP", at, name] => log.line(format!("{} into {}: not applicable to this image - skipped", update_label(name), where_label(at))).await,
+                    ["PVS-UPD-SKIP", at, name] => log.info(format!("{} into {}: not applicable to this image - skipped", update_label(name), where_label(at))).await,
                     // A required step (servicing stack, cumulative update) failed: the image
                     // stops there; nothing of it is shipped.
                     ["PVS-STOPPED", at, name] => log.warn(format!("{} is required - {} was not serviced further", update_label(name), where_label(at))).await,
@@ -1690,7 +1690,7 @@ pub async fn build(pve: &Pve, db: &SqlitePool, log: &JobLog, web: &reqwest::Clie
                         let cbs = read(share.join(format!("logs/health-{i}.log")).display().to_string()).await;
                         if let Some(n) = reverse_delta_only(&cbs) {
                             // Microsoft's scan error, not damage: the image ships, the job says so.
-                            log.warn(format!("Image {i}: /ScanHealth flags {n} reverse-delta file(s) (WinSxS \\r\\) and nothing else - the known scan error of the 2026 cumulative updates, not damage")).await;
+                            log.info(format!("Image {i}: /ScanHealth flags {n} reverse-delta file(s) (WinSxS \\r\\) and nothing else - the known scan error of the 2026 cumulative updates, not damage")).await;
                         } else {
                             bail!(
                                 "image {i} is not healthy: {why} - DISM /ScanHealth; {}",
@@ -1860,7 +1860,7 @@ async fn cabs_to_esd(log: &JobLog, dir: &Path, cabs: &[PathBuf]) -> Result<()> {
     if cabs.is_empty() {
         return Ok(());
     }
-    log.line(format!("Turning {} package CAB(s) into ESDs for wimlib", cabs.len())).await;
+    log.debug(format!("Turning {} package CAB(s) into ESDs for wimlib", cabs.len())).await;
     let newer = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
     for cab in cabs {
         let esd = cab.with_extension("esd");

@@ -308,6 +308,7 @@ fn bake_option_label(k: &str) -> &str {
         "preferIPv4" => "Prefer IPv4",
         "preventDeviceEncryption" => "No auto device encryption",
         "vmPowerPlan" => "VM power plan",
+        "personalizationDefaults" => "Personalization defaults",
         other => other,
     }
 }

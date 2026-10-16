@@ -131,7 +131,9 @@ impl JobLog {
         let _ = self.live.tx.send(Event::Line { n, text });
     }
 
-    pub async fn line(&self, text: impl Into<String>) {
+    /// A decision, or a fact that changes how the rest of the log reads - never progress:
+    /// a step that begins is `run`, one that finished is `ok`.
+    pub async fn info(&self, text: impl Into<String>) {
         self.tag(Tag::Info, text).await
     }
     pub async fn get(&self, text: impl Into<String>) {
@@ -731,7 +733,7 @@ impl Jobs {
                 if cancelled.is_none() && skipped.is_none() {
                     let _ = sqlx::query("UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?").bind(now()).bind(&job_id).execute(&this.db).await;
                     log.progress_done();
-                    log.run("Starting - the queue has room").await;
+                    log.info("Starting - the queue has room").await;
                 }
             }
             // A panic in the body must still end the job, so run it as its own task.

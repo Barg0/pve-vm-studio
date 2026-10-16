@@ -538,7 +538,7 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
                 log.ok(format!("{name} has every package of {} - nothing to build", build.title)).await;
                 return Ok(Outcome::Unchanged(build.uuid.clone()));
             }
-            log.line(format!("{name} differs from {}: {new} package(s) new or changed, {gone} no longer listed - building it again", build.title)).await;
+            log.info(format!("{name} differs from {}: {new} package(s) new or changed, {gone} no longer listed - building it again", build.title)).await;
         }
 
         pr.stage(5.0, 80.0, "downloading from Microsoft");
@@ -578,7 +578,7 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
         }
         log.ok(format!("metadata\\: the satellites' lists for {listed_n} languages, as the Languages and Optional Features ISO has them")).await;
         if !unlisted.is_empty() {
-            log.line(format!("No Baseless FoD list for {} in the metadata - their satellites are on the ISO without a list of their own", unlisted.join(", "))).await;
+            log.info(format!("No Baseless FoD list for {} in the metadata - their satellites are on the ISO without a list of their own", unlisted.join(", "))).await;
         }
         // fod-<os>-<build>: one FoD ISO per release, with the satellites of every language.
         let name = format!("fod-{}-{base}.iso", src.short);

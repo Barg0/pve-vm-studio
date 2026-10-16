@@ -613,12 +613,12 @@ where
                 Ok(()) => break,
                 Err(e) if forbidden(&e) && attempt < 2 => {
                     attempt += 1;
-                    log.warn(format!("{}: the link expired - asking the catalog for a fresh one", files[i].name)).await;
+                    log.debug(format!("{}: the link expired - asking the catalog for a fresh one", files[i].name)).await;
                 }
                 Err(e) if cut(&e) && cuts < 5 => {
                     cuts += 1;
                     log.debug(format!("{e:#}")).await;
-                    log.warn(format!("{}: the connection broke - continuing where it stopped (try {} of 6)", files[i].name, cuts + 1)).await;
+                    log.info(format!("{}: the connection broke - continuing where it stopped (try {} of 6)", files[i].name, cuts + 1)).await;
                     tokio::time::sleep(std::time::Duration::from_secs(5 * cuts)).await;
                     log.check_abort()?;
                 }
@@ -639,7 +639,7 @@ async fn download_with(web: &reqwest::Client, log: &JobLog, file: &File, dest: &
     let host = file.url.split('/').nth(2).unwrap_or("Microsoft's CDN");
     if loud {
         // A step of its own in the log - the longest one.
-        log.line(format!("{} ({:.1} GB) from {host}", file.name, file.size as f64 / 1e9)).await;
+        log.get(format!("{} ({:.1} GB) from {host}", file.name, file.size as f64 / 1e9)).await;
     } else {
         log.debug(format!("Downloading {} ({:.1} MB)", file.name, file.size as f64 / 1e6)).await;
     }

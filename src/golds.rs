@@ -327,7 +327,7 @@ impl Leftovers {
     async fn clean(&mut self, pve: &Pve, log: &JobLog) {
         if let Some((node, vmid)) = self.vm.take() {
             match pve.vm_destroy(&node, vmid).await {
-                Ok(()) => log.line(format!("Removed bake VM {vmid}")).await,
+                Ok(()) => log.ok(format!("Removed bake VM {vmid}")).await,
                 Err(e) => log.warn(format!("Could not remove bake VM {vmid}: {e:#}")).await,
             }
         }
@@ -438,7 +438,7 @@ async fn bake_linux_inner(
                 .ok_or_else(|| anyhow!("{} lists no checksum for {file}", img.checksum_url))?
         }
     };
-    log.line(format!("Published {}: {checksum}", img.algorithm)).await;
+    log.debug(format!("Published {}: {checksum}", img.algorithm)).await;
     // Named by content: a new release gets a new file, a rebake of the same one reuses it.
     let import_name = format!("pvs-{}-{}.qcow2", img.id, &checksum[..16]);
     let import_volid = format!("{}:import/{import_name}", p.import_storage);
@@ -462,7 +462,7 @@ async fn bake_linux_inner(
             match download(pve, log, &mut pr, node, &p.import_storage, &import_name, img, &checksum, &file).await {
                 Ok(()) => break,
                 Err(e) if attempt == 1 && format!("{e:#}").contains("stalled") => {
-                    log.warn(format!("{e:#} - trying once more")).await;
+                    log.info(format!("{e:#} - trying once more")).await;
                     attempt += 1;
                 }
                 Err(e) => return Err(e),
@@ -489,13 +489,13 @@ async fn bake_linux_inner(
         if let Some(n) = linux::vm_network_config(&[nic], false) {
             files.push(("network-config".into(), n.into_bytes()));
         }
-        log.line(format!("Bake address {ip}/{prefix}, gateway {}, DNS {}", p.linux_gateway, p.linux_dns.join(", "))).await;
+        log.info(format!("Bake address {ip}/{prefix}, gateway {}, DNS {}", p.linux_gateway, p.linux_dns.join(", "))).await;
     }
     if cis_level > 0
         && let (Some(b), Some(c)) = (cis::benchmark_for(img.id), &opt.cis)
     {
         files.extend(cis::seed_files(b, c));
-        log.line(format!("CIS: {} v{}, Level {cis_level} Server{}", b.name, b.version,
+        log.info(format!("CIS: {} v{}, Level {cis_level} Server{}", b.name, b.version,
             if c.exceptions.is_empty() { String::new() } else { format!(", {} exception(s)", c.exceptions.len()) })).await;
     }
     let refs: Vec<(&str, &[u8])> = files.iter().map(|(n, c)| (n.as_str(), c.as_slice())).collect();
@@ -573,7 +573,7 @@ async fn bake_linux_inner(
     }
     pve.vm_resize(node, vmid, "scsi0", &format!("{first_gb}G")).await?;
     pve.vm_action(node, vmid, "start").await?;
-    log.line(format!("Bake VM started - console: {name} ({vmid}) in the PVE UI, user bake / bake")).await;
+    log.ok(format!("Bake VM started - console: {name} ({vmid}) in the PVE UI, user bake / bake")).await;
     pr.within(1.0, "started");
 
     // ---- 4. follow it ----
@@ -610,11 +610,7 @@ async fn bake_linux_inner(
     }
 
     for l in report.lines().filter(|l| l.starts_with("BAKE-")) {
-        if l.ends_with("MISSING") {
-            log.warn(crate::markers::text(l)).await;
-        } else {
-            log.line(crate::markers::text(l)).await;
-        }
+        log.tag(crate::markers::tag(l), crate::markers::text(l)).await;
     }
     if let Some(l) = report.lines().find(|l| l.starts_with("BAKE-LOCALE") && l.ends_with("MISSING")) {
         bail!("a locale is missing on the gold: {}", crate::markers::text(l));
@@ -638,7 +634,7 @@ async fn bake_linux_inner(
             ))
             .await;
             for r in v["results"].as_array().into_iter().flatten().filter(|r| matches!(r["status"].as_str(), Some("fail" | "error"))) {
-                log.line(format!("CIS {} {}: {}", r["status"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""), r["title"].as_str().unwrap_or(""))).await;
+                log.warn(format!("CIS {} {}: {}", r["status"].as_str().unwrap_or(""), r["id"].as_str().unwrap_or(""), r["title"].as_str().unwrap_or(""))).await;
             }
             Some(sum)
         }
@@ -843,7 +839,7 @@ async fn follow_bake(pve: &Pve, log: &JobLog, pr: &mut Progress, node: &str, vmi
             } else {
                 if last_note.elapsed() > Duration::from_secs(60) {
                     last_note = Instant::now();
-                    log.line(format!("Booting ({} min) - waiting for the guest agent", started.elapsed().as_secs() / 60)).await;
+                    log.debug(format!("Booting ({} min) - waiting for the guest agent", started.elapsed().as_secs() / 60)).await;
                 }
                 tokio::time::sleep(Duration::from_secs(4)).await;
                 continue;
@@ -882,7 +878,7 @@ async fn follow_bake(pve: &Pve, log: &JobLog, pr: &mut Progress, node: &str, vmi
             {
                 pve.vm_resize(node, vmid, "scsi0", &format!("{gb}G")).await.context("growing the disk for the CIS volumes")?;
                 grown = true;
-                log.line(format!("Disk grown to {gb} GB for the CIS Level 2 volumes")).await;
+                log.ok(format!("Disk grown to {gb} GB for the CIS Level 2 volumes")).await;
             }
             if report.lines().any(|l| l.trim() == "BAKE-OK") {
                 return Ok(report);
@@ -961,7 +957,7 @@ pub async fn remove(pve: &Pve, db: &SqlitePool, gold: &GoldRow, log: &JobLog) ->
             // VMIDs are reused: an old record's VMID can be a newer gold's template by now.
             // Only a VM that carries this gold's name is this gold's.
             Ok(s) if !owns_vm(gold, s.name.as_deref()) => {
-                log.line(format!("VM {vmid} is {} now, not this gold's template - left alone", s.name.as_deref().unwrap_or("unnamed"))).await;
+                log.info(format!("VM {vmid} is {} now, not this gold's template - left alone", s.name.as_deref().unwrap_or("unnamed"))).await;
             }
             Ok(s) if s.template == Some(1) => {
                 // Linked clones made outside the studio block this too; PVE says so.
@@ -969,7 +965,7 @@ pub async fn remove(pve: &Pve, db: &SqlitePool, gold: &GoldRow, log: &JobLog) ->
                 log.ok(format!("Removed template {vmid}")).await;
             }
             Ok(_) => bail!("VM {vmid} is no longer a template - not touching it"),
-            Err(_) => log.line(format!("Template {vmid} is gone already")).await,
+            Err(_) => log.info(format!("Template {vmid} is gone already")).await,
         }
     }
     sqlx::query("UPDATE golds SET status = 'removed' WHERE id = ?").bind(&gold.id).execute(db).await?;

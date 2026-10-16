@@ -583,7 +583,7 @@ pub async fn window_bake_job(app: AppState, log: JobLog, run_id: String, from: S
     opt.keep_current = true;
     let (gid, img, path) = api::prepare_windows_bake(&app, &mut opt).await.map_err(|e| anyhow!("{e}"))?;
     sqlx::query("UPDATE golds SET job_id = ? WHERE id = ?").bind(log.id()).bind(&gid).execute(&app.db).await?;
-    log.line(format!("Gold {gid} from {new_iso} - it replaces {from} ({})", run.from_build)).await;
+    log.info(format!("Gold {gid} from {new_iso} - it replaces {from} ({})", run.from_build)).await;
     api::windows_bake_job(app, log, gid, opt, img, path).await
 }
 
@@ -619,7 +619,7 @@ async fn cleanup(app: &AppState, log: &JobLog, run: &Run, keep: u32) -> Result<(
         }
     }
     if !gone {
-        log.line(format!("{} is not in PVE any more", run.source_iso)).await;
+        log.info(format!("{} is not in PVE any more", run.source_iso)).await;
     }
 
     // Golds beyond the kept number, per kind of each new gold. A gold with linked clones
@@ -638,11 +638,11 @@ async fn cleanup(app: &AppState, log: &JobLog, run: &Run, keep: u32) -> Result<(
         same.sort_by(|a, b| if newer_gold(a, b) { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater });
         for g in same.into_iter().skip(keep as usize) {
             if usage.get(&g.id).copied().unwrap_or(0) > 0 {
-                log.line(format!("Keeping {}: linked clones use it", g.id)).await;
+                log.info(format!("Keeping {}: linked clones use it", g.id)).await;
                 continue;
             }
             if pinned.contains(&g.id) {
-                log.line(format!("Keeping {}: a design pins it", g.id)).await;
+                log.info(format!("Keeping {}: a design pins it", g.id)).await;
                 continue;
             }
             log.run(format!("Removing gold {}", crate::names::gold(g))).await;

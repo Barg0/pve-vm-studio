@@ -197,7 +197,7 @@ pub async fn fetch(pve: &Pve, log: &JobLog, node: &str, storage: &str, release: 
     }
     let url = format!("{BASE}/archive-virtio/virtio-win-{release}/virtio-win.iso");
     log.get(format!("PVE downloads {url}")).await;
-    log.warn("The virtio-win project publishes no checksum for the ISO itself - PVE checks the TLS connection only").await;
+    log.info("The virtio-win project publishes no checksum for the ISO itself - PVE checks the TLS connection only").await;
     let upid: String = pve
         .post(
             &format!("/nodes/{}/storage/{}/download-url", enc(node), enc(storage)),

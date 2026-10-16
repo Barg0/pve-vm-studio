@@ -1059,7 +1059,7 @@ function goldBuildHtml(g, build) {
 const ACTIVATION = { "kms-client": "KMS client key (GVLK)", preview: "Insider preview key", retail: "Retail key", mak: "MAK", none: "None" };
 const BAKE_OPTION = { rdp: "Remote Desktop", ping: "Answers ping", suppressServerManagerAtLogon: "No Server Manager at sign-in",
   blockSignInInputMethods: "STIG sign-in keyboard", suppressWelcomeExperience: "No welcome experience", suppressFirstSignInAnimation: "No first sign-in animation",
-  edgeBaseline: "Edge baseline", preferIPv4: "Prefer IPv4", preventDeviceEncryption: "No auto device encryption", vmPowerPlan: "VM power plan" };
+  edgeBaseline: "Edge baseline", preferIPv4: "Prefer IPv4", preventDeviceEncryption: "No auto device encryption", vmPowerPlan: "VM power plan", personalizationDefaults: "Personalization defaults" };
 const shortHash = h => h ? `${h.slice(0, 8)}…${h.slice(-4)}` : "";
 function goldKv(rows) {
   return `<dl class="gold-kv">${rows.filter(r => r && r[1] !== undefined && r[1] !== "").map(([k, v, raw]) =>
@@ -1472,7 +1472,7 @@ async function bladeGolds(main, stale) {
     if (g.os === "windows") {
       const bo = m.bakeOptions;
       const policies = bo ? [["rdp", "rdp"], ["ping", "ping"], ["blockSignInInputMethods", "signinkeyboard"], ["suppressServerManagerAtLogon", "svrmgr"],
-        ["suppressWelcomeExperience", "welcome"], ["suppressFirstSignInAnimation", "firstlogon"], ["edgeBaseline", "edge"], ["preferIPv4", "preferipv4"],
+        ["suppressWelcomeExperience", "welcome"], ["suppressFirstSignInAnimation", "firstlogon"], ["edgeBaseline", "edge"], ["preferIPv4", "preferipv4"], ["personalizationDefaults", "personalization"],
         // A gold from before these two were toggles had both, always.
         ["preventDeviceEncryption", "noencrypt", true], ["vmPowerPlan", "power", true]].filter(([k, , was]) => bo[k] ?? was).map(([, f]) => f) : m.policies;
       const editionKey = { EnterpriseMultiSession: "MultiSession", DatacenterAzureEdition: "AzureEdition", Enterprise: "Enterprise", Education: "Education",
@@ -1538,6 +1538,18 @@ function winPolicies(info) {
   return info.features.filter(f => !f.scope || f.scope === kind || (f.scope === "desktop" && img.installation_type !== "Server Core"));
 }
 
+/* Editions Microsoft licenses for its own clouds only (New-Vhdx's note on the Hyper-V path):
+   multi-session for Azure Virtual Desktop, Azure Edition for Azure and Azure Local. On PVE
+   such a gold is a lab image - the glyph says so on its row, an index on the ISO or virtual. */
+const LAB_ONLY = {
+  MultiSession: "Lab only. Windows 11 Enterprise multi-session is licensed for Azure Virtual Desktop only - not for Proxmox VE. Do not activate it and do not run it in production: a gold built here is for testing, nothing else.",
+  AzureEdition: "Lab only. Windows Server Datacenter: Azure Edition is licensed for Azure and Azure Local only - not for Proxmox VE. It does not stay activated here: the VM deactivates itself once it notices where it runs. Do not run it in production.",
+};
+function labOnlyKey(editionId) {
+  return /^(ServerRdsh|EnterpriseMultiSession)$/.test(editionId || "") ? "MultiSession" : /^(ServerTurbine|ServerAzure)/.test(editionId || "") ? "AzureEdition" : "";
+}
+const labOnlyTip = key => LAB_ONLY[key] ? warnTip(LAB_ONLY[key]) : "";
+
 /* An ISO index (or a virtual edition) by the studio's name - "Windows Server 2025 Datacenter
    Core" - not DISM's "Windows Server 2025 ServerDatacenterCore". */
 function wiEditionName(imageId, fallback) {
@@ -1593,12 +1605,12 @@ async function fillWinBake(catalog, stale) {
   $id("wiImages").innerHTML = `<div class="table-wrap"><table class="data">
       <thead><tr><th></th><th>Edition</th><th>Type</th><th>Build</th><th>Language</th><th>Size</th><th>Gold id</th></tr></thead>
       <tbody>${info.images.map(i => `<tr class="clickable ${i.index === winForm.index && !winForm.edition ? "selected" : ""}" data-wi="${i.index}" data-wi-edition="">
-        <td class="mono">${i.index}</td><td>${esc(wiEditionName(i.image_id, i.name))}</td>
+        <td class="mono">${i.index}</td><td><div class="wi-ed"><span>${esc(wiEditionName(i.image_id, i.name))}</span>${labOnlyTip(labOnlyKey(i.edition_id))}</div></td>
         <td><span class="pill role ${i.installation_type === "Server Core" ? "core" : i.installation_type === "Client" ? "client" : "desktop"}">${esc(i.installation_type === "Server Core" ? "Core" : i.installation_type === "Client" ? "Client" : "Desktop")}</span></td>
         <td class="mono">${esc(String(i.version || i.build).replace(/^10\.0\./, ""))}</td><td class="mono">${esc(i.language)}</td><td class="mono">${i.size_gb} GiB</td><td class="mono">${esc(i.image_id)}</td></tr>${(i.virtual || []).map(v => `
         <tr class="clickable wi-virtual ${i.index === winForm.index && winForm.edition === v.key ? "selected" : ""}" data-wi="${i.index}" data-wi-edition="${esc(v.key)}"
           title="Applied from index ${i.index}, changed to the virtual edition after sysprep (DISM /Set-Edition)">
-          <td></td><td><span class="wi-arrow">↳</span> ${esc(wiEditionName(v.image_id, v.label))}</td>
+          <td></td><td><div class="wi-ed"><span><span class="wi-arrow">↳</span> ${esc(wiEditionName(v.image_id, v.label))}</span>${labOnlyTip(v.key)}</div></td>
           <td><span class="wi-types"><span class="pill role ${i.installation_type === "Server Core" ? "core" : i.installation_type === "Client" ? "client" : "desktop"}">${esc(i.installation_type === "Server Core" ? "Core" : i.installation_type === "Client" ? "Client" : "Desktop")}</span><span class="pill role virtual">Virtual</span></span></td><td class="mono">${esc(String(i.version || i.build).replace(/^10\.0\./, ""))}</td><td class="mono">${esc(i.language)}</td><td class="mono">${i.size_gb} GiB</td>
           <td class="mono">${esc(v.image_id)}</td></tr>`).join("")}`).join("")}</tbody></table></div>
     <div class="field-group">Disk</div>
