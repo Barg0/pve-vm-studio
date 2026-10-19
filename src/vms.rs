@@ -323,6 +323,52 @@ pub async fn get(db: &SqlitePool, id: &str) -> Result<Option<VmRow>> {
 }
 
 /// A MAC in Proxmox's own OUI (BC:24:11), as PVE itself assigns them.
+/// The W11 benchmark turns VBS, HVCI and Credential Guard on at Level 1 (18.9.5): on PVE they
+/// run only with nested virtualization and a vTPM (measured 2026-10-18) - without them the
+/// policy is set and nothing runs. The Server benchmarks have these in their NG profile only.
+pub fn cis_needs_vbs(manifest: &serde_json::Value) -> bool {
+    manifest["cis"]["benchmarkId"].as_str() == Some("w11sa")
+}
+
+/// VBS under nested virtualization leaves 2 vCPU too slow for Windows' first sign-in: on W11 L1
+/// CIS VMs (2026-10-19) 5 of 10 deploys on 2 vCPU stopped in OOBE - its pages ran 81-191 s
+/// (the OOBE monitor resets at about 180 s, W18) or failed to load ("Something went wrong",
+/// OOBEZDP, waiting for a click). On 4 vCPU, the image's default, 6 of 6 went through in 35-66 s.
+pub const CIS_VBS_MIN_CORES: u32 = 4;
+
+pub fn win_cis_hardware_ok(manifest: &serde_json::Value, spec: &VmSpec) -> Result<()> {
+    if cis_needs_vbs(manifest) && !(spec.nested && spec.vtpm) {
+        bail!("a W11 CIS gold turns on VBS, HVCI and Credential Guard (CIS 18.9.5) - deploy it with nested virtualization and a vTPM, or they stay off");
+    }
+    if cis_needs_vbs(manifest) && spec.cores < CIS_VBS_MIN_CORES {
+        bail!("a W11 CIS gold runs VBS, HVCI and Credential Guard (CIS 18.9.5) - give it {CIS_VBS_MIN_CORES} vCPU at least: with {} vCPU Windows' first sign-in is too slow and OOBE stops", spec.cores);
+    }
+    Ok(())
+}
+
+/// A Windows CIS gold enforces its account policy at OOBE already (14 characters, complexity:
+/// 3 of upper, lower, digit, symbol, not containing the user name); a weaker password makes
+/// Setup fail on the VM - said here instead. The built-in Administrator is renamed on each VM
+/// (2.3.1.3), so it cannot be the user the VM is deployed for.
+pub fn win_cis_account_ok(user: &str, password: &str) -> Result<()> {
+    if user.eq_ignore_ascii_case("administrator") {
+        bail!("a CIS gold renames the built-in Administrator - deploy with a user of its own");
+    }
+    let classes = [
+        password.chars().any(|c| c.is_uppercase()),
+        password.chars().any(|c| c.is_lowercase()),
+        password.chars().any(|c| c.is_ascii_digit()),
+        password.chars().any(|c| !c.is_alphanumeric()),
+    ]
+    .iter()
+    .filter(|b| **b)
+    .count();
+    if password.chars().count() < 14 || classes < 3 || (user.len() > 2 && password.to_lowercase().contains(&user.to_lowercase())) {
+        bail!("the gold's CIS password policy: at least 14 characters, three of upper case, lower case, digits and symbols, not containing the user name");
+    }
+    Ok(())
+}
+
 pub fn new_mac() -> String {
     let b = uuid::Uuid::new_v4();
     let r = b.as_bytes();
@@ -365,6 +411,19 @@ async fn deploy_inner(
     let agent = !win || manifest["guestAgent"].as_bool() != Some(false);
     let img = if win {
         windows::check_name(&spec.name)?;
+        if manifest["cis"].is_object() {
+            win_cis_account_ok(&spec.user, &spec.password)?;
+            win_cis_hardware_ok(&manifest, spec)?;
+            // The names the gold gives the built-in accounts (its CIS settings) are taken.
+            let site = serde_json::from_str::<serde_json::Value>(&gold.options).ok()
+                .and_then(|o| serde_json::from_value::<crate::cis::CisSite>(o["cis"]["site"].clone()).ok())
+                .unwrap_or_default();
+            for n in [&site.windows.admin_name, &site.windows.guest_name] {
+                if spec.user.eq_ignore_ascii_case(n) {
+                    bail!("the gold's CIS settings give the name {n} to a built-in account - deploy with another user name");
+                }
+            }
+        }
         None
     } else {
         Some(catalog::linux(&gold.image_id).ok_or_else(|| anyhow!("{} is not a known gold image", gold.image_id))?)
@@ -642,6 +701,7 @@ async fn deploy_inner(
             domain_join: spec.domain_join.clone(),
             arc: spec.arc.clone(),
             cis: manifest["cis"].is_object(),
+            ssh_listen: spec.ip.clone(),
         };
         let user_data = linux::vm_user_data(img, &seed);
         let meta_data = linux::vm_meta_data(&spec.name, &stamp);
@@ -677,6 +737,10 @@ async fn deploy_inner(
             specialize: pass_media.is_some(),
             join_specialize: spec.domain_join.clone().filter(|_| join_mode == "specialize"),
             product_key: spec.product_key.clone(),
+            cis: manifest["cis"]["benchmarkId"]
+                .as_str()
+                .zip(manifest["cis"]["level"].as_u64())
+                .map(|(b, l)| (b.to_owned(), l as u8)),
         };
         let unattend = windows::vm_unattend(&ws, &manifest);
         let vmcmd = windows::vm_cmd(&ws);
@@ -838,9 +902,14 @@ async fn deploy_inner(
             if m.iter().any(|l| l.contains("-FAIL ")) {
                 deploy_pass_dism_errors(pve, log, &node, vmid).await;
             }
-            if guest_provision_result(pve, db, log, vm_id, &node, vmid).await? {
+            // VBS (W11 CIS) starts only with a boot, like Hotpatch's.
+            let restart = guest_provision_result(pve, db, log, vm_id, &node, vmid).await?;
+            if win && manifest["cis"].is_object() {
+                cis_wait_oobe(pve, &node, vmid).await?;
+            }
+            if restart || cis_needs_vbs(&manifest) {
                 pr.stage(90.0, 93.0, "restarting");
-                log.run(format!("Restarting - {} asked for it", restart_reason(spec))).await;
+                log.run(format!("Restarting - {} asked for it", if cis_needs_vbs(&manifest) && !spec.hotpatch { "CIS (VBS)" } else { restart_reason(spec) })).await;
                 pve.run_task(
                     &format!("/nodes/{}/qemu/{vmid}/status/shutdown", crate::pve::enc(&node)),
                     form![("timeout", "300"), ("forceStop", "1")],
@@ -857,6 +926,9 @@ async fn deploy_inner(
         log.run("First boot: specialize names the VM, OOBE takes the VM's answer file").await;
         windows::follow_first_boot(pve, log, &mut pr, &node, vmid).await?;
         let restart = guest_provision_result(pve, db, log, vm_id, &node, vmid).await?;
+        if manifest["cis"].is_object() {
+            cis_wait_oobe(pve, &node, vmid).await?;
+        }
         // [diff] Hyper-V's VMs never had a seed drive: everything went into the VHDX. Here the
         // seed rides in on a SATA disk, which cannot be unplugged from a running VM - so
         // one clean shutdown, the drive goes, and the VM starts again. A role that asked for
@@ -910,6 +982,12 @@ async fn deploy_inner(
     if spec.hotpatch && win && agent {
         hotpatch_check(pve, db, log, vm_id, &node, vmid, &gold.image_id).await;
     }
+    if win && agent && cis_needs_vbs(&manifest) {
+        cis_vbs_check(pve, log, &node, vmid).await;
+    }
+    if win && agent && manifest["cis"].is_object() {
+        cis_vm_final(pve, log, &node, vmid, &manifest).await;
+    }
     // Built: PVE refuses to remove it, or its disks, until protection is taken off.
     if spec.protection
         && let Err(e) = pve.vm_set(&node, vmid, form![("protection", 1)]).await {
@@ -962,7 +1040,7 @@ async fn follow_first_boot(pve: &Pve, log: &JobLog, pr: &mut Progress, node: &st
                     continue;
                 }
                 // The join and Arc steps report with markers; those are worth a tag of their own.
-                let marker = ["DOMAIN-", "ARC-", "SUDO-", "MKHOMEDIR-", "NSS-SSS-", "TIME-SYNC"].iter().any(|m| l.starts_with(m));
+                let marker = ["DOMAIN-", "ARC-", "SUDO-", "SSH-GROUP-", "SSH-LISTEN-", "MKHOMEDIR-", "NSS-SSS-", "TIME-SYNC"].iter().any(|m| l.starts_with(m));
                 if marker && (l.contains("FAILED") || l.contains("UNRESOLVED") || l.contains("NOT-INSTALLED") || l.contains("MISSING")) {
                     log.warn(l).await;
                 } else if marker {
@@ -1143,6 +1221,119 @@ fn vm_notes(spec: &VmSpec, gold: &crate::golds::GoldRow, image: &str) -> String 
     )
 }
 
+/// OOBE signs its defaultuser0 in once after SetupComplete, then disables it - a restart or
+/// shutdown before that leaves the account enabled and in Administrators (measured on the W11
+/// CIS VMs 2026-10-18). A server's OOBE has no such account: the wait ends at once.
+/// The poll is reg.exe while OOBE runs: a PowerShell start took 15-50 s on a W11 VM under VBS
+/// in its first sign-in, and OOBE's own monitor gives that sign-in about three minutes until
+/// its first page shows. When the monitor gives up, it sets the image state back from
+/// IMAGE_STATE_COMPLETE and restarts the VM; OOBE then waits on "Why did my PC restart?" for a
+/// click (cis-w11-l1-v6, 2026-10-18). Such a VM is not usable: the deploy fails with it.
+async fn cis_wait_oobe(pve: &Pve, node: &str, vmid: u32) -> Result<()> {
+    let probe = r"reg query HKLM\SYSTEM\Setup /v OOBEInProgress & reg query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Setup\State /v ImageState";
+    let ps = "$u = Get-LocalUser -Name defaultuser0 -ErrorAction SilentlyContinue; if ($u -and $u.Enabled) { 'open' } else { 'done' }";
+    for _ in 0..120 {
+        let state = match pve.agent_exec(node, vmid, &["cmd.exe", "/c", probe]).await {
+            Ok((_, out)) => oobe_state(&out),
+            Err(_) => OobeState::Unknown,
+        };
+        if state == OobeState::Reset {
+            bail!("OOBE failed: Windows' OOBE monitor reset it and restarted the VM, which now waits on \"Why did my PC restart?\" - the VM is not usable, deploy it again");
+        }
+        if state != OobeState::Running
+            && let Ok((0, out)) = pve.agent_exec(node, vmid, &["powershell", "-NoProfile", "-Command", ps]).await
+            && out.trim() == "done"
+        {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    }
+    bail!("OOBE has not finished after 20 minutes (defaultuser0 still enabled) - the VM is not usable, deploy it again")
+}
+
+#[derive(Debug, PartialEq)]
+enum OobeState {
+    /// OOBEInProgress 1, the image state still COMPLETE
+    Running,
+    /// OOBEInProgress 0 - defaultuser0 decides
+    Over,
+    /// the image state left IMAGE_STATE_COMPLETE: OOBE's monitor reset it
+    Reset,
+    Unknown,
+}
+
+/// reg.exe's answer for OOBEInProgress and ImageState (value names and data are not localized).
+fn oobe_state(out: &str) -> OobeState {
+    let value = |name: &str| {
+        out.lines()
+            .map(str::split_whitespace)
+            .find_map(|mut w| (w.next() == Some(name)).then(|| w.nth(1).map(str::to_owned)).flatten())
+    };
+    if let Some(s) = value("ImageState")
+        && s != "IMAGE_STATE_COMPLETE"
+    {
+        return OobeState::Reset;
+    }
+    match value("OOBEInProgress").as_deref() {
+        Some("0x0") => OobeState::Over,
+        Some(_) => OobeState::Running,
+        None => OobeState::Unknown,
+    }
+}
+
+/// The VM's CIS state once OOBE is done: the final phase (all rules, Winlogon AutoAdminLogon
+/// included - OOBE needed it until now), then the check into C:\ProgramData\PVS\cis-report.json,
+/// its result in the job log.
+async fn cis_vm_final(pve: &Pve, log: &JobLog, node: &str, vmid: u32, manifest: &serde_json::Value) {
+    let (Some(bench), Some(level)) = (manifest["cis"]["benchmarkId"].as_str(), manifest["cis"]["level"].as_u64()) else { return };
+    let ps = format!(
+        "$p = 'C:\\Windows\\PVS\\cis'; & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p\\pvs-cis.ps1 fix -Benchmark {bench} -Level {level} -Phase final -Exceptions $p\\exceptions -Markers *>&1 | Out-Null; \
+         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p\\pvs-cis.ps1 check -Benchmark {bench} -Level {level} -Phase final -Exceptions $p\\exceptions -Json C:\\ProgramData\\PVS\\cis-report.json -Markers *>&1 | Select-String 'CIS-CHECK-DONE' | ForEach-Object {{ $_.Line }}"
+    );
+    match pve.agent_exec(node, vmid, &["powershell", "-NoProfile", "-Command", &ps]).await {
+        Ok((_, out)) => match out.lines().map(str::trim).find(|l| l.starts_with("PVS-CIS-CHECK-DONE")) {
+            Some(line) => {
+                let msg = format!("CIS on the VM: {}", line.trim_start_matches("PVS-CIS-CHECK-DONE ").trim());
+                if crate::markers::tag(line) == crate::jobs::Tag::Ok { log.ok(msg).await } else { log.warn(msg).await }
+            }
+            None => log.warn("CIS on the VM: the check gave no result").await,
+        },
+        Err(e) => log.warn(format!("CIS on the VM: {e:#}")).await,
+    }
+}
+
+/// A W11 CIS VM after its restart: VBS running with Credential Guard (1) and HVCI (2), as the
+/// benchmark's 18.9.5 asks - the job warns when they do not run.
+async fn cis_vbs_check(pve: &Pve, log: &JobLog, node: &str, vmid: u32) {
+    let ps = "$d = Get-CimInstance -Namespace root\\Microsoft\\Windows\\DeviceGuard -ClassName Win32_DeviceGuard; \"$($d.VirtualizationBasedSecurityStatus)|$($d.SecurityServicesRunning -join ',')\"";
+    let mut answer = String::new();
+    for _ in 0..12 {
+        if let Ok((0, out)) = pve.agent_exec(node, vmid, &["powershell", "-NoProfile", "-Command", ps]).await
+            && let Some(line) = out.lines().map(str::trim).find(|l| l.contains('|'))
+        {
+            answer = line.to_owned();
+            let (vbs, running) = answer.split_once('|').unwrap_or(("", ""));
+            if vbs == "2" && ["1", "2"].iter().all(|n| running.split(',').any(|x| x.trim() == *n)) {
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    }
+    let (vbs, running) = answer.split_once('|').unwrap_or(("", ""));
+    let has = |n: &str| running.split(',').any(|x| x.trim() == n);
+    if vbs == "2" && has("1") && has("2") {
+        log.ok("CIS 18.9.5: VBS running with Credential Guard and HVCI").await;
+    } else {
+        log.warn(format!(
+            "CIS 18.9.5: VBS {}, Credential Guard {}, HVCI {} - the policy is set, the protection is not running",
+            match vbs { "2" => "running", "1" => "configured, not running", "0" => "off", _ => "unknown" },
+            if has("1") { "running" } else { "off" },
+            if has("2") { "running" } else { "off" }
+        ))
+        .await;
+    }
+}
+
 /// Hotpatch ready: after the restart, VBS must run (Win32_DeviceGuard status 2) - what
 /// Azure's Hotpatch enrolment checks first. The answer goes onto the VM's record (the card's
 /// status line). A VM that is not ready is still built: the job warns.
@@ -1240,6 +1431,41 @@ async fn deploy_pass_dism_errors(pve: &Pve, log: &JobLog, node: &str, vmid: u32)
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn win_cis_needs_vbs_hardware() {
+        let w11 = serde_json::json!({ "cis": { "benchmarkId": "w11sa", "level": 1 } });
+        let ws = serde_json::json!({ "cis": { "benchmarkId": "ws2025sa", "level": 2 } });
+        let mut spec: VmSpec = serde_json::from_value(serde_json::json!({ "name": "t", "gold": "g", "bridge": "vmbr0", "user": "ops", "cores": 2 })).unwrap();
+        assert!(win_cis_hardware_ok(&w11, &spec).is_err());
+        assert!(win_cis_hardware_ok(&ws, &spec).is_ok());
+        spec.nested = true;
+        spec.vtpm = true;
+        assert!(win_cis_hardware_ok(&w11, &spec).is_err());
+        spec.cores = CIS_VBS_MIN_CORES;
+        assert!(win_cis_hardware_ok(&w11, &spec).is_ok());
+    }
+
+    #[test]
+    fn win_oobe_state() {
+        let q = |oobe: &str, image: &str| {
+            format!("\r\nHKEY_LOCAL_MACHINE\\SYSTEM\\Setup\r\n    OOBEInProgress    REG_DWORD    {oobe}\r\n\r\n\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State\r\n    ImageState    REG_SZ    {image}\r\n\r\n")
+        };
+        assert_eq!(oobe_state(&q("0x1", "IMAGE_STATE_COMPLETE")), OobeState::Running);
+        assert_eq!(oobe_state(&q("0x0", "IMAGE_STATE_COMPLETE")), OobeState::Over);
+        assert_eq!(oobe_state(&q("0x1", "IMAGE_STATE_UNDEPLOYABLE")), OobeState::Reset);
+        assert_eq!(oobe_state(&q("0x1", "IMAGE_STATE_SPECIALIZE_RESEAL_TO_OOBE")), OobeState::Reset);
+        assert_eq!(oobe_state("ERROR: The system was unable to find the specified registry key or value."), OobeState::Unknown);
+    }
+
+    #[test]
+    fn win_cis_account() {
+        assert!(win_cis_account_ok("ops", "Correct-Horse-9").is_ok());
+        assert!(win_cis_account_ok("ops", "short-A1").is_err());
+        assert!(win_cis_account_ok("ops", "alllowercaseletters").is_err());
+        assert!(win_cis_account_ok("Administrator", "Correct-Horse-9").is_err());
+        assert!(win_cis_account_ok("horse", "Correct-Horse-9").is_err());
+    }
+
     use super::*;
 
     fn spec() -> VmSpec {

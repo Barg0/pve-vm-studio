@@ -118,10 +118,18 @@ prepare() {
     local err
     err=$(echo "$end_sector,,E6D6D379-F507-44C2-A23C-238F2A3DF928" | sfdisk --no-reread --no-tell-kernel --append "$disk" 2>&1 >/dev/null) \
         || fail "could not create the LVM partition at sector $end_sector: $(tr '\n' ' ' <<<"$err" | cut -c1-300)"
-    partx -a "$disk" >/dev/null 2>&1
-    udevadm settle
-    newpart=$(lsblk -lnpo NAME,TYPE "$disk" | awk '$2 == "part" { print $1 }' | while read -r p; do
-        [ "$(cat "/sys/class/block/$(basename "$p")/start")" -ge "$end_sector" ] && echo "$p"; done | head -n 1)
+    # The kernel learns of it through partx; udev may need a moment to create the node
+    # (one Ubuntu 26.04 bake in twelve saw none right after the first settle).
+    newpart=""
+    for i in $(seq 1 15); do
+        partx -a "$disk" >/dev/null 2>&1
+        udevadm settle
+        newpart=$(lsblk -lnpo NAME,TYPE "$disk" | awk '$2 == "part" { print $1 }' | while read -r p; do
+            [ "$(cat "/sys/class/block/$(basename "$p")/start")" -ge "$end_sector" ] && echo "$p"; done | head -n 1)
+        [ -n "$newpart" ] && [ -b "$newpart" ] && break
+        newpart=""
+        sleep 2
+    done
     [ -n "$newpart" ] || fail "the new partition did not appear"
     pvcreate -ff -y "$newpart" >/dev/null || fail "pvcreate $newpart"
     vgcreate "$VG" "$newpart" >/dev/null || fail "vgcreate"

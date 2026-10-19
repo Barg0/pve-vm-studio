@@ -16,8 +16,12 @@
 #   evidence only (EL backports strict KEX).
 # - Host private keys: root:root <= 0600, or root:ssh_keys <= 0640 (EL's sshd-keygen and
 #   cloud-init use ssh_keys) - the fix keeps the group it finds.
-# - AllowGroups wheel pvs-ssh (pvs-ssh created empty). The clone admin from cloud-init is in
-#   wheel; other SSH users (domain users too) must join pvs-ssh.
+# - AllowGroups wheel pvs-ssh (pvs-ssh created empty), plus the domain groups a domain join
+#   permits (deb's c5_ssh_groups). The clone admin from cloud-init is in wheel; other local SSH
+#   users join pvs-ssh.
+# - authselect: custom/pvs-cis is built on the profile in use (/etc/pvs-cis/authselect-base
+#   records which). When a domain join selects sssd, the next fix rebuilds it on sssd, keeping
+#   the join's features (with-mkhomedir) - a profile built on local would drop pam_sss.
 # - sudo is classic sudo: /etc/sudoers.d/10-pvs-cis (deb helpers). pwfeedback / visiblepw /
 #   timestamp_type=global are removed from the Defaults lines that set them (other options on
 #   the line stay); every change is validated with visudo -c and reverted on failure.
@@ -171,6 +175,7 @@ E5_AS_NAME=pvs-cis
 E5_AS_ID=custom/pvs-cis
 E5_AS_DIR=/etc/authselect/custom/pvs-cis
 E5_AS_SAVE=/var/lib/pvs-cis/authselect-saved
+E5_AS_BASEF=/etc/pvs-cis/authselect-base
 E5_AS_FEATURES="with-faillock with-pwhistory without-nullok"
 E5_PAM_FILES="/etc/pam.d/system-auth /etc/pam.d/password-auth"
 
@@ -254,10 +259,17 @@ e5_as_ensure() {
     prev=$(e5_as_raw)
     read -ra have <<<"$prev"
     cur=${have[0]:-}
+    # Another profile was selected since ours was built (a domain join selects sssd): ours is
+    # rebuilt on it, or selecting ours would take pam_sss away again. The template edits come
+    # back with the fixes that made them.
+    if [ -d "$E5_AS_DIR" ] && [ -n "$cur" ] && [ "$cur" != "$E5_AS_ID" ] && [ "$cur" != "$(cat "$E5_AS_BASEF" 2>/dev/null)" ]; then
+        rm -rf "$E5_AS_DIR"
+    fi
     if [ ! -d "$E5_AS_DIR" ]; then
         f=$(e5_as_base)
         authselect create-profile "$E5_AS_NAME" -b "$f" >/dev/null 2>&1 \
             || { echo "authselect create-profile $E5_AS_NAME -b $f failed"; return 1; }
+        mkdir -p "${E5_AS_BASEF%/*}" && echo "$f" > "$E5_AS_BASEF"
     fi
     sup=$(authselect list-features "$E5_AS_ID" 2>/dev/null)
     for f in "${have[@]:1}" $E5_AS_FEATURES; do
@@ -421,8 +433,8 @@ check_sshd_private_host_keys_0600_root() {
         ev "$f: $m $o:$g"
         if [ "$g" = ssh_keys ]; then mask=137; else mask=177; fi
         if (( (8#$m & 8#$mask) != 0 )) || [ "$o" != root ] || { [ "$g" != root ] && [ "$g" != ssh_keys ]; }; then rc=1; fi
-    done < <(c5_sshd_vals hostkey)
-    [ $n -gt 0 ] || ev "no host key found"
+    done < <(c5_key_files private)
+    [ $n -gt 0 ] || { ev "no host key found"; rc=1; }
     return $rc
 }
 fix_sshd_private_host_keys_0600_root() {
@@ -437,14 +449,12 @@ fix_sshd_private_host_keys_0600_root() {
             chown root:root "$f"
             chmod u-x,go-rwx "$f"
         fi
-    done < <(c5_sshd_vals hostkey)
+    done < <(c5_key_files private)
     return 0
 }
 
-fix_sshd_login_limited_to_allowed_groups() {
-    getent group pvs-ssh >/dev/null || groupadd -r pvs-ssh || return 1
-    c5_sshd AllowGroups wheel pvs-ssh
-}
+# shellcheck disable=SC2034 # read by deb's c5_ssh_groups
+c5_SSH_ADMIN=wheel
 
 check_sshd_no_weak_ciphers() {
     local c v

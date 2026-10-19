@@ -1011,7 +1011,7 @@ document.addEventListener("input", e => {
 /* -- Golds: the library, and the bake panel above it -- */
 
 const bakeForm = { image: "", mirror: null, node: "", bridge: "", vlan: null, addresses: "", gateway: "", dns: "", disk: null, storage: "", updates: true, features: ["aliases", "prompt", "fastfetch", "quietmotd"], region: true, language: "", format: "", keyboard: "", timezone: "", cis: 0 };
-const winForm = { iso: "", index: null, edition: "", disk: 64, storage: "", locale: "", keyboard: "", timezone: "", features: ["rdp", "ping", "svrmgr", "noencrypt", "power"] };
+const winForm = { iso: "", index: null, edition: "", cis: 0, disk: 64, storage: "", locale: "", keyboard: "", timezone: "", features: ["rdp", "ping", "svrmgr", "noencrypt", "power"] };
 const goldsUi = { bake: false, os: "linux", cleanup: false, cleanupPick: null, labelEdit: null, au: null, placeOpen: false };
 let catalogCache = null;
 
@@ -1021,7 +1021,8 @@ function openBake(os) { goldsUi.bake = true; goldsUi.os = os; state.blade = "gol
    that differ in any of those are both wanted. The newest ready gold heads the tile (highest
    build, then latest bake), what is baking or failed after it shows below, older ones fold. */
 // The release too: a 25H2 gold is its own branch beside 26H2, not an older 26H2.
-function goldKind(g) { return g.image_id + "|" + goldRelease(g) + "|" + goldLang(g) + "|" + (goldManifest(g).diskSizeGB || ""); }
+// And the CIS level: a CIS L2 gold and a plain one of the same image are two lines, each kept current.
+function goldKind(g) { return g.image_id + "|" + goldRelease(g) + "|" + goldLang(g) + "|" + (goldManifest(g).diskSizeGB || "") + "|" + goldCisLevel(g); }
 function goldTiles(golds, catalog) {
   const groups = new Map();
   golds.forEach(g => { const k = goldKind(g); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(g); });
@@ -1058,8 +1059,8 @@ function goldBuildHtml(g, build) {
 }
 const ACTIVATION = { "kms-client": "KMS client key (GVLK)", preview: "Insider preview key", retail: "Retail key", mak: "MAK", none: "None" };
 const BAKE_OPTION = { rdp: "Remote Desktop", ping: "Answers ping", suppressServerManagerAtLogon: "No Server Manager at sign-in",
-  blockSignInInputMethods: "STIG sign-in keyboard", suppressWelcomeExperience: "No welcome experience", suppressFirstSignInAnimation: "No first sign-in animation",
-  edgeBaseline: "Edge baseline", preferIPv4: "Prefer IPv4", preventDeviceEncryption: "No auto device encryption", vmPowerPlan: "VM power plan" };
+  blockSignInInputMethods: "Fixed sign-in keyboard", suppressWelcomeExperience: "No welcome experience", suppressFirstSignInAnimation: "No first sign-in animation",
+  edgeBaseline: "Edge baseline", preferIPv4: "Prefer IPv4", preventDeviceEncryption: "No auto device encryption", vmPowerPlan: "VM power plan", disableSearchBoxSuggestions: "No search box suggestions" };
 const shortHash = h => h ? `${h.slice(0, 8)}…${h.slice(-4)}` : "";
 function goldKv(rows) {
   return `<dl class="gold-kv">${rows.filter(r => r && r[1] !== undefined && r[1] !== "").map(([k, v, raw]) =>
@@ -1190,18 +1191,20 @@ function goldRowHtml(t) {
   const flags = [m.evaluation ? `<span class="gold-flag warn" title="180 days, no KMS activation">evaluation</span>` : "",
     m.generalized === false ? `<span class="gold-flag warn" title="VMs from it share its SID">not generalized</span>` : "",
     m.requiresTpm ? `<span class="gold-flag" title="VMs from it get a vTPM">TPM</span>` : "",
-    m.cis ? `<button type="button" class="gold-flag ${m.cis.fail || m.cis.error ? "warn" : "ok"}" data-cis-report="${esc(g.id)}" title="${esc(m.cis.benchmark + " v" + m.cis.version)} - self-assessed. Open the report">CIS L${m.cis.level} · ${m.cis.score}%</button>` : "",
     g.old_secure_boot_certs ? `<span class="gold-flag warn" title="Its EFI disk holds only Microsoft's 2011 Secure Boot certificates, which expired in June 2026 - rebake it (new EFI disks carry the 2023 set)">2011 certs</span>` : ""].join("");
+  // The CIS level beside the name, as a status pill: the score in its tip, the report on a click.
+  const cisPill = m.cis ? cisPillHtml(m.cis.level, { tag: "button", warn: m.cis.fail || m.cis.error, attrs: ` type="button" data-cis-report="${esc(g.id)}"
+    title="${esc(m.cis.benchmark + " v" + m.cis.version)} - ${esc(m.cis.score)}% of the applicable automated rules pass, self-assessed. Open the report"` }) : "";
   const key = "gold-" + g.id, open = gs(key, false);
   const rebake = after ? `<button type="button" class="gold-flag ${after.status === "failed" ? "bad" : "run"}" ${after.job_id ? `data-job-open="${esc(after.job_id)}"` : ""}
     title="${esc(when(after.created_at))} - open its log">${after.status === "baking" ? "rebake running" : "rebake failed"}</button>` : "";
-  return `<div class="card collapsible gold-card ${open ? "" : "collapsed"}">
+  return `<div class="card collapsible gold-card ${open ? "" : "collapsed"}" data-gold-card="${esc(g.id)}">
     <div class="card-head" data-toggle="${esc(key)}">
       <div class="card-lead">
         <span class="card-chevron">${chevron()}</span>
         <div class="card-icon"><img src="${imageIconSrc(img)}" alt=""></div>
         <div class="gold-id">
-          <div class="card-title">${esc(title)}${titleBadges(`<span class="pill status ${tone}">${esc(cap(g.status))}</span>`)}</div>
+          <div class="card-title">${esc(title)}${titleBadges(`${cisPill}<span class="pill status ${tone}">${esc(cap(g.status))}</span>`)}</div>
           <div class="gold-sub">${esc(sub)}${sub ? '<span class="gold-sep">·</span>' : ""}${goldsUi.labelEdit === g.id
             ? `<input class="gold-label-input" id="goldLabelInput" maxlength="80" value="${esc(m.label || "")}" placeholder="What this gold is for"><button class="btn icon sm" type="button" data-label-save="${esc(g.id)}" title="Save the label" aria-label="Save the label">${checkIcon()}</button>`
             : `<button type="button" class="gold-label ${m.label ? "" : "empty"}" data-label-edit="${esc(g.id)}" title="Set the label">${esc(m.label || "Add a label")}${pencilIcon()}</button>`}</div>
@@ -1226,7 +1229,7 @@ function goldRowHtml(t) {
       ${open ? goldDetailHtml(g) : ""}
       ${t.older.length ? `<div class="section collapsible ${oldOpen ? "" : "collapsed"} gold-older">
         <div class="section-head" data-nested="gold-old-${esc(t.key)}"><span class="section-chevron">${chevron()}</span>${t.older.length} older<span class="section-meta">${t.older.filter(x => !x.used_by).length} not a parent</span></div>
-        <div class="section-body"><table class="data"><tbody>${t.older.map(x => `<tr><td class="mono">${esc(goldShortId(x))}</td><td class="mono">${esc(goldBuildLabel(x))}</td><td class="muted">${esc(goldAge(x.created_at))}</td>
+        <div class="section-body"><table class="data"><tbody>${t.older.map(x => `<tr data-gold-card="${esc(x.id)}"><td class="mono">${esc(goldShortId(x))}</td><td class="mono">${esc(goldBuildLabel(x))}</td><td class="muted">${esc(goldAge(x.created_at))}</td>
           <td>${jobPill(x.status === "ready" ? "succeeded" : x.status)}</td><td class="muted">${x.used_by ? x.used_by + " linked clone" + (x.used_by === 1 ? "" : "s") : ""}</td>
           <td class="row-actions">${x.job_id ? `<button class="btn sm" type="button" data-job-open="${esc(x.job_id)}"><img src="${iconSrc("log.svg")}" alt=""> Log</button>` : ""}${goldRemoveBtn(x)}</td></tr>`).join("")}</tbody></table></div>
       </div>` : ""}
@@ -1359,6 +1362,12 @@ async function bladeGolds(main, stale) {
   const r = bake.resolved || {};
   const ready = golds.filter(g => g.status === "ready");
   const tiles = goldTiles(golds, catalog);
+  // Sent here for one gold (the Passwords blade's GRUB rows): an older one's fold opens.
+  const flash = goldsUi.flash;
+  if (flash) {
+    const t = tiles.find(x => x.older.some(o => o.id === flash));
+    if (t) state.nestedOpen["gold-old-" + t.key] = true;
+  }
   const section = (os, label) => {
     const list = tiles.filter(t => t.os === os);
     return list.length ? `<div class="field-group">${label} <span class="hint">${list.length}</span></div>${list.map(goldRowHtml).join("")}` : "";
@@ -1422,6 +1431,16 @@ async function bladeGolds(main, stale) {
         <div class="ue-actions"><button class="btn primary" type="button" data-bake-open="linux">Bake a Linux gold</button><button class="btn" type="button" data-bake-open="windows">Bake a Windows gold</button></div></div>`}
 `;
 
+  if (flash) {
+    goldsUi.flash = null;
+    const el = main.querySelector(`[data-gold-card="${CSS.escape(flash)}"]`);
+    if (el) {
+      el.scrollIntoView({ block: "center" });
+      el.classList.add("gold-flash");
+      // A timer, not animationend: with reduced motion there is no animation to end.
+      setTimeout(() => el.classList.remove("gold-flash"), 1300);
+    } else toast("That gold is gone");
+  }
   const on = (id, ev, fn) => { const el = $id(id); if (el) el.addEventListener(ev, fn); };
   on("bakeOpen", "click", () => openBake(goldsUi.os));
   on("bakeClose", "click", () => { goldsUi.bake = false; render(); });
@@ -1472,14 +1491,14 @@ async function bladeGolds(main, stale) {
     if (g.os === "windows") {
       const bo = m.bakeOptions;
       const policies = bo ? [["rdp", "rdp"], ["ping", "ping"], ["blockSignInInputMethods", "signinkeyboard"], ["suppressServerManagerAtLogon", "svrmgr"],
-        ["suppressWelcomeExperience", "welcome"], ["suppressFirstSignInAnimation", "firstlogon"], ["edgeBaseline", "edge"], ["preferIPv4", "preferipv4"]
+        ["suppressWelcomeExperience", "welcome"], ["suppressFirstSignInAnimation", "firstlogon"], ["edgeBaseline", "edge"], ["preferIPv4", "preferipv4"], ["disableSearchBoxSuggestions", "searchsuggest"],
         // A gold from before these two were toggles had both, always.
         ["preventDeviceEncryption", "noencrypt", true], ["vmPowerPlan", "power", true]].filter(([k, , was]) => bo[k] ?? was).map(([, f]) => f) : m.policies;
       const editionKey = { EnterpriseMultiSession: "MultiSession", DatacenterAzureEdition: "AzureEdition", Enterprise: "Enterprise", Education: "Education",
         ProfessionalWorkstation: "ProWorkstation", ProfessionalEducation: "ProEducation", EnterpriseN: "EnterpriseN", EducationN: "EducationN",
         ProfessionalWorkstationN: "ProWorkstationN", ProfessionalEducationN: "ProEducationN" }[m.editionUpgrade] || "";
       Object.assign(winForm, { iso: m.sourceMedia || m.sourceIso || winForm.iso, index: m.imageIndex ?? null, edition: editionKey, disk: m.diskSizeGB || 64, locale: m.locale || winForm.locale,
-        keyboard: m.keyboardLayout || winForm.keyboard, timezone: m.timeZone || winForm.timezone, features: policies || winForm.features });
+        keyboard: m.keyboardLayout || winForm.keyboard, timezone: m.timeZone || winForm.timezone, features: policies || winForm.features, cis: (m.cis && m.cis.level) || 0 });
     } else {
       bakeForm.image = g.image_id; bakeForm.disk = m.diskSizeGB || null; bakeForm.updates = !!(m.updatesApplied ?? m.updates); if (m.features) bakeForm.features = m.features;
       bakeForm.cis = (m.cis && m.cis.level) || 0;
@@ -1530,7 +1549,7 @@ async function bladeGolds(main, stale) {
 }
 
 /* One policy toggle of the Windows bake form, its tip beside the label. */
-const winPolicyToggle = f => toggle(`id="wiF_${esc(f.id)}"`, `${esc(f.label)}${f.tip ? infoTip(f.label, f.tip) : ""}`, winForm.features.includes(f.id));
+const winPolicyToggle = (f, more) => toggle(`id="wiF_${esc(f.id)}"`, `${esc(f.label)}${f.tip ? infoTip(f.label, f.tip + (more ? " " + more : "")) : ""}`, winForm.features.includes(f.id));
 
 /* The policies the selected index can take: Server Manager is a server's, the welcome
    experience and the first sign-in animation a client's. */
@@ -1605,6 +1624,23 @@ async function fillWinBake(catalog, stale) {
   if (!winForm.locale) winForm.locale = catalog.region.locale || lang;
   if (!winForm.keyboard) winForm.keyboard = catalog.region.keyboard || lang;
   if (!winForm.timezone) winForm.timezone = catalog.region.windowsTimeZone || (info.default_timezone !== "UTC" ? info.default_timezone : "UTC");
+  // CIS: only where the studio has the picked edition's benchmark (a virtual edition has its own).
+  const wiImg = info.images.find(i => i.index === winForm.index) || {};
+  const wiPick = winForm.edition ? (wiImg.virtual || []).find(v => v.key === winForm.edition) || {} : wiImg;
+  const wiCis = wiPick.cis || null, wiCisLevel = wiCis ? winForm.cis : 0;
+  const wiSrv = wiCis && /Server/.test(wiCis.name) ? " Server" : "";
+  // The baked-in policies this CIS level contradicts: off while it is on, their setting kept.
+  const wiOff = new Map(wiCisLevel ? ((wiCis.conflicts || {})[wiCisLevel] || []).map(c => [c.id, c.rules]) : []);
+  // ...the ones it turns on (Prefer IPv4: IPv6 stays on, 18.6.19.2.1 a standing exception), and
+  // the rules a policy, when on, makes exceptions of (Remote Desktop over W11 Level 2).
+  const wiOn = new Map(wiCisLevel ? ((wiCis.forced || {})[wiCisLevel] || []).map(c => [c.id, c.why]) : []);
+  const wiExc = new Map(wiCisLevel ? ((wiCis.excepts || {})[wiCisLevel] || []).map(c => [c.id, c]) : []);
+  const wiPolicy = f => wiOff.has(f.id) ? toggle(`id="wiF_${esc(f.id)}"`,
+      `${esc(f.label)}${infoTip(f.label + " - off for CIS Level " + wiCisLevel, "CIS Level " + wiCisLevel + " sets this the other way: " + wiOff.get(f.id).join("; ") + ". The benchmark wins.")}`, false, true)
+    : wiOn.has(f.id) ? toggle(`id="wiF_${esc(f.id)}"`,
+      `${esc(f.label)}${infoTip(f.label + " - on for CIS Level " + wiCisLevel, "CIS Level " + wiCisLevel + " " + wiOn.get(f.id))}`, true, true)
+    : wiExc.has(f.id) ? winPolicyToggle(f, `On, it overrules CIS Level ${wiCisLevel}: ${wiExc.get(f.id).rules.join(", ")} become declared exceptions in the gold's report. ${wiExc.get(f.id).reason}`)
+    : winPolicyToggle(f);
   $id("wiImages").innerHTML = `<div class="table-wrap"><table class="data">
       <thead><tr><th></th><th>Edition</th><th>Type</th><th>Build</th><th>Language</th><th>Size</th><th>Gold id</th></tr></thead>
       <tbody>${info.images.map(i => `<tr class="clickable ${i.index === winForm.index && !winForm.edition ? "selected" : ""}" data-wi="${i.index}" data-wi-edition="">
@@ -1625,18 +1661,26 @@ async function fillWinBake(catalog, stale) {
       ${field(fieldLabel("language.svg", "Time zone"), `<select id="wiTz">${opts(info.timezones.map(z => [z.id, `${z.id} · ${z.iana}`]), winForm.timezone)}</select>`)}
     </div>
     <div class="field-group">Policies baked in</div>
-    <div class="toggle-grid">${winPolicies(info).map(winPolicyToggle).join("")}</div>
-    ${actions(`<span class="hint gs-actions-note">WinPE pass 1 (apply${winForm.edition ? ", check the edition target" : ""}) · audit mode (virtio, agent, sysprep) · WinPE pass 2 (verify${winForm.edition ? ", change the edition" : ""}, region, policies, key)</span>`,
+    <div class="toggle-grid">${winPolicies(info).map(wiPolicy).join("")}</div>
+    ${wiCis ? `<div class="field-group">Hardening</div>
+    <div class="field-like"><span class="field-label"><img src="${iconSrc("security.svg")}" alt="">CIS benchmark${infoTip(wiCis.name + " v" + wiCis.version,
+      `Level 1 and Level 2${wiSrv}, applied in audit mode before sysprep and checked there - the score and every rule's evidence stay with the gold. Each VM from the gold renames the built-in Administrator and Guest and is checked again after its first start. Its admin account needs a password of 14 characters or more with three of upper case, lower case, digits and symbols, not containing the user name, and may not be called Administrator. Self-assessed - not a CIS certification.`)}</span>
+      <div class="cis-level-row"><div class="ov-seg" role="group" aria-label="CIS level">${[[0, "Off"], [1, "Level 1" + wiSrv], [2, "Level 2" + wiSrv]].map(([n, l]) =>
+        `<button type="button" class="btn${wiCisLevel === n ? " on" : ""}" data-wcis="${n}">${l}</button>`).join("")}</div>
+        <button type="button" class="btn cis-rules-btn" data-cis-rules="${esc(wiPick.image_id)}" data-cis-level="${wiCisLevel || 2}" title="The rules of ${esc(wiCis.name + " v" + wiCis.version)}" aria-label="Policy Catalog"><img src="${iconSrc("cis-rules.svg")}" alt=""> Policy Catalog</button></div></div>
+    <div class="tip-box"><img src="${iconSrc("help.svg")}" alt=""><div><b>For standalone machines only.</b> These are the CIS Stand-alone benchmarks, for machines that are not joined to a domain: the settings are local policy in the gold. A domain member gets its hardening from the domain's Group Policy instead (the CIS Enterprise benchmarks), which overrides local policy - bake its gold without CIS.</div></div>` : ""}
+    ${actions(`<span class="hint gs-actions-note">WinPE pass 1 (apply${winForm.edition ? ", check the edition target" : ""}) · audit mode (virtio, agent, sysprep) · WinPE pass 2 (verify${winForm.edition ? ", change the edition" : ""}, region, policies, key)${wiCisLevel ? " · CIS Level " + wiCisLevel + " in audit mode" : ""}</span>`,
       act("wiStart", "gold-image.svg", "Bake", true))}`;
   const keepWin = () => {
     winForm.locale = $id("wiLocale").value; winForm.keyboard = $id("wiKeyboard").value; winForm.timezone = $id("wiTz").value;
     winForm.disk = Math.min(2048, Math.max(32, parseInt($id("wiDisk").value, 10) || 64));
     winForm.storage = ($id("wiStorage") || {}).value || winForm.storage;
     // Policies the selected image does not offer keep their setting for when it comes back.
-    const shown = winPolicies(info).map(f => f.id);
+    const shown = winPolicies(info).map(f => f.id).filter(id => !wiOff.has(id) && !wiOn.has(id));
     winForm.features = winForm.features.filter(f => !shown.includes(f)).concat(shown.filter(id => $id("wiF_" + id)?.checked));
   };
   wireProvisioning($id("wiImages"), winForm, winDiskStorages, () => { keepWin(); fillWinBake(catalog, stale); });
+  $id("wiImages").querySelectorAll("[data-wcis]").forEach(b => b.addEventListener("click", () => { keepWin(); winForm.cis = Number(b.dataset.wcis); fillWinBake(catalog, stale); }));
   $id("wiImages").querySelectorAll("[data-wi]").forEach(tr => tr.addEventListener("click", () => {
     keepWin(); winForm.index = parseInt(tr.dataset.wi, 10); winForm.edition = tr.dataset.wiEdition || ""; fillWinBake(catalog, stale);
   }));
@@ -1645,8 +1689,9 @@ async function fillWinBake(catalog, stale) {
     try {
       const { id } = await api("POST", "/golds/windows", { iso: winForm.iso, index: winForm.index,
         region: { locale: winForm.locale, keyboard: winForm.keyboard, timezone: winForm.timezone },
-        features: winForm.features.filter(f => winPolicies(info).some(p => p.id === f)), policies: 1,
-        edition_upgrade: winForm.edition || "", disk_gb: winForm.disk, disk_storage: winForm.storage || null });
+        features: [...new Set(winForm.features.filter(f => winPolicies(info).some(p => p.id === f) && !wiOff.has(f)).concat([...wiOn.keys()]))], policies: 1,
+        edition_upgrade: winForm.edition || "", disk_gb: winForm.disk, disk_storage: winForm.storage || null,
+        cis: wiCisLevel ? { level: wiCisLevel, exceptions: [] } : null });
       goldsUi.bake = false;
       openJob(id);
     } catch (e) { toast(e.message, true); }
@@ -2357,6 +2402,8 @@ async function openCisReport(goldId) {
   let rep;
   try { rep = await api("GET", "/golds/" + encodeURIComponent(goldId) + "/cis"); } catch (e) { toast(e.message, true); return; }
   const results = rep.results || [], c = rep.counts || {};
+  // A Windows gold has no GRUB (and no "Server" profile on W11): its own benchmark names the level.
+  const win = ((cluster.golds || []).find(x => x.id === goldId) || {}).os === "windows" || /^(w11|ws20)/.test(rep.distro || "");
   const judged = (c.pass || 0) + (c.fail || 0) + (c.error || 0);
   const score = judged ? Math.round((c.pass || 0) * 1000 / judged) / 10 : 0;
   let tab = (c.fail || c.error) ? "fail" : "all", q = "";
@@ -2374,7 +2421,7 @@ async function openCisReport(goldId) {
   };
   ov.innerHTML = `<div class="modal cis-modal" role="dialog" aria-modal="true" aria-labelledby="cisTitle">
     <div class="cis-head"><span class="card-icon"><img src="${iconSrc("security.svg")}" alt=""></span>
-      <div><h2 id="cisTitle">${esc(rep.benchmark)} v${esc(rep.version)} · Level ${esc(rep.level)} Server</h2>
+      <div><h2 id="cisTitle">${esc(rep.benchmark)} v${esc(rep.version)} · Level ${esc(rep.level)}${win ? "" : " Server"}</h2>
       <div class="hint">Checked ${esc(when(rep.checked))} · self-assessed by the studio - not a CIS certification</div></div>
       <div class="cis-score"><b>${score}%</b><span>of the applicable automated rules pass</span></div></div>
     <div class="cis-bar"><div class="ov-seg cis-tabs" role="group" aria-label="Filter"></div><input type="search" class="cis-search" placeholder="Search rules and evidence" aria-label="Search"></div>
@@ -2398,7 +2445,7 @@ async function openCisReport(goldId) {
     }
   });
   ov.querySelector(".cis-search").addEventListener("input", e => { q = e.target.value.trim().toLowerCase(); paint(); });
-  ov.querySelector(".cis-grub").innerHTML = `<button class="btn" type="button" data-cis-grub title="The password that protects editing the boot menu - admins only"><img src="${iconSrc("secret.svg")}" alt=""> Show GRUB password</button>`;
+  if (!win) ov.querySelector(".cis-grub").innerHTML = `<button class="btn" type="button" data-cis-grub title="The password that protects editing the boot menu - admins only"><img src="${iconSrc("secret.svg")}" alt=""> Show GRUB password</button>`;
   document.addEventListener("keydown", key, true);
   document.body.appendChild(ov);
   paint();
@@ -2420,7 +2467,8 @@ async function openCisRules(image, level) {
     const d = does(r);
     return `<details class="cis-row rule-${d}"><summary><span class="cis-id mono">${esc(r.id)}</span><span class="cis-lvl${r.level === 2 ? " l2" : ""}">L${r.level}</span>
       <span class="cis-title">${esc(r.title)}${r.manual ? ' <span class="cis-manual">manual</span>' : ""}</span><span class="cis-does ${d}">${d === "fix" ? "Fixes" : d === "chk" ? "Checks" : "Review"}</span></summary>
-      <div class="cis-why-rule">${d === "fix" ? "Applied in the bake; the check after the reboot proves it." : d === "chk" ? "Checked after the reboot - nothing to apply." : "Reported for a person to review, not scored."}${r.decision ? `<br><b>Studio decision:</b> ${esc(r.decision)}` : ""}</div></details>`;
+      <div class="cis-why-rule">${d === "fix" ? "Applied in the bake; the check after the reboot proves it." : d === "chk" ? "Checked after the reboot - nothing to apply."
+        : /^exception: /.test(r.decision) ? "A declared exception: not applied, and the check reports it as an exception with the reason." : "Reported for a person to review, not scored."}${r.decision ? `<br><b>Studio decision:</b> ${esc(r.decision.replace(/^exception: /, ""))}` : ""}</div></details>`;
   };
   const ov = document.createElement("div");
   ov.className = "overlay open cis-overlay";
@@ -3054,9 +3102,67 @@ function wireRegion(main) {
   });
 }
 
+/* Image settings › CIS settings: the values a benchmark leaves to the site, Windows and Linux
+   apart. Each field is locked until its pencil is pressed; the check saves it. New bakes take
+   them, a gold keeps the ones it was baked with. */
+const CIS_SITE_FIELDS = [
+  ["windows", "legal_caption", "Logon message title", "2.3.7.5 Interactive logon: Message title for users attempting to log on. Shown above the text before every sign-in."],
+  ["windows", "legal_text", "Logon message text", "2.3.7.4 Interactive logon: Message text for users attempting to log on. One line."],
+  ["windows", "admin_name", "New name of the built-in Administrator", "2.3.1.3 Accounts: Rename administrator account. Each VM from the gold renames its built-in Administrator to this; the VM's own user may not have this name."],
+  ["windows", "guest_name", "New name of the Guest account", "2.3.1.4 Accounts: Rename guest account. The Guest stays disabled (2.3.1.2), under this name."],
+  ["linux", "banner", "Login banner", "/etc/issue, /etc/issue.net (the SSH banner) and /etc/motd. No OS details: no \\m \\r \\s \\v and no distribution name - the benchmark's banner rules check for them."],
+  ["linux", "ntp", "Time servers", "The authorized time servers for timesyncd or chrony, separated by spaces. Empty: the distribution's own (ntp.ubuntu.com, the Debian pool, pool.ntp.org)."],
+];
+const cisSiteUi = { open: {} };
+function cisSiteCard(cs) {
+  const site = cs.site, def = cs.defaults;
+  const row = ([os, k, label, tip]) => {
+    const key = os + "." + k, on = !!cisSiteUi.open[key], v = site[os][k], isDef = v === def[os][k];
+    const input = k === "legal_text" || k === "banner"
+      ? `<textarea id="cisS_${esc(key)}" rows="2" class="keep-border"${on ? "" : " readonly"}>${esc(v)}</textarea>`
+      : `<input id="cisS_${esc(key)}" class="keep-border" value="${esc(v)}" placeholder="${k === "ntp" ? "the distribution's own" : ""}"${on ? "" : " readonly"}>`;
+    return field(`<span class="field-label">${esc(label)}${infoTip(label, tip)}</span>`, `<div class="edit-field">${input}
+      <button class="btn icon" type="button" data-cis-site-def="${esc(key)}"${isDef ? " disabled" : ""} title="Back to the default" aria-label="Set ${esc(label)} back to the default">${regenIcon()}</button>
+      <button class="btn icon" type="button" data-cis-site-edit="${esc(key)}" title="${on ? "Save" : "Edit"}" aria-label="${on ? "Save" : "Edit"} ${esc(label)}">${on ? checkIcon() : pencilIcon()}</button></div>`);
+  };
+  const part = os => CIS_SITE_FIELDS.filter(f => f[0] === os).map(row).join("");
+  return gsCard("gd-cis", "security.svg", "CIS settings", "Logon message, account names, banner and time servers of CIS golds", `
+    <div class="field-group">Windows</div><div class="grid-2">${part("windows")}</div>
+    <div class="field-group">Linux</div><div class="grid-2">${part("linux")}</div>
+    <div class="tip-box"><img src="${iconSrc("help.svg")}" alt=""><div>New CIS bakes take these values; a gold keeps the ones it was baked with, and so do the VMs from it. A rebake takes today's.</div></div>`, "", false);
+}
+function wireCisSite(main, cs) {
+  const save = async next => {
+    try { cs.site = (await api("PUT", "/settings/cis", next)) || next; toast("Saved - new CIS bakes take it"); return true; }
+    catch (e) { toast(e.message, true); return false; }
+  };
+  main.querySelectorAll("[data-cis-site-edit]").forEach(b => b.addEventListener("click", async () => {
+    const key = b.dataset.cisSiteEdit, [os, k] = key.split(".");
+    // Unlocked in place, so what another open field holds is not lost to a redraw.
+    if (!cisSiteUi.open[key]) {
+      cisSiteUi.open[key] = true;
+      const el = $id("cisS_" + key);
+      el.removeAttribute("readonly"); el.focus();
+      b.innerHTML = checkIcon(); b.title = "Save";
+      return;
+    }
+    const v = $id("cisS_" + key).value;
+    if (v !== cs.site[os][k] && !await save({ ...cs.site, [os]: { ...cs.site[os], [k]: v } })) return;
+    delete cisSiteUi.open[key];
+    renderServerBlade("imagesettings", main);
+  }));
+  main.querySelectorAll("[data-cis-site-def]").forEach(b => b.addEventListener("click", async () => {
+    const [os, k] = b.dataset.cisSiteDef.split(".");
+    if (await save({ ...cs.site, [os]: { ...cs.site[os], [k]: cs.defaults[os][k] } })) { delete cisSiteUi.open[b.dataset.cisSiteDef]; renderServerBlade("imagesettings", main); }
+  }));
+  const first = main.querySelector('[id^="cisS_"]:not([readonly])');
+  if (first) first.focus();
+}
+
 async function bladeImageSettings(main, stale) {
-  const [bake, c, au, worker, region, cat] = await Promise.all([api("GET", "/settings/bake"), refreshInventory(), api("GET", "/auto-update").catch(() => null),
-    api("GET", "/settings/worker").catch(() => null), api("GET", "/settings/region").catch(() => ({})), catalogCache || api("GET", "/catalog")]);
+  const [bake, c, au, worker, region, cat, cisSite] = await Promise.all([api("GET", "/settings/bake"), refreshInventory(), api("GET", "/auto-update").catch(() => null),
+    api("GET", "/settings/worker").catch(() => null), api("GET", "/settings/region").catch(() => ({})), catalogCache || api("GET", "/catalog"),
+    api("GET", "/settings/cis").catch(() => null)]);
   catalogCache = cat;
   if (stale()) return;
   const inv = c.inventory;
@@ -3090,7 +3196,9 @@ async function bladeImageSettings(main, stale) {
       ${actions(bake.problem ? `<span class="hint err gs-actions-note">${esc(bake.problem)}</span>` : "", act("bsSave", "save.svg", "Save", true))}`, "", false)}
     ${worker ? mediaWorkerCard(worker, r) : ""}
     ${regionCard(region, cat)}
+    ${cisSite ? cisSiteCard(cisSite) : ""}
     ${au ? autoUpdateCard(au) : ""}`;
+  if (cisSite) wireCisSite(main, cisSite);
   const on = (id, ev, fn) => { const el = $id(id); if (el) el.addEventListener(ev, fn); };
   on("ibSave", "click", async () => {
     try {

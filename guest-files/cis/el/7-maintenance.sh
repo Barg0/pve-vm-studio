@@ -4,18 +4,21 @@
 #
 # Decisions
 # - shadow, shadow-, gshadow, gshadow-: EL wants mode 0000 root:root (its default; there is
-#   no shadow group). A missing backup file passes, as in deb.
+#   no shadow group). The backups (passwd-, group-, shadow-, gshadow-) are required: the EL
+#   benchmarks have no "missing is fine" note, not even for gshadow-. A missing one is copied
+#   from the live file.
 # - SUID/SGID review: owning package and integrity from rpm (rpm -qf / rpm -V) instead of dpkg.
 
 e7_shadow_check() {
     if [ ! -e "$1" ]; then
+        [ "${2:-}" = required ] && { ev "$1: missing"; return 1; }
         ev "$1: missing (ok)"
-        [ "${2:-}" = required ] && return 1
         return 0
     fi
     perm_ok "$1" 0000 root root
 }
 e7_shadow_fix() {
+    case $1 in *-) c7_bak_make "$1" || return 1 ;; esac
     [ -e "$1" ] || return 0
     chown root:root "$1" && chmod 0000 "$1"
 }
@@ -25,7 +28,7 @@ check_etc_shadow_640_root_shadow() { e7_shadow_check /etc/shadow required; }
 fix_etc_shadow_640_root_shadow()   { e7_shadow_fix /etc/shadow; }
 
 rule etc-shadow-bak-640-root-shadow "/etc/shadow- 000 root:root"
-check_etc_shadow_bak_640_root_shadow() { e7_shadow_check /etc/shadow-; }
+check_etc_shadow_bak_640_root_shadow() { e7_shadow_check /etc/shadow- required; }
 fix_etc_shadow_bak_640_root_shadow()   { e7_shadow_fix /etc/shadow-; }
 
 rule etc-gshadow-present-640-root-shadow "/etc/gshadow present, 000 root:root"
@@ -36,7 +39,7 @@ fix_etc_gshadow_present_640_root_shadow() {
 }
 
 rule etc-gshadow-bak-640-root-shadow "/etc/gshadow- 000 root:root"
-check_etc_gshadow_bak_640_root_shadow() { e7_shadow_check /etc/gshadow-; }
+check_etc_gshadow_bak_640_root_shadow() { e7_shadow_check /etc/gshadow- required; }
 fix_etc_gshadow_bak_640_root_shadow()   { e7_shadow_fix /etc/gshadow-; }
 
 # The package that ships PATH, "" when none.

@@ -104,6 +104,12 @@ const TEXT: &[(&str, &str)] = &[
     ("CIS-SEALING", "Sealing the gold"),
     ("CIS-SNAPD-PURGED", "snapd removed"),
     ("CIS-SNAPD-KEPT", "snapd kept"),
+    // Windows: pvs-cis.ps1 in audit mode.
+    ("CIS-START", "CIS benchmark"),
+    ("CIS-FIX-DONE", "CIS rules applied"),
+    ("CIS-FIX-FAILED", "CIS rule not applied"),
+    ("CIS-CHECK-DONE", "CIS rules checked"),
+    ("CIS-REPORT", "CIS report sent"),
     ("DIAG", "Diagnostics"),
     ("GROW-READY", "Ready for the bigger disk"),
     ("INITRD-REBUILT", "initramfs rebuilt"),
@@ -188,6 +194,9 @@ pub fn tag(line: &str) -> Tag {
     match key {
         // Exit codes: 0, or 3010 (done, restart pending).
         "VIRTIO" | "QGA" => if matches!(args, "0" | "3010") { Tag::Ok } else { Tag::Warn },
+        "CIS-FIX-DONE" => if args.ends_with(" 0 failed") { Tag::Ok } else { Tag::Warn },
+        "CIS-CHECK-DONE" => if args.contains(" 0 fail,") && args.ends_with(" 0 error") { Tag::Ok } else { Tag::Warn },
+        "CIS-FIX-FAILED" => Tag::Warn,
         "PE-START" | "PARTITIONED" | "APPLIED" | "DRIVERS" | "BCDBOOT" | "EDITION" | "PASS1-OK" | "AUDIT-START"
         | "GENERALIZED" | "ANSWERFILE" | "TIMEZONE" | "LOCALE" | "POLICY" | "KEY" | "PASS2-OK" | "FIRSTBOOT-OK"
         | "WORKER-START" | "ONLINE" | "WORKER-OK"
@@ -236,6 +245,10 @@ mod tests {
         assert_eq!(tag("PVS-VIRTIO 0"), Tag::Ok);
         assert_eq!(tag("PVS-VIRTIO 1603"), Tag::Warn);
         assert_eq!(tag("PVS-SYSPREP-START"), Tag::Debug);
+        assert_eq!(tag("PVS-CIS-FIX-DONE level 2 gold: 486 applied, 0 failed"), Tag::Ok);
+        assert_eq!(tag("PVS-CIS-FIX-DONE level 2 gold: 485 applied, 1 failed"), Tag::Warn);
+        assert_eq!(tag("PVS-CIS-CHECK-DONE level 2: 488 pass, 0 fail, 0 n/a, 0 review, 2 exception, 0 error"), Tag::Ok);
+        assert_eq!(tag("PVS-CIS-CHECK-DONE level 2: 487 pass, 1 fail, 0 n/a, 0 review, 2 exception, 0 error"), Tag::Warn);
         assert_eq!(tag("PVS-PASS1-START SRC=E:\\sources\\install.wim VIO=F: INDEX=2"), Tag::Debug);
         assert_eq!(tag("PVS-NO-OS-DISK"), Tag::Error);
         assert_eq!(tag("PVS-NO-KEY"), Tag::Info);

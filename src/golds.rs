@@ -104,6 +104,14 @@ fn manifest_of(g: &GoldRow) -> serde_json::Value {
     serde_json::from_str(&g.manifest).unwrap_or_default()
 }
 
+/// A gold's CIS level - 0 for a gold baked without the benchmark. Part of what makes a gold
+/// line (with image, release, language): a CIS gold and a plain one of the same image are kept,
+/// followed and cleaned up apart, and a VM names the one it builds from.
+pub fn cis_level(g: &GoldRow) -> u8 {
+    let m = manifest_of(g);
+    m["cis"]["level"].as_u64().or_else(|| serde_json::from_str::<serde_json::Value>(&g.options).ok()?["cis"]["level"].as_u64()).unwrap_or(0) as u8
+}
+
 /// The language a gold speaks - the sidecar's `language` (Windows: the image's own UI
 /// language; Linux: LANG). Golds from before schema 2 kept it elsewhere.
 pub fn language(g: &GoldRow) -> String {
@@ -159,14 +167,14 @@ pub fn release(g: &GoldRow) -> Option<&'static str> {
 /// language and its release (25H2, 26H2) when the design names them. No release named means
 /// the newest release, not the newest build: an Insider flight (29683) outnumbers every
 /// release, so it is only taken when the image has nothing else.
-pub fn resolve<'a>(golds: &'a [GoldRow], image: &str, lang: &str, pin: &str, rel: &str) -> Option<&'a GoldRow> {
+pub fn resolve<'a>(golds: &'a [GoldRow], image: &str, lang: &str, pin: &str, rel: &str, cis: u8) -> Option<&'a GoldRow> {
     if !pin.is_empty() {
         return golds.iter().find(|g| g.status == "ready" && g.id == pin);
     }
     let newest = |insider: bool| {
         golds
             .iter()
-            .filter(|g| g.status == "ready" && g.image_id == image && (lang.is_empty() || language(g).eq_ignore_ascii_case(lang)))
+            .filter(|g| g.status == "ready" && g.image_id == image && cis_level(g) == cis && (lang.is_empty() || language(g).eq_ignore_ascii_case(lang)))
             .filter(|g| if rel.is_empty() { insider || release(g) != Some(INSIDER) } else { release(g).is_some_and(|r| r.eq_ignore_ascii_case(rel)) })
             .max_by(|a, b| build_version(a).cmp(&build_version(b)).then_with(|| a.created_at.cmp(&b.created_at)))
     };
@@ -991,15 +999,24 @@ mod tests {
         let golds = vec![g("a25", "10.0.26200.9550"), g("b26", "10.0.26300.9457"), g("c25", "26200.9601")];
         assert_eq!(release(&golds[0]), Some("25H2"));
         assert_eq!(release(&golds[1]), Some("26H2"));
-        assert_eq!(resolve(&golds, "w11-enterprise", "", "", "").map(|g| g.id.as_str()), Some("b26"));
-        assert_eq!(resolve(&golds, "w11-enterprise", "", "", "25H2").map(|g| g.id.as_str()), Some("c25"));
-        assert!(resolve(&golds, "w11-enterprise", "", "", "24H2").is_none());
+        assert_eq!(resolve(&golds, "w11-enterprise", "", "", "", 0).map(|g| g.id.as_str()), Some("b26"));
+        assert_eq!(resolve(&golds, "w11-enterprise", "", "", "25H2", 0).map(|g| g.id.as_str()), Some("c25"));
+        assert!(resolve(&golds, "w11-enterprise", "", "", "24H2", 0).is_none());
         // An Insider gold of the same image: the newest build, but not the newest release.
         let mut with_insider = golds.clone();
         with_insider.push(g("i29", "10.0.29683.1000"));
-        assert_eq!(resolve(&with_insider, "w11-enterprise", "", "", "").map(|g| g.id.as_str()), Some("b26"));
-        assert_eq!(resolve(&with_insider, "w11-enterprise", "", "", "Insider Preview").map(|g| g.id.as_str()), Some("i29"));
-        assert_eq!(resolve(&[g("i29", "29683.1000")], "w11-enterprise", "", "", "").map(|g| g.id.as_str()), Some("i29"));
+        assert_eq!(resolve(&with_insider, "w11-enterprise", "", "", "", 0).map(|g| g.id.as_str()), Some("b26"));
+        assert_eq!(resolve(&with_insider, "w11-enterprise", "", "", "Insider Preview", 0).map(|g| g.id.as_str()), Some("i29"));
+        assert_eq!(resolve(&[g("i29", "29683.1000")], "w11-enterprise", "", "", "", 0).map(|g| g.id.as_str()), Some("i29"));
+        // A CIS gold is a line of its own: the newest build, but not the plain line's gold.
+        let mut with_cis = golds.clone();
+        let mut l2 = g("l2", "10.0.26300.9500");
+        l2.manifest = r#"{"build":"10.0.26300.9500","cis":{"level":2}}"#.into();
+        with_cis.push(l2);
+        assert_eq!(cis_level(&with_cis[3]), 2);
+        assert_eq!(resolve(&with_cis, "w11-enterprise", "", "", "", 0).map(|g| g.id.as_str()), Some("b26"));
+        assert_eq!(resolve(&with_cis, "w11-enterprise", "", "", "", 2).map(|g| g.id.as_str()), Some("l2"));
+        assert!(resolve(&with_cis, "w11-enterprise", "", "", "", 1).is_none());
         let mut server = g("s", "10.0.26100.33438");
         server.image_id = "ws2025-datacenter-core".into();
         assert_eq!(release(&server), None);

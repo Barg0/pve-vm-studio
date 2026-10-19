@@ -3,8 +3,9 @@
 # Decisions
 # - shadow, shadow-, gshadow, gshadow-: back to deb's rule (0640 at most, root, group root or
 #   shadow) over el's 0000 root:root - SUSE ships shadow 0640 root:shadow and unix_chkpwd
-#   reads it through the shadow group. A missing backup file passes; gshadow is created with
-#   grpconv when the image has none.
+#   reads it through the shadow group. A missing shadow- fails and is copied from the live file
+#   (only gshadow- may be missing, the benchmark's note); gshadow is created with grpconv when
+#   the image has none.
 # - Group passwords (7.2.10): none may sit in /etc/group; the fix removes them (gpasswd -r) -
 #   a fresh image has none. HOME_MODE (7.2.8) goes through kv_set, which copies the vendor
 #   /usr/etc/login.defs to /etc first.
@@ -27,8 +28,8 @@ check_etc_shadow_640_root_shadow() { perm_ok /etc/shadow 0640 root "root|shadow"
 fix_etc_shadow_640_root_shadow()   { c7_shadow_fix /etc/shadow; }
 
 rule etc-shadow-bak-640-root-shadow "/etc/shadow- 640 root:shadow"
-check_etc_shadow_bak_640_root_shadow() { c7_perm_opt /etc/shadow- 0640 root "root|shadow"; }
-fix_etc_shadow_bak_640_root_shadow()   { c7_shadow_fix /etc/shadow-; }
+check_etc_shadow_bak_640_root_shadow() { c7_bak_check /etc/shadow- 0640 root "root|shadow"; }
+fix_etc_shadow_bak_640_root_shadow()   { c7_bak_make /etc/shadow- && c7_shadow_fix /etc/shadow-; }
 
 rule etc-gshadow-present-640-root-shadow "/etc/gshadow present, 640 root:shadow"
 check_etc_gshadow_present_640_root_shadow() { perm_ok /etc/gshadow 0640 root "root|shadow"; }
@@ -38,7 +39,7 @@ fix_etc_gshadow_present_640_root_shadow() {
 }
 
 rule etc-gshadow-bak-640-root-shadow "/etc/gshadow- 640 root:shadow"
-check_etc_gshadow_bak_640_root_shadow() { c7_perm_opt /etc/gshadow- 0640 root "root|shadow"; }
+check_etc_gshadow_bak_640_root_shadow() { c7_bak_check /etc/gshadow- 0640 root "root|shadow"; }
 fix_etc_gshadow_bak_640_root_shadow()   { c7_shadow_fix /etc/gshadow-; }
 
 # Groups whose /etc/group password field is neither x, ! nor empty.

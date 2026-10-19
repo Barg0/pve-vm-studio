@@ -1,8 +1,9 @@
 # CIS Ubuntu 26.04 - chapter 7: system maintenance (file permissions, local users/groups).
 #
 # Decisions
-# - Backup files (passwd-, group-, shadow-, gshadow-) and opasswd(.old): a missing file
-#   passes (nothing to protect); the evidence says "missing".
+# - Backup files passwd-, group-, shadow-: required - the benchmarks audit them like the file
+#   itself and have no "missing" note; a missing one is copied from the live file. gshadow-
+#   may be missing (their note), as may opasswd(.old) ("if they exist").
 # - shadow/gshadow files keep group "shadow" (Ubuntu default) when it is root or shadow;
 #   anything else is set to root:shadow.
 # - Filesystem scans (7.1.11-7.1.13) walk each local mount once with find -xdev. Skipped:
@@ -32,6 +33,21 @@
 C7_STATE=/var/lib/pvs-cis
 
 # ---- chapter helpers ----
+
+# A backup file (passwd-, group-, shadow-, gshadow-) is audited like the file itself; only
+# gshadow- may be missing (the benchmarks' note - EL has none, its rules require it).
+c7_bak_check() {
+    local f=$1
+    shift
+    if [ ! -e "$f" ]; then
+        if [ "$f" = /etc/gshadow- ]; then ev "$f: missing (a passing state)"; return 0; fi
+        ev "$f: missing"
+        return 1
+    fi
+    perm_ok "$f" "$@"
+}
+# A missing backup comes from the live file - what the shadow tools write on the next change.
+c7_bak_make() { [ -e "$1" ] || cp -p "${1%-}" "$1"; }
 
 # Perm check where a missing file passes.
 c7_perm_opt() {
@@ -114,24 +130,24 @@ check_etc_passwd_644_root_root() { perm_ok /etc/passwd 0644 root root; }
 fix_etc_passwd_644_root_root()   { perm_set /etc/passwd 0644 root root; }
 
 rule etc-passwd-bak-644-root-root "/etc/passwd- 644 root:root"
-check_etc_passwd_bak_644_root_root() { c7_perm_opt /etc/passwd- 0644 root root; }
-fix_etc_passwd_bak_644_root_root()   { perm_set /etc/passwd- 0644 root root; }
+check_etc_passwd_bak_644_root_root() { c7_bak_check /etc/passwd- 0644 root root; }
+fix_etc_passwd_bak_644_root_root()   { c7_bak_make /etc/passwd- && perm_set /etc/passwd- 0644 root root; }
 
 rule etc-group-644-root-root "/etc/group 644 root:root"
 check_etc_group_644_root_root() { perm_ok /etc/group 0644 root root; }
 fix_etc_group_644_root_root()   { perm_set /etc/group 0644 root root; }
 
 rule etc-group-bak-644-root-root "/etc/group- 644 root:root"
-check_etc_group_bak_644_root_root() { c7_perm_opt /etc/group- 0644 root root; }
-fix_etc_group_bak_644_root_root()   { perm_set /etc/group- 0644 root root; }
+check_etc_group_bak_644_root_root() { c7_bak_check /etc/group- 0644 root root; }
+fix_etc_group_bak_644_root_root()   { c7_bak_make /etc/group- && perm_set /etc/group- 0644 root root; }
 
 rule etc-shadow-640-root-shadow "/etc/shadow 640 root:shadow"
 check_etc_shadow_640_root_shadow() { perm_ok /etc/shadow 0640 root "root|shadow"; }
 fix_etc_shadow_640_root_shadow()   { c7_shadow_fix /etc/shadow; }
 
 rule etc-shadow-bak-640-root-shadow "/etc/shadow- 640 root:shadow"
-check_etc_shadow_bak_640_root_shadow() { c7_perm_opt /etc/shadow- 0640 root "root|shadow"; }
-fix_etc_shadow_bak_640_root_shadow()   { c7_shadow_fix /etc/shadow-; }
+check_etc_shadow_bak_640_root_shadow() { c7_bak_check /etc/shadow- 0640 root "root|shadow"; }
+fix_etc_shadow_bak_640_root_shadow()   { c7_bak_make /etc/shadow- && c7_shadow_fix /etc/shadow-; }
 
 rule etc-gshadow-present-640-root-shadow "/etc/gshadow present, 640 root:shadow"
 check_etc_gshadow_present_640_root_shadow() { perm_ok /etc/gshadow 0640 root "root|shadow"; }
@@ -141,7 +157,7 @@ fix_etc_gshadow_present_640_root_shadow() {
 }
 
 rule etc-gshadow-bak-640-root-shadow "/etc/gshadow- 640 root:shadow"
-check_etc_gshadow_bak_640_root_shadow() { c7_perm_opt /etc/gshadow- 0640 root "root|shadow"; }
+check_etc_gshadow_bak_640_root_shadow() { c7_bak_check /etc/gshadow- 0640 root "root|shadow"; }
 fix_etc_gshadow_bak_640_root_shadow()   { c7_shadow_fix /etc/gshadow-; }
 
 rule etc-shells-644-root-root "/etc/shells 644 root:root"

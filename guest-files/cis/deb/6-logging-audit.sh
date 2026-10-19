@@ -205,11 +205,21 @@ function hexnorm(v,   n, i, c, d) {
     else return v
     return sprintf("%x", n)
 }
-function norm(line,   t, n, i, j, act, arch, sc, f, x, nm, op, val, ch, k, c) {
+function letters(s,   ch, k, j, v) {
+    k = split(s, ch, ""); v = ""
+    for (j = 1; j <= k; j++) v = v " " ch[j]
+    v = srt(v, " "); gsub(/ /, "", v)
+    return v
+}
+function norm(line,   t, n, i, j, act, arch, sc, f, x, nm, op, val, ch, k, c, wp, perm) {
     n = split(line, t, /[ \t]+/)
-    act = ""; arch = ""; sc = ""; f = ""
+    act = ""; arch = ""; sc = ""; f = ""; wp = ""; perm = ""
     for (i = 1; i <= n; i++) {
         if (t[i] == "-a" || t[i] == "-A") { act = srt(t[++i], ","); continue }
+        # -w PATH -p PERM: the same watch as -a always,exit -F path|dir=PATH -F perm=PERM with no
+        # arch (every ABI) - auditctl -l prints an arch-less path/perm rule this way.
+        if (t[i] == "-w") { act = "always,exit"; wp = t[++i]; continue }
+        if (t[i] == "-p") { perm = letters(t[++i]); continue }
         if (t[i] == "-S") { sc = sc "," t[++i]; continue }
         if (t[i] == "-k") { i++; continue }
         if (t[i] == "-F" || t[i] == "-C") {
@@ -221,25 +231,37 @@ function norm(line,   t, n, i, j, act, arch, sc, f, x, nm, op, val, ch, k, c) {
                 f = f " C:" nm op val; continue
             }
             if (nm == "key") continue
-            if (nm == "arch") { arch = val; continue }
+            if (nm == "arch") {
+                # auditctl takes the machine names and the AUDIT_ARCH numbers as well
+                if (val == "x86_64" || tolower(val) == "c000003e") val = "b64"
+                else if (val ~ /^i[3-6]86$/ || val == "40000003") val = "b32"
+                arch = val; continue
+            }
             if (nm ~ /^(auid|uid|euid|suid|fsuid|loginuid|ouid)$/ && (val == "-1" || val == "4294967295" || val == "unset")) val = "unset"
             if (nm ~ /^a[0-3]$/) val = hexnorm(val)
-            if (nm == "perm") { k = split(val, ch, ""); val = ""; for (j = 1; j <= k; j++) val = val " " ch[j]; val = srt(val, " "); gsub(/ /, "", val) }
-            if ((nm == "path" || nm == "dir") && val != "/") sub(/\/+$/, "", val)
+            if (nm == "perm") { perm = letters(val); continue }
+            if (nm == "path" || nm == "dir") { wp = val; continue }
             f = f " " nm op val
         }
     }
+    if (wp != "/") sub(/\/+$/, "", wp)
     sc = srt(sc, ",")
     if (("," sc ",") ~ /,all,/) sc = "all"
-    # A watch (path=/dir= with perm=): auditctl -l prints it with the arch and the kernel
-    # whole list of syscalls for that permission; the benchmark writes it without -S. Both
-    # are the same rule - compared without arch and syscalls.
-    if (f ~ /(^| )(path|dir)=/ && f ~ /(^| )perm=/) { arch = ""; sc = "" }
-    return act "|" arch "|" sc "|" srt(f, " ")
+    # A watch (path or dir with perm): auditctl -l prints it with the whole syscall list of
+    # the kernel for that permission, the benchmarks with -S all or without -S - compared
+    # without syscalls, path and dir alike. The arch stays: a b64-only watch misses 32-bit calls.
+    if (wp != "" && perm != "") { sc = ""; f = f " watch=" wp }
+    else if (wp != "") f = f " path=" wp
+    return act "|" arch "|" sc "|" srt(f, " ") "|" perm
 }
+# Line l covers required rule r: same action and filters; the same arch, or none (every ABI);
+# the required syscalls (or all); at least the required permission letters (rwxa covers wa).
 function covers(r, l,   R, L, rs, ls, n, i, have) {
     split(r, R, "|"); split(l, L, "|")
-    if (R[1] != L[1] || R[2] != L[2] || R[4] != L[4]) return 0
+    if (R[1] != L[1] || R[4] != L[4]) return 0
+    if (L[2] != "" && L[2] != R[2]) return 0
+    n = length(R[5]); for (i = 1; i <= n; i++) if (!index(L[5], substr(R[5], i, 1))) return 0
+    if (R[5] == "" && L[5] != "") return 0
     if (R[3] == "") return (L[3] == "" || L[3] == "all")
     if (L[3] == "all") return 1
     n = split(L[3], ls, ","); for (i = 1; i <= n; i++) have[ls[i]] = 1
@@ -247,11 +269,46 @@ function covers(r, l,   R, L, rs, ls, n, i, have) {
     return 1
 }'
 
+# RULE the way this benchmark writes it (bench.conf): AUDIT_WATCH=w - a watch as
+# "-w PATH -p PERM" (Ubuntu 24.04, Debian 12); all - a watch without arch, every ABI (EL9);
+# b64 (default) - as given (Ubuntu 26.04, Debian 13, EL10, SLE 16). AUDIT_B32=no: the
+# benchmark has no 32-bit rules (EL10: "32-bit architecture is not supported"; SLE 16 b64 only)
+# - nothing is printed for a b32 rule. A watch is path=/dir= with perm= and no other filter.
+c6_form() {
+    local r=$1 w p perm k rest
+    if [[ $r == *"arch=b32"* ]] && [ "${AUDIT_B32:-yes}" = no ]; then return 0; fi
+    if [[ $r =~ -F\ (path|dir)=([^ ]+) ]]; then w=${BASH_REMATCH[1]} p=${BASH_REMATCH[2]}; fi
+    if [[ $r =~ -F\ perm=([a-z]+) ]]; then perm=${BASH_REMATCH[1]}; fi
+    if [[ $r =~ (-k|-F\ key=)\ ?([^ ]+) ]]; then k=${BASH_REMATCH[2]}; fi
+    # EL9 writes every watch without an arch, with other filters too (6.2.3.27-31: path, perm=x
+    # and auid): a b64 one gives up 32-bit and execveat calls, its b32 twin is the same rule.
+    if [ "${AUDIT_WATCH:-b64}" = all ] && [ -n "${p:-}" ] && [ -n "${perm:-}" ]; then
+        [[ $r == *"arch=b32"* ]] && return 0
+        r=$(sed -E 's/ -F arch=b(32|64)//; s/ -S all//' <<<"$r")
+        echo "${r/-a always,exit/-a always,exit -S all}"
+        return 0
+    fi
+    # AUDIT_PATHRULE=noarch (Ubuntu 24.04, Debian 12): a path/perm rule with auid filters
+    # (6.2.3.x chcon, setfacl, chacl, usermod) is written without an arch - every ABI.
+    if [ "${AUDIT_PATHRULE:-arch}" = noarch ] && [ -n "${p:-}" ] && [ -n "${perm:-}" ] && [[ $r == *auid* ]]; then
+        [[ $r == *"arch=b32"* ]] && return 0
+        sed -E 's/ -F arch=b(32|64)//' <<<"$r"
+        return 0
+    fi
+    rest=$(sed -E 's/-a always,exit//; s/-F (arch|path|dir|perm|key)=[^ ]+//g; s/-k [^ ]+//; s/-S all//; s/[[:space:]]//g' <<<"$r")
+    if [ -z "${p:-}" ] || [ -z "${perm:-}" ] || [ -n "$rest" ]; then echo "$r"; return 0; fi
+    case ${AUDIT_WATCH:-b64} in
+        w) echo "-w $p -p $perm${k:+ -k $k}" ;;
+        all) echo "-a always,exit -S all -F $w=$p -F perm=$perm${k:+ -k $k}" ;;
+        *) echo "$r" ;;
+    esac
+}
+
 # 0 when a line on stdin covers RULE (same content, key ignored).
 c6_rule_in() {
     awk -v req="$1" "$C6_AWK_NORM"'
         BEGIN { R = norm(req) }
-        /^[ \t]*-[aA][ \t]/ { if (covers(R, norm($0))) { found = 1; exit } }
+        /^[ \t]*-[aAw][ \t]/ { if (covers(R, norm($0))) { found = 1; exit } }
         END { exit !found }'
 }
 
@@ -265,6 +322,11 @@ c6_run_rules() { auditctl -l 2>/dev/null; }
 c6_target_ok() {
     local p t
     p=$(grep -oE -- '-F (path|dir)=[^ ]+' <<<"$1" | head -n 1)
+    # -w PATH: a directory watched as a directory, anything else through its parent
+    if [ -z "$p" ] && [[ $1 =~ ^[[:space:]]*-w\ ([^ ]+) ]]; then
+        p="path=${BASH_REMATCH[1]%/}"
+        [ -d "${p#path=}" ] && p="dir=${p#path=}"
+    fi
     [ -n "$p" ] || return 0
     case $p in
         *dir=*) t=${p#*dir=}; t=${t%/} ;;
@@ -282,6 +344,8 @@ c6_audit_check() {
     disk=$(c6_disk_rules)
     run=$(c6_run_rules)
     for r in "$@"; do
+        r=$(c6_form "$r")
+        [ -n "$r" ] || continue
         if ! c6_target_ok "$r"; then ev "target absent, not loadable: $r"; continue; fi
         d=missing s=missing
         c6_rule_in "$r" <<<"$disk" && d=ok
@@ -298,6 +362,8 @@ c6_audit_fix() {
     [ -d /etc/audit ] || { echo "auditd not installed"; return 1; }
     disk=$(c6_disk_rules)
     for r in "$@"; do
+        r=$(c6_form "$r")
+        [ -n "$r" ] || continue
         c6_target_ok "$r" || continue
         c6_rule_in "$r" <<<"$disk" || audit_add "$r"
     done
@@ -346,6 +412,9 @@ c6_grub_add() {
 }
 
 C6_AUDIT_TOOLS="/sbin/auditctl /sbin/aureport /sbin/ausearch /sbin/auditd /sbin/augenrules"
+# Ubuntu 24.04 and Debian 12 list autrace too (AUDIT_AUTRACE=yes in their bench.conf); Debian 13
+# no longer ships it and Ubuntu 26.04 does not list it.
+[ "${AUDIT_AUTRACE:-no}" = yes ] && C6_AUDIT_TOOLS="$C6_AUDIT_TOOLS /sbin/autrace"
 
 # Mounts the privileged-command scan walks (benchmark: real filesystems without
 # noexec/nosuid; /snap revisions skipped).
@@ -376,7 +445,7 @@ check_journald_service_active() {
 fix_journald_service_active() {
     systemctl unmask systemd-journald.service 2>/dev/null
     systemctl --now enable systemd-journald.service 2>/dev/null
-    systemctl is-active --quiet systemd-journald.service
+    svc_active systemd-journald.service
 }
 
 rule journal-remote-receiver-not-in-use "journal-remote receiver not in use"
@@ -648,14 +717,28 @@ fix_log_files_in_var_log_restricted() {
             echo 'UMASK=0027' >> /etc/sysstat/sysstat
         fi
     fi
-    c6_logfiles 1 >/dev/null
-    # apt's daily runs create /var/log/apt files with the default umask (0644) on clones.
-    local u
-    for u in apt-daily.service apt-daily-upgrade.service; do
-        mkdir -p "/etc/systemd/system/$u.d"
-        printf '[Service]\nUMask=0027\n' > "/etc/systemd/system/$u.d/50-pvs-cis-umask.conf"
-    done
+    # unattended-upgrades opens its logs with the run's umask - 0644, where the benchmark wants
+    # 0640 (/var/log/apt itself may be 0644). Pre-created 0640 and recreated 0640 on rotation:
+    # not a umask for the whole run, which every maintainer script it starts would inherit.
+    if pkg_installed unattended-upgrades; then
+        printf '%s\n' 'f /var/log/unattended-upgrades/unattended-upgrades.log 0640 root adm -' \
+            'f /var/log/unattended-upgrades/unattended-upgrades-dpkg.log 0640 root adm -' > /etc/tmpfiles.d/60-pvs-cis-uu.conf
+        systemd-tmpfiles --create /etc/tmpfiles.d/60-pvs-cis-uu.conf 2>/dev/null
+        f=/etc/logrotate.d/unattended-upgrades
+        [ -f "$f" ] && ! grep -Eq '^[[:space:]]*create\b' "$f" && sed -i -E '0,/^[^#]*\{/s//&\n    create 0640 root adm/' "$f"
+    fi
+    # update-alternatives opens its log 0644 when the file is missing (the first package that
+    # registers an alternative after the bake - realmd's dependencies at a domain join): it
+    # exists 0640 from the start (logrotate's create keeps that).
+    if command -v update-alternatives >/dev/null 2>&1; then
+        printf '%s\n' 'f /var/log/alternatives.log 0640 root root -' > /etc/tmpfiles.d/60-pvs-cis-alternatives.conf
+        systemd-tmpfiles --create /etc/tmpfiles.d/60-pvs-cis-alternatives.conf 2>/dev/null
+    fi
+    # The run-wide umask of earlier versions goes.
+    rm -f /etc/systemd/system/apt-daily.service.d/50-pvs-cis-umask.conf /etc/systemd/system/apt-daily-upgrade.service.d/50-pvs-cis-umask.conf
+    rmdir /etc/systemd/system/apt-daily.service.d /etc/systemd/system/apt-daily-upgrade.service.d 2>/dev/null
     systemctl daemon-reload 2>/dev/null
+    c6_logfiles 1 >/dev/null
     return 0
 }
 
@@ -763,9 +846,12 @@ rule audit-sudoers-changes "Audit sudoers changes"
 check_audit_sudoers_changes() { c6_audit_check "${C6_R_6_2_3_1[@]}"; }
 fix_audit_sudoers_changes() { c6_audit_fix "${C6_R_6_2_3_1[@]}"; }
 
+# AUDIT_EXECVEAT=yes (bench.conf: Debian 13, EL9): the benchmark names execveat with execve.
+C6_EXECVE=execve
+[ "${AUDIT_EXECVEAT:-no}" = yes ] && C6_EXECVE=execve,execveat
 C6_R_6_2_3_2=(
-    "-a always,exit -F arch=b32 -C euid!=uid -F auid!=unset -S execve -k user_emulation"
-    "-a always,exit -F arch=b64 -C euid!=uid -F auid!=unset -S execve -k user_emulation"
+    "-a always,exit -F arch=b32 -C euid!=uid -F auid!=unset -S $C6_EXECVE -k user_emulation"
+    "-a always,exit -F arch=b64 -C euid!=uid -F auid!=unset -S $C6_EXECVE -k user_emulation"
 )
 rule audit-actions-run-as-another-user "Audit actions run as another user"
 check_audit_actions_run_as_another_user() { c6_audit_check "${C6_R_6_2_3_2[@]}"; }
@@ -811,6 +897,18 @@ C6_R_6_2_3_4=(
 rule audit-date-and-time-changes "Audit date and time changes"
 check_audit_date_and_time_changes() { c6_audit_check "${C6_R_6_2_3_4[@]}"; }
 fix_audit_date_and_time_changes() { c6_audit_fix "${C6_R_6_2_3_4[@]}"; }
+
+# Ubuntu 24.04 / Debian 12 (6.2.3.4): the same for 32-bit calls as well.
+C6_R_TIME_BOTH=(
+    "-a always,exit -F arch=b64 -S adjtimex,settimeofday -k time-change"
+    "-a always,exit -F arch=b32 -S adjtimex,settimeofday -k time-change"
+    "-a always,exit -F arch=b64 -S clock_settime -F a0=0x0 -k time-change"
+    "-a always,exit -F arch=b32 -S clock_settime -F a0=0x0 -k time-change"
+    "-a always,exit -F arch=b64 -F path=/etc/localtime -F perm=wa -k time-change"
+)
+rule audit-date-and-time-changes-both-abis "Audit date and time changes (64- and 32-bit)"
+check_audit_date_and_time_changes_both_abis() { c6_audit_check "${C6_R_TIME_BOTH[@]}"; }
+fix_audit_date_and_time_changes_both_abis() { c6_audit_fix "${C6_R_TIME_BOTH[@]}"; }
 
 C6_R_6_2_3_5=(
     "-a always,exit -F arch=b32 -S sethostname,setdomainname -k system-locale"
@@ -1110,6 +1208,26 @@ rule audit-module-unload-syscall "Audit module unload syscall"
 check_audit_module_unload_syscall() { c6_audit_check "${C6_R_6_2_3_33[@]}"; }
 fix_audit_module_unload_syscall() { c6_audit_fix "${C6_R_6_2_3_33[@]}"; }
 
+# Ubuntu 24.04 / Debian 12 (6.2.3.28): one recommendation for loading, unloading and kmod -
+# every module syscall in both ABIs, and kmod for every ABI (no arch, as the benchmark writes it).
+C6_R_KMOD_ALL=(
+    "-a always,exit -F arch=b32 -S init_module,finit_module,delete_module,create_module,query_module -F auid>=$C6_UID -F auid!=unset -k kernel_modules"
+    "-a always,exit -F arch=b64 -S init_module,finit_module,delete_module,create_module,query_module -F auid>=$C6_UID -F auid!=unset -k kernel_modules"
+    "-a always,exit -F path=/usr/bin/kmod -F perm=x -F auid>=$C6_UID -F auid!=unset -k kernel_modules"
+)
+rule audit-kernel-module-changes "Audit kernel module loading, unloading and kmod"
+check_audit_kernel_module_changes() {
+    local bad=0 f k
+    c6_audit_check "${C6_R_KMOD_ALL[@]}" || bad=1
+    # The benchmark's symlink audit: the module tools are kmod.
+    k=$(readlink -f /bin/kmod)
+    for f in /usr/sbin/lsmod /usr/sbin/rmmod /usr/sbin/insmod /usr/sbin/modinfo /usr/sbin/modprobe /usr/sbin/depmod; do
+        if [ "$(readlink -f "$f")" = "$k" ]; then ev "$f -> kmod"; else ev "$f -> $(readlink -f "$f") (not kmod)"; bad=1; fi
+    done
+    return $bad
+}
+fix_audit_kernel_module_changes() { c6_audit_fix "${C6_R_KMOD_ALL[@]}"; }
+
 rule audit-rules-load-past-errors-c "Audit rules load past errors (-c)"
 check_audit_rules_load_past_errors_c() {
     local l
@@ -1132,9 +1250,10 @@ check_audit_configuration_immutable() {
     l=$(ls -1v /etc/audit/rules.d/*.rules 2>/dev/null | while IFS= read -r f; do grep -Ph -- '^\h*-e\h+\d' "$f"; done | tail -n 1 | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s/[[:space:]]+/ /g')
     ev "rules.d last -e: ${l:-none}"
     [ "$l" = "-e 2" ] || bad=1
+    # The running state is evidence only: the benchmarks judge the configuration on disk (a
+    # running "enabled 1" until the next boot is "not, on its own, a finding").
     e=$(auditctl -s 2>/dev/null | awk '$1 == "enabled" { print $2 }')
     ev "running: enabled ${e:-unknown}"
-    [ "$e" = 2 ] || bad=1
     return $bad
 }
 fix_audit_configuration_immutable() {
@@ -1157,7 +1276,8 @@ check_running_and_on_disk_audit_rules_agree() {
     out=$(augenrules --check 2>&1)
     ev "$out"
     grep -q 'No change' <<<"$out" && return 0
-    return 3
+    # Drift between rules.d and audit.rules: the benchmark's expected output is "No change".
+    return 1
 }
 fix_running_and_on_disk_audit_rules_agree() {
     command -v augenrules >/dev/null 2>&1 || { echo "augenrules not installed"; return 1; }
@@ -1209,7 +1329,8 @@ check_audit_log_files_group_adm_or_root() {
     local d g bad=0 files
     g=$(grep -Piws -- '^\h*log_group\h*=\h*\H+\b' "$C6_AUDITD")
     ev "${g:-log_group not set (root)}"
-    [ -n "$g" ] && ! grep -Piq 'adm' <<<"$g" && bad=1
+    # Every log_group line must name adm or root (the benchmark greps each line; auditd takes the last).
+    [ -n "$g" ] && grep -Pviq -- '^\h*log_group\h*=\h*(adm|root)\b' <<<"$g" && bad=1
     d=$(c6_audit_logdir)
     files=$(find -L "$d" -not -path "$d/lost+found" -type f \( ! -group root -a ! -group adm \) -printf '%p %g\n' 2>/dev/null)
     if [ -n "$files" ]; then ev "$files"; bad=1; else ev "$d: files group root/adm"; fi
@@ -1398,6 +1519,8 @@ C6_AIDE_ATTRS="p+i+n+u+g+s+b+acl+xattrs+sha512"
 c6_aide_tools() {
     local t
     for t in auditctl auditd ausearch aureport augenrules; do echo "$(readlink -f /sbin)/$t"; done
+    [ "${AUDIT_AUTRACE:-no}" = yes ] && echo "$(readlink -f /sbin)/autrace"
+    return 0
 }
 
 rule aide-protects-audit-tools "AIDE protects audit tools"

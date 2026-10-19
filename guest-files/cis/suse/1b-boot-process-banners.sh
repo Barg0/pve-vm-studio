@@ -221,7 +221,8 @@ fix_grub_superuser_password() {
     command -v grub2-mkconfig >/dev/null 2>&1 || { ev "grub2-mkconfig missing"; return 1; }
     # Without the switch, a superuser makes every boot wait at a password prompt.
     s1_grub_unrestricted_ok || { ev "no GRUB password set"; return 1; }
-    if ! { [ -s "$S1_GRUB_PWDIR/grub-password" ] && grep -q '^password_pbkdf2 ' "$S1_GRUB_USERS" 2>/dev/null; }; then
+    # A password once set stays (deb's fix says why: the studio holds the one of the bake).
+    if ! grep -q '^password_pbkdf2 ' "$S1_GRUB_USERS" 2>/dev/null; then
         pw=$(head -c 1024 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 24)
         [ "${#pw}" -eq 24 ] || { ev "password generation failed"; return 1; }
         hash=$(printf '%s\n%s\n' "$pw" "$pw" | grub2-mkpasswd-pbkdf2 --iteration-count=600000 --salt=64 2>/dev/null \
@@ -344,6 +345,25 @@ check_crypto_policy_no_weak_macs() {
 fix_crypto_policy_no_weak_macs() {
     e1_cp_module NO-WEAKMAC 'mac = -*-128 -HMAC-SHA1'
     e1_cp_add NO-WEAKMAC
+}
+
+# SLE 16 has this one automated (EL 9: manual): chacha20-poly1305 for SSH with an openssh that
+# still lacks the Terrapin fix is a fail, not a question; with the fix it does not apply.
+check_crypto_policy_ssh_chacha_reviewed() {
+    local s
+    s=$(e1_cp_ssh_ciphers)
+    if ! grep -qi 'CHACHA20-POLY1305' <<<"$s"; then
+        ev "SSH ciphers: no chacha20-poly1305"
+        return 0
+    fi
+    ev "SSH ciphers include chacha20-poly1305"
+    e1_terrapin_fixed && { ev "Terrapin fixed (strict key exchange): does not apply"; return 2; }
+    return 1
+}
+fix_crypto_policy_ssh_chacha_reviewed() {
+    e1_terrapin_fixed >/dev/null && return 0
+    e1_cp_module NO-SSHCHACHA 'cipher@SSH = -CHACHA20-POLY1305'
+    e1_cp_add NO-SSHCHACHA
 }
 
 # ---- 1.7 banners ----

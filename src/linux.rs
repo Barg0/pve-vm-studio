@@ -717,6 +717,10 @@ pub struct VmSeed {
     /// Cloned from a CIS gold.
     #[serde(default)]
     pub cis: bool,
+    /// The clone's static address, for sshd's ListenAddress where its benchmark asks for one
+    /// (CIS 5.1.24 of Ubuntu 24.04, Debian 12, SLE 16); empty on DHCP.
+    #[serde(default)]
+    pub ssh_listen: String,
 }
 
 /// One network adapter of a VM, as the seed describes it: matched by its MAC, a static
@@ -805,8 +809,21 @@ pub fn vm_user_data(img: &LinuxImage, s: &VmSeed) -> String {
             user = shq(&s.user)
         ));
     }
+    if s.cis && !s.ssh_listen.trim().is_empty() {
+        // Where the benchmark has the rule: sshd bound to the clone's own address (a gold has
+        // none - its exceptions.default says so). sshd -t first; with socket activation
+        // (Ubuntu 24.04's ssh.socket) the socket takes its addresses from sshd_config through
+        // the generator, at a daemon-reload. Bound to one address, sshd can no longer start
+        // before the network has it (NetworkManager is late): it waits for network-online and
+        // retries; the socket may bind it before it exists (FreeBind) - else SSH is gone after a
+        // reboot.
+        ud.cmd(&format!(
+            "if /usr/local/sbin/pvs-cis list 2>/dev/null | grep -q 'sshd-listen-address$'; then f=/etc/ssh/sshd_config.d/01-pvs-cis-listen.conf; (umask 077; printf 'ListenAddress %s\\n' {ip} > $f); if sshd -t 2>/dev/null; then for u in ssh.service sshd.service; do systemctl cat $u >/dev/null 2>&1 || continue; mkdir -p /etc/systemd/system/$u.d; printf '[Unit]\\nWants=network-online.target\\nAfter=network-online.target\\n[Service]\\nRestart=on-failure\\nRestartSec=5\\n' > /etc/systemd/system/$u.d/10-pvs-cis-listen.conf; done; if systemctl cat ssh.socket >/dev/null 2>&1; then mkdir -p /etc/systemd/system/ssh.socket.d; printf '[Socket]\\nFreeBind=yes\\n' > /etc/systemd/system/ssh.socket.d/10-pvs-cis-listen.conf; fi; systemctl daemon-reload; if systemctl is-active --quiet ssh.socket; then systemctl restart ssh.socket; else systemctl reload ssh sshd 2>/dev/null; fi; echo SSH-LISTEN-OK {ip}; else rm -f $f; echo SSH-LISTEN-FAILED; fi; fi",
+            ip = sq(s.ssh_listen.trim())
+        ));
+    }
     if let Some(d) = dj {
-        for c in crate::guest::linux_join_commands(d, img.family) {
+        for c in crate::guest::linux_join_commands(d, img.family, s.cis) {
             ud.cmd(&c);
         }
     }
@@ -909,6 +926,7 @@ mod tests {
                     location: "westeurope".into(),
                 }),
                 cis: false,
+                ssh_listen: "10.0.0.5".into(),
             };
             let ud = vm_user_data(img, &seed);
             assert!(ud.contains("realm join") && ud.contains("azcmagent connect"));
@@ -973,7 +991,7 @@ mod tests {
         // CIS: hardening, then a reboot - BAKE-OK comes from the second boot, not runcmd.
         let u = catalog::linux("ubuntu2604").unwrap();
         for level in [1u8, 2] {
-            let cis_opt = BakeOptions { cis: Some(crate::cis::CisOptions { level, exceptions: vec![] }), ..opt.clone() };
+            let cis_opt = BakeOptions { cis: Some(crate::cis::CisOptions { level, ..Default::default() }), ..opt.clone() };
             assert_eq!(cis_opt.cis_level(u.id), level);
             let ud = bake_user_data(u, &cis_opt);
             assert!(ud.contains("pvs-cis fix --level") && ud.contains("mode: reboot") && !ud.contains("echo BAKE-OK"));
@@ -982,7 +1000,7 @@ mod tests {
             std::fs::write(dir.join(format!("ubuntu2604-cis{level}.yaml")), ud).unwrap();
         }
         // No CIS benchmark for Fedora: the option is ignored. Debian 13 has Ubuntu 26.04's.
-        let d = BakeOptions { cis: Some(crate::cis::CisOptions { level: 2, exceptions: vec![] }), ..opt.clone() };
+        let d = BakeOptions { cis: Some(crate::cis::CisOptions { level: 2, ..Default::default() }), ..opt.clone() };
         assert_eq!(d.cis_level("fedora44"), 0);
         assert!(bake_user_data(catalog::linux("fedora44").unwrap(), &d).contains("echo BAKE-OK"));
         // Enterprise Linux: lvm2 by dnf.
@@ -994,9 +1012,12 @@ mod tests {
         let deb = bake_user_data(catalog::linux("debian13").unwrap(), &d);
         assert!(deb.contains("pvs-cis fix --level 2") && !deb.contains("snapd"));
         std::fs::write(dir.join("debian13-cis2.yaml"), deb).unwrap();
-        let vm = VmSeed { hostname: "h".into(), user: "admin".into(), password: "it's".into(), ssh_key: String::new(), packages: vec![], domain_join: None, arc: None, cis: true };
+        let vm = VmSeed { hostname: "h".into(), user: "admin".into(), password: "it's".into(), ssh_key: String::new(), packages: vec![], domain_join: None, arc: None, cis: true, ssh_listen: "10.0.0.5".into() };
         let ud = vm_user_data(u, &vm);
         assert!(ud.contains("ALL=(ALL) ALL'") && !ud.contains("chpasswd:") && ud.contains("| chpasswd") && !ud.contains("openssl passwd") && ud.contains("preserve_sources_list"));
+        // sshd bound to the clone's address where the benchmark has the rule; not without CIS.
+        assert!(ud.contains("ListenAddress %s") && ud.contains("'10.0.0.5'") && ud.contains("sshd-listen-address"));
+        assert!(!vm_user_data(u, &VmSeed { cis: false, ..vm.clone() }).contains("ListenAddress"));
         std::fs::write(dir.join("vm-ubuntu2604-cis.yaml"), ud).unwrap();
     }
 }

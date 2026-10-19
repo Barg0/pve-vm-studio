@@ -182,12 +182,12 @@ fn options(g: &GoldRow) -> Option<WinBakeOptions> {
 /// Golds of one kind replace each other: image, release (a 25H2 gold is its own branch
 /// beside 26H2), Insider channel (a Beta gold never replaces a Future Platforms one - all
 /// read "Insider Preview" as their release), language and disk size.
-type Kind = (String, &'static str, &'static str, String, u32);
+type Kind = (String, &'static str, &'static str, String, u32, u8);
 
 fn kind(g: &GoldRow) -> Kind {
     // From the ISO's name in the bake options: it outlives the ISO, which a run deletes.
     let channel = options(g).and_then(|o| uup::insider_of_iso(&o.iso)).map(|p| p.id).unwrap_or("");
-    (g.image_id.clone(), golds::release(g).unwrap_or(""), channel, golds::language(g).to_lowercase(), options(g).map(|o| o.disk_gb()).unwrap_or(0))
+    (g.image_id.clone(), golds::release(g).unwrap_or(""), channel, golds::language(g).to_lowercase(), options(g).map(|o| o.disk_gb()).unwrap_or(0), golds::cis_level(g))
 }
 
 fn newer_gold(a: &GoldRow, b: &GoldRow) -> bool {
@@ -1446,5 +1446,23 @@ mod tests {
         assert_ne!(beta, fp);
         assert_eq!(fp, canary, "a Canary gold is replaced by the Future Platforms one");
         assert_eq!(kind(&gold("local:iso/enus-w11-pro-26300.9711.iso")).2, "");
+    }
+
+    #[test]
+    fn cis_golds_are_a_line_of_their_own() {
+        let gold = |cis: serde_json::Value| GoldRow {
+            image_id: "w11-enterprise".into(),
+            os: "windows".into(),
+            options: serde_json::json!({ "iso": "local:iso/enus-w11-pro-26200.9711.iso", "index": 1, "region": { "locale": "de-DE", "keyboard": "de-DE", "timezone": "UTC" }, "cis": cis }).to_string(),
+            manifest: serde_json::json!({ "language": "en-US", "build": "10.0.26200.9711" }).to_string(),
+            ..Default::default()
+        };
+        let (plain, l2) = (kind(&gold(serde_json::Value::Null)), kind(&gold(serde_json::json!({ "level": 2 }))));
+        assert_ne!(plain, l2);
+        assert_eq!((plain.5, l2.5), (0, 2));
+        // A language is a line of its own too.
+        let mut de = gold(serde_json::Value::Null);
+        de.manifest = serde_json::json!({ "language": "de-DE", "build": "10.0.26200.9711" }).to_string();
+        assert_ne!(kind(&de), plain);
     }
 }

@@ -113,6 +113,28 @@ e1_repos() {
     done < <(e1_repo_files)
 }
 
+# A repo file value with dnf's variables replaced as dnf does: /etc/dnf/vars/<name> first, then
+# releasever (VERSION_ID), releasever_major and basearch (EPEL 10's gpgkey has
+# RPM-GPG-KEY-EPEL-$releasever_major).
+e1_dnf_expand() {
+    local v=$1 n f val
+    for f in /etc/dnf/vars/*; do
+        [ -f "$f" ] || continue
+        n=${f##*/}
+        val=$(head -n 1 "$f")
+        v=${v//\$\{$n\}/$val}
+        v=${v//\$$n/$val}
+    done
+    val=${VERSION_ID:-}
+    v=${v//\$\{releasever_major\}/${val%%.*}}
+    v=${v//\$releasever_major/${val%%.*}}
+    v=${v//\$\{releasever\}/$val}
+    v=${v//\$releasever/$val}
+    v=${v//\$\{basearch\}/$(uname -m)}
+    v=${v//\$basearch/$(uname -m)}
+    printf '%s\n' "$v"
+}
+
 # Enabled repositories only (same columns).
 e1_repos_enabled() { e1_repos | awk -F'\t' 'tolower($3) !~ /^(0|false|no|off)$/'; }
 
@@ -128,7 +150,9 @@ check_dnf_gpg_keys_reviewed() {
             bad=1
             continue
         fi
-        for k in $key; do
+        # Several keys: separated by blanks or commas.
+        for k in ${key//,/ }; do
+            k=$(e1_dnf_expand "$k")
             case $k in
                 file://*)
                     k=${k#file://}

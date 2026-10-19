@@ -292,6 +292,10 @@ tr.wi-virtual.selected td { color: var(--fg); }
   color: var(--fg-muted); border: 1px solid var(--border); }
 .gold-flag.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); background: var(--warn-soft); }
 button.gold-flag { font-family: inherit; cursor: pointer; background: none; }
+/* The gold a GRUB row sent you to: the Passwords blade's two soft pulses of the accent. */
+.gold-card.gold-flash, tr.gold-flash { animation: pw-flash 1.2s ease-out; }
+@media (prefers-reduced-motion: reduce) { .gold-card.gold-flash, tr.gold-flash { animation: none; outline: 2px solid var(--accent); } }
+button.pill.cis:hover { filter: brightness(1.15); }
 .gold-flag.run { color: var(--run); border-color: var(--run-border); background: var(--run-soft); }
 .gold-flag.bad { color: var(--danger-text); border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .gold-tags { display: flex; flex-wrap: wrap; gap: 4px; }

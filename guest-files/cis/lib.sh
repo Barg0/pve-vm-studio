@@ -75,7 +75,9 @@ effective_file() {
 
 svc_exists() { [ -n "$(systemctl list-unit-files "$1" --no-legend 2>/dev/null)" ]; }
 svc_enabled() { [ "$(systemctl is-enabled "$1" 2>/dev/null)" = enabled ]; }
-svc_active() { systemctl is-active --quiet "$1" 2>/dev/null; }
+# 0 or 1 only: systemctl is-active exits 3 for an inactive unit, and a check that ends on it
+# would hand the engine 3 - "review" - for what is a fail.
+svc_active() { systemctl is-active --quiet "$1" 2>/dev/null || return 1; }
 
 # Stopped and masked - nothing can start it again by dependency.
 svc_off() {
@@ -98,9 +100,11 @@ mod_unavailable() {
     # Every installed kernel, not only the running one: the next boot may be another (the
     # benchmark's audit walks /usr/lib/modules/** too). modprobe.d holds for all of them.
     if ! find /lib/modules/*/ -type f \( -name "$m.ko*" -o -name "$n.ko*" \) 2>/dev/null | grep -q .; then
+        # Built in: the benchmarks count that as passing ("part of the kernel ... also
+        # considered a passing state") - nothing can unload or deny it.
         if grep -Eq "/(${m}|${n})\.ko" "/lib/modules/$kver/modules.builtin" 2>/dev/null; then
             ev "$m: built into the kernel"
-            return 1
+            return 0
         fi
         ev "$m: no module in any installed kernel"
         return 0
@@ -129,12 +133,44 @@ mod_disable() {
 
 SYSCTL_FILE=/etc/sysctl.d/60-pvs-cis.conf
 
+# The sysctl.d files in the order systemd-sysctl applies them: by file name across /etc, /run,
+# /usr/local/lib and /usr/lib (the first directory wins a name), a dangling link skipped.
+# Not `systemd-analyze cat-config`: on Leap 16 it stops at the dangling 99-sysctl.conf link
+# (-> /etc/sysctl.conf, which the image does not have), while systemd-sysctl still applies the
+# files that sort after it.
+sysctl_files() {
+    local d f n
+    declare -A seen=()
+    for d in /etc/sysctl.d /run/sysctl.d /usr/local/lib/sysctl.d /usr/lib/sysctl.d /lib/sysctl.d; do
+        [ -d "$d" ] || continue
+        [ "$d" = /lib/sysctl.d ] && [ "$(readlink -f /lib)" = /usr/lib ] && continue
+        for f in "$d"/*.conf; do
+            n=${f##*/}
+            [ -n "${seen[$n]+x}" ] && continue
+            seen[$n]=1
+            [ -f "$f" ] && printf '%s\t%s\n' "$n" "$f"
+        done
+    done | LC_ALL=C sort -t $'\t' -k1,1 | cut -f2
+}
+
 # The value the configuration files leave for KEY (the last assignment, in the order
 # systemd-sysctl reads them), "" when none sets it.
 sysctl_conf() {
     local k=$1 re
-    re="^[[:space:]]*${k//./[./]}[[:space:]]*="
-    systemd-analyze cat-config sysctl.d 2>/dev/null | grep -E "$re" | tail -n 1 | cut -d= -f2- | xargs
+    re="^[[:space:]]*-?${k//./[./]}[[:space:]]*="
+    # shellcheck disable=SC2046
+    grep -hE "$re" $(sysctl_files) /dev/null 2>/dev/null | tail -n 1 | cut -d= -f2- | xargs
+}
+
+# Every active assignment of KEY as "<file>: <line>", in sysctl.d (systemd's order) and in
+# /etc/sysctl.conf.
+sysctl_conf_all() {
+    local k=$1 re f
+    re="^[[:space:]]*-?${k//./[./]}[[:space:]]*="
+    for f in $(sysctl_files) /etc/sysctl.conf; do
+        [ -f "$f" ] || continue
+        grep -E "$re" "$f" 2>/dev/null | sed "s|^|$f: |"
+    done | awk '!seen[$0]++'
 }
 
 # UFW's own sysctl file (IPT_SYSCTL in /etc/default/ufw), when it exists. ufw applies it on
@@ -150,7 +186,7 @@ sysctl_ufw_file() {
 # Running and configured both equal VAL (whitespace normalized - "1 0" vs "1	0"), and no
 # active line in UFW's sysctl file says otherwise.
 sysctl_is() {
-    local k=$1 want run conf f have
+    local k=$1 want run conf f have=""
     want=$(xargs <<<"$2")
     run=$(sysctl -n "$k" 2>/dev/null | xargs)
     conf=$(sysctl_conf "$k")
@@ -163,6 +199,18 @@ sysctl_is() {
             [ "$have" = "$want" ] || return 1
         fi
     fi
+    # /etc/sysctl.conf comes before systemd's own order in the benchmark's audit (Ubuntu links
+    # it in as 99-sysctl.conf, Debian 13 no longer ships the link): a value there is the one.
+    if [ -z "$have" ] && [ -f /etc/sysctl.conf ]; then
+        have=$(grep -E "^[[:space:]]*${k//./[./]}[[:space:]]*=" /etc/sysctl.conf 2>/dev/null | tail -n 1 | cut -d= -f2- | xargs)
+        if [ -n "$have" ]; then
+            ev "/etc/sysctl.conf: $k = $have"
+            [ "$have" = "$want" ] || return 1
+        fi
+    fi
+    # Overridden values elsewhere: evidence (the benchmark asks to correct them in /etc/sysctl.d).
+    have=$(sysctl_conf_all "$k" | awk -v w="$want" '{ v = $0; sub(/^[^=]*=[[:space:]]*/, "", v); gsub(/[[:space:]]+/, " ", v); sub(/ $/, "", v); if (v != w) print }')
+    [ -n "$have" ] && ev "overridden: $have"
     [ "$run" = "$want" ] && [ "$conf" = "$want" ]
 }
 

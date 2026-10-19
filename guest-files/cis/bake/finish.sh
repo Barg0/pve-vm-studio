@@ -39,10 +39,13 @@ fi
 # Once only: this unit and the layout one go; the gold's own first-boot units are switched on
 # (they do nothing in the bake - they start with the clone).
 systemctl disable pvs-cis-finish.service pvs-cis-layout.service >/dev/null 2>&1
-rm -f /etc/systemd/system/pvs-cis-finish.service /etc/systemd/system/pvs-cis-layout.service
 systemctl enable pvs-cis-aide-init.service >/dev/null 2>&1
 [ -e /etc/pvs-cis/layout.done ] && systemctl enable pvs-cis-grow.service >/dev/null 2>&1
 echo BAKE-CIS-SEALING >> "$R"
 bash /usr/local/lib/pvs-cis/generalize.sh
+# The unit files last, with no systemctl call after them: every daemon-reload while this unit
+# still runs reloads it, and a unit whose file is gone falls back to systemd's default start
+# timeout (90 s) - a check that took longer was killed on the spot, before the gold was sealed.
+rm -f /etc/systemd/system/pvs-cis-finish.service /etc/systemd/system/pvs-cis-layout.service
 sync
 echo BAKE-OK >> "$R"

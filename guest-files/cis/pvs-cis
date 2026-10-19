@@ -44,6 +44,17 @@ for fam in ${FAMILY:?bench.conf sets FAMILY}; do
         . "$f"
     done
 done
+# The site's own values (the studio's CIS settings, kept with the gold): "Key<TAB>value" in
+# $LIB/site. Banner: the login banner (/etc/issue, /etc/issue.net, /etc/motd, sshd);
+# Ntp: the authorized time servers, space-separated (empty: the distro's).
+if [ -f "$LIB/site" ]; then
+    while IFS=$'\t' read -r k v; do
+        case $k in
+            Banner) [ -n "$v" ] && C1B_BANNER=$v ;;
+            Ntp) [ -n "$v" ] && PVS_CIS_NTP=$v ;;
+        esac
+    done < "$LIB/site"
+fi
 RULES=()
 declare -A R_LEVEL R_KIND R_TITLE R_KEY
 while IFS=$'\t' read -r id lvl kind key; do
@@ -70,16 +81,44 @@ while [ $# -gt 0 ]; do
         *) echo "pvs-cis: unknown option $1" >&2; exit 2 ;;
     esac
 done
-declare -A EXC
+declare -A EXC EXC_FIX
 # The benchmark's own (exceptions.default beside bench.conf: what the studio deviates from on
 # purpose, with the reason - e.g. HMAC-SHA1 kept for Kerberos on Leap), then the bake's.
+# A third column "fix": the deviation is partial - the fix still does all it can (the check
+# then fails with rc 4 on anything beyond the reason).
 for ef in "$BENCH_DIR/exceptions.default" "$EXC_FILE"; do
     [ -n "$ef" ] && [ -f "$ef" ] || continue
-    while IFS=$'\t' read -r id why; do
+    while IFS=$'\t' read -r id why flag; do
         case $id in ''|'#'*) continue ;; esac
         EXC[$id]=${why:-no reason given}
+        [ "${flag:-}" = fix ] && EXC_FIX[$id]=1
     done < "$ef"
 done
+
+# Who reads a line decides its form. The bake pipes pvs-cis and reads the CIS-* markers
+# (src/golds.rs, bake/finish.sh), so off a terminal they stay exactly as they are. An admin at
+# a terminal gets the studio's log layout (deploy/install.sh log()): time, a five-wide tag,
+# the message, in the Kaido (Tokyo Night) colours.
+say() { # <fd> <tag> <marker line> <human line>
+    local fd=$1 tag=$2 shown color
+    if [ ! -t "$fd" ]; then
+        printf '%s\n' "$3" >&"$fd"
+        return
+    fi
+    shown=$tag
+    [ "$tag" = ok ] && shown="o.k."
+    if [ -n "${NO_COLOR:-}" ]; then
+        printf ' %s [ %-5s ] %s\n' "$(date '+%H:%M:%S')" "$shown" "$4" >&"$fd"
+        return
+    fi
+    case $tag in
+        start|end) color=$'\e[38;2;122;162;247m' ;; info) color=$'\e[38;2;230;222;120m' ;;
+        warn) color=$'\e[38;2;224;175;104m' ;; ok) color=$'\e[38;2;158;206;106m' ;;
+        error) color=$'\e[38;2;247;118;142m' ;; *) color=$'\e[38;2;139;147;173m' ;;
+    esac
+    printf ' \e[38;2;139;147;173m%s [ \e[0m%s%-5s\e[0m\e[38;2;139;147;173m ]\e[0m %s\n' \
+        "$(date '+%H:%M:%S')" "$color" "$shown" "$4" >&"$fd"
+}
 
 # The functions of a recommendation: check_<key>/fix_<key>, dashes as underscores.
 fname() { local k=${R_KEY[$1]}; echo "${k//-/_}"; }
@@ -109,8 +148,8 @@ do_fix() {
     local id f out rc ok=0 failed=0 none=0
     for id in $(selected); do
         f=fix_$(fname "$id")
-        if [ -n "${EXC[$id]+x}" ]; then
-            echo "CIS-FIX $id exception"
+        if [ -n "${EXC[$id]+x}" ] && [ -z "${EXC_FIX[$id]+x}" ]; then
+            say 1 info "CIS-FIX $id exception" "$id exception, left alone: ${EXC[$id]}"
             continue
         fi
         if ! declare -F "$f" >/dev/null; then
@@ -123,11 +162,12 @@ do_fix() {
             ok=$((ok + 1))
         else
             failed=$((failed + 1))
-            echo "CIS-FIX-FAILED $id rc=$rc ${R_TITLE[$id]}"
+            say 1 error "CIS-FIX-FAILED $id rc=$rc ${R_TITLE[$id]}" "$id fix failed (rc $rc): ${R_TITLE[$id]}"
             [ -n "$out" ] && printf '%s\n' "$out" | tail -n 5 | sed 's/^/  | /'
         fi
     done
-    echo "CIS-FIX-DONE level $LEVEL: $ok applied, $failed failed, $none without a fix"
+    say 1 "$([ $failed -eq 0 ] && echo ok || echo error)" "CIS-FIX-DONE level $LEVEL: $ok applied, $failed failed, $none without a fix" \
+        "fix level $LEVEL: $ok applied, $failed failed, $none without a fix"
 }
 
 do_check() {
@@ -147,14 +187,23 @@ do_check() {
             1) status=fail ;;
             2) status=na ;;
             3) status=review ;;
+            # A fail beyond what the rule's exception covers (the check knows what that is):
+            # never shown as the exception.
+            4) status=fail ;;
             *) status=error ;;
         esac
-        if [ -n "${EXC[$id]+x}" ] && [ "$status" != pass ] && [ "$status" != na ]; then status=exception; fi
+        # Only a plain fail becomes the declared exception - an error or a review stays what it is.
+        if [ -n "${EXC[$id]+x}" ] && [ "$rc" = 1 ]; then status=exception; fi
         case $status in
             pass) pass=$((pass + 1)) ;; fail) fail=$((fail + 1)) ;; na) na=$((na + 1)) ;;
             review) review=$((review + 1)) ;; exception) exc=$((exc + 1)) ;; *) err=$((err + 1)) ;;
         esac
-        [ "$status" = pass ] || echo "CIS-$status $id ${R_TITLE[$id]}" >&2
+        case $status in
+            pass) ;;
+            fail|error) say 2 error "CIS-$status $id ${R_TITLE[$id]}" "$id $status: ${R_TITLE[$id]}" ;;
+            exception) say 2 warn "CIS-$status $id ${R_TITLE[$id]}" "$id exception: ${R_TITLE[$id]} - ${EXC[$id]}" ;;
+            *) say 2 info "CIS-$status $id ${R_TITLE[$id]}" "$id $status: ${R_TITLE[$id]}" ;;
+        esac
         out=${out:0:2000}
         {
             [ $first -eq 1 ] || printf ',\n'
@@ -178,7 +227,9 @@ do_check() {
         } > "$JSON"
     fi
     rm -f "$tmp"
-    echo "CIS-CHECK-DONE level $LEVEL: $pass pass, $fail fail, $na n/a, $review review, $exc exception, $err error"
+    say 1 "$([ $((fail + err)) -eq 0 ] && echo ok || echo error)" \
+        "CIS-CHECK-DONE level $LEVEL: $pass pass, $fail fail, $na n/a, $review review, $exc exception, $err error" \
+        "check level $LEVEL: $pass pass, $fail fail, $na n/a, $review review, $exc exception, $err error"
 }
 
 case $cmd in

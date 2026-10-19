@@ -26,7 +26,8 @@
 # - 2.3.3.x chrony: checks only (n/a when chrony is absent or timesyncd is the one in use);
 #   no fix - chrony is removed by 2.3.1.1.
 # - 2.4.1.x cron: n/a when no cron(d).service. Missing cron.hourly/daily/weekly/monthly/d are
-#   created 0700; a missing cron.yearly passes (the benchmark says so) and is not created.
+#   created 0700; a missing cron.yearly passes (EL9 and the deb benchmarks say so) and is not created -
+#   EL10 (CRON_YEARLY_OPTIONAL=no) gets it created too.
 # - 2.4.1.9 / 2.4.2.1: empty /etc/cron.allow and /etc/at.allow are created -> only root may use
 #   crontab/at. Admin users run them through sudo. at: n/a unless the package is installed.
 
@@ -106,17 +107,32 @@ c2_off_check() {
     return $bad
 }
 
-# Stop UNITS and purge the installed PKGS; when the purge is refused, mask UNITS instead.
+# Removes PKGS through the family's package manager, refused when a protected package would
+# go with them (el and suse redefine it: dnf, zypper).
+c2_remove() { c2_apt purge "$@"; }
+
+# Stop UNITS and remove the installed PKGS. With UNITS (a server), a package another installed
+# package needs stays and the units are masked - the benchmark's "required as a dependency"
+# branch; removing it would take the package that needs it along. When the removal is refused,
+# the units are masked too. Clients (no UNITS) have no such branch: removed or a failure.
 c2_off_fix() {
-    local pkgs=$1 units=${2:-} inst
+    local pkgs=$1 units=${2:-} inst p keep="" go=""
     # shellcheck disable=SC2086
     inst=$(c2_installed $pkgs)
     [ -n "$inst" ] || return 0
+    for p in $inst; do
+        if [ -n "$units" ] && [ -n "$(c2_needed_by "$p")" ]; then keep="$keep $p"; else go="$go $p"; fi
+    done
     # shellcheck disable=SC2086
     [ -n "$units" ] && systemctl stop $units 2>/dev/null
-    # shellcheck disable=SC2086
-    c2_apt purge $inst && return 0
-    [ -n "$units" ] || return 1
+    if [ -n "$go" ]; then
+        # shellcheck disable=SC2086
+        if ! c2_remove $go; then
+            [ -n "$units" ] || return 1
+            keep="$keep $go"
+        fi
+    fi
+    [ -n "${keep// /}" ] || return 0
     # shellcheck disable=SC2086
     svc_off $units
 }
@@ -274,9 +290,23 @@ fix_mta_listens_on_loopback_only() {
 
 rule listening-services-reviewed "listening services reviewed"
 check_listening_services_reviewed() {
-    ss -Hplntu 2>/dev/null | awk '{ p = $7; sub(/^users:\(\("/, "", p); sub(/".*/, "", p); print $1, $5, p }' | sort -u
-    ev "decision: only sshd (22/tcp) expected on a non-loopback address; resolver and time daemons loopback-only"
+    local all other
+    all=$(ss -Hplntu 2>/dev/null | awk '{ p = $7; sub(/^users:\(\("/, "", p); sub(/".*/, "", p); print $1, $5, p }' | sort -u)
+    ev "$all"
+    # What listens beyond loopback, sshd aside - computed, not assumed.
+    other=$(awk '$2 !~ /^(127\.|\[::1\]|::1|\[::ffff:127\.)/ && $3 !~ /^sshd?$/' <<<"$all")
+    ev "decision: only sshd (22/tcp) on a non-loopback address; ${other:+also listening: $(paste -sd';' <<<"$other")}${other:-nothing else listens there}"
     return 3
+}
+# systemd-resolved answers LLMNR (5355) and, where enabled, mDNS (5353) on every interface: off,
+# so that the decision above holds. Nothing else of the image listens beyond loopback.
+fix_listening_services_reviewed() {
+    systemctl is-enabled --quiet systemd-resolved 2>/dev/null || return 0
+    mkdir -p /etc/systemd/resolved.conf.d
+    printf '%s\n' '# pvs-cis 2.1.x: no LLMNR or mDNS listeners on the network' '[Resolve]' 'LLMNR=no' 'MulticastDNS=no' > /etc/systemd/resolved.conf.d/60-pvs-cis.conf
+    chmod 0644 /etc/systemd/resolved.conf.d/60-pvs-cis.conf
+    systemctl try-restart systemd-resolved 2>/dev/null
+    return 0
 }
 
 # ---- 2.2 clients ----
@@ -316,7 +346,7 @@ fix_ftp_clients_removed() {
 # Enabled (any enabled* state) or active.
 c2_inuse() {
     case $(systemctl is-enabled "$1" 2>/dev/null | head -n 1) in enabled*) return 0 ;; esac
-    systemctl is-active --quiet "$1" 2>/dev/null
+    svc_active "$1"
 }
 
 # n/a for the timesyncd section when chrony is the daemon in use.
@@ -385,8 +415,7 @@ rule timesyncd-enabled-and-running "timesyncd enabled and running"
 check_timesyncd_enabled_and_running() {
     c2_tsd_na && return 2
     ev "$(c2_unit_line systemd-timesyncd.service)"
-    [ "$(systemctl is-enabled systemd-timesyncd.service 2>/dev/null)" = enabled ] \
-        && systemctl is-active --quiet systemd-timesyncd.service
+    svc_enabled systemd-timesyncd.service && svc_active systemd-timesyncd.service
 }
 fix_timesyncd_enabled_and_running() {
     c2_tsd_na && return 0
@@ -424,7 +453,7 @@ rule chrony-enabled-and-running "chrony enabled and running"
 check_chrony_enabled_and_running() {
     c2_chrony_na && return 2
     ev "$(c2_unit_line chrony.service)"
-    [ "$(systemctl is-enabled chrony.service 2>/dev/null)" = enabled ] && systemctl is-active --quiet chrony.service
+    svc_enabled chrony.service && svc_active chrony.service
 }
 
 # ---- 2.4 job schedulers ----
@@ -444,7 +473,7 @@ check_cron_enabled_and_active() {
     c2_need_cron || return
     u=$(c2_cron_unit)
     ev "$(c2_unit_line "$u")"
-    [ "$(systemctl is-enabled "$u" 2>/dev/null)" = enabled ] && systemctl is-active --quiet "$u"
+    svc_enabled "$u" && svc_active "$u"
 }
 fix_cron_enabled_and_active() {
     local u
@@ -490,8 +519,9 @@ check_etc_cron_monthly_root_only() { c2_crondir_check /etc/cron.monthly; }
 fix_etc_cron_monthly_root_only() { c2_crondir_fix /etc/cron.monthly; }
 
 rule etc-cron-yearly-root-only "/etc/cron.yearly root-only"
-check_etc_cron_yearly_root_only() { c2_crondir_check /etc/cron.yearly 1; }
-fix_etc_cron_yearly_root_only() { c2_crondir_fix /etc/cron.yearly 1; }
+# CRON_YEARLY_OPTIONAL=no (EL10: its text never says a missing directory passes): created 0700.
+check_etc_cron_yearly_root_only() { c2_crondir_check /etc/cron.yearly "$([ "${CRON_YEARLY_OPTIONAL:-yes}" = yes ] && echo 1)"; }
+fix_etc_cron_yearly_root_only() { c2_crondir_fix /etc/cron.yearly "$([ "${CRON_YEARLY_OPTIONAL:-yes}" = yes ] && echo 1)"; }
 
 rule etc-cron-d-root-only "/etc/cron.d root-only"
 check_etc_cron_d_root_only() { c2_crondir_check /etc/cron.d; }

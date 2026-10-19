@@ -726,6 +726,17 @@
   .pill.status.off, .pill.status.bad { --c: var(--danger); }
   .pill.status.warn { --c: var(--warn); }
   .pill.status.run, .pill.status.info { --c: var(--run, var(--accent)); }
+  /* CIS: the studio's own accent (orange on Proxmox Dark), amber when the gold failed a rule. */
+  .pill.status.cis { --c: var(--accent); }
+  .pill.status.cis.warn { --c: var(--warn); }
+  button.pill { font-family: inherit; border: 0; cursor: pointer; }
+  .opt-label > .pill.cis, .picker-label > .pill.cis { margin: 0 6px; height: 18px; font-size: 11px; }
+  /* The CIS pill and the "latest" tag stay together: a long name wraps before them, not between. */
+  .opt-tags { display: inline-flex; align-items: center; white-space: nowrap; }
+  .opt-tags > .pill.cis { margin: 0 6px; height: 18px; font-size: 11px; }
+  /* A GRUB row's gold id: a link to the gold, the row's name otherwise. */
+  .pw-gold-link { background: none; border: 0; padding: 0; font: inherit; text-align: left; cursor: pointer; color: var(--accent); }
+  .pw-gold-link:hover { text-decoration: underline; }
   .pill.status.idle { --c: var(--fg-muted); }
   .pill.status.none::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--c); }
   .pill.status.run::before { animation: pill-pulse 1.6s ease-in-out infinite; }
@@ -1458,6 +1469,10 @@
   .edit-field > input[readonly]:hover { border-color: var(--border); }
   /* Account boxes keep their border while locked - a borderless credential reads as empty space. */
   .edit-field > input.keep-border[readonly] { border-color: var(--border); }
+  /* A longer text (the CIS logon message, the Linux banner) locked the same way. */
+  .edit-field > textarea { flex: 1; min-width: 0; resize: vertical; font: inherit; }
+  .edit-field:has(> textarea) { align-items: flex-start; }
+  .edit-field > textarea[readonly] { background: var(--bg-subtle); color: var(--fg-muted); cursor: default; border-color: var(--border); }
   .disk-badge {
     /* Fixed width so OS and DATA end at the same x - otherwise the file-name inputs
        above and below each other stop at different points. */
@@ -1612,6 +1627,11 @@
     box-shadow: 0 0 0 1px var(--accent);
   }
   .picker-btn img { width: 18px; height: 18px; flex-shrink: 0; }
+  /* No gold picked yet (a new VM): a prompt, not a value, in an empty glyph slot - and the red
+     outline every field still to fill gets (input.is-invalid), open or closed. */
+  .picker-btn .picker-label.is-placeholder { font-style: italic; color: var(--fg-muted); }
+  .picker-btn .picker-empty-glyph { width: 18px; height: 18px; flex-shrink: 0; border: 1px dashed var(--border-strong); border-radius: 4px; }
+  .picker-btn.is-invalid, .picker.open .picker-btn.is-invalid { border-color: var(--danger); box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 55%, transparent); }
   .picker-label {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-size: 13px;

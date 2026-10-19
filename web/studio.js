@@ -2325,6 +2325,13 @@ const AUTO_START_ACTIONS = [
 function nestedVirtRequired(s) {
   return !!(s && findImage(s.imageId).requiresNestedVirt);
 }
+/* A W11 CIS gold turns VBS, HVCI and Credential Guard on (CIS 18.9.5): the studio deploys it
+   with nesting and a vTPM, which they need on PVE. */
+function cisVbsGold(s) {
+  const g = s && goldsLoaded() && goldFor(s), m = g ? goldManifest(g) : {};
+  return !!(m.cis && m.cis.benchmarkId === "w11sa");
+}
+const CIS_VBS_MIN_CORES = 4;
 const NESTED_VIRT_INFO = "The guest sees the processor's virtualization extensions (Intel VT-x / AMD-V): VBS, Credential Guard, Memory Integrity and Hotpatch need them, and so does a guest that runs Hyper-V itself. Needs host or a named CPU model - x86-64-vX has none to give.";
 /* A VM's hardware as it will be built: its own values under "Override the defaults", else
    VM settings → Hardware defaults. Nesting is on regardless where the image needs it. */
@@ -2333,7 +2340,7 @@ function hwOf(s) {
   return {
     own,
     cpu: own && s.cpuType ? s.cpuType : d.cpu,
-    nested: nestedVirtRequired(s) || (hotpatchCapable(s) && !!s.hotpatchReady) || (own ? (s.nestedVirtualization ?? d.nested) : d.nested),
+    nested: nestedVirtRequired(s) || (hotpatchCapable(s) && !!s.hotpatchReady) || cisVbsGold(s) || (own ? (s.nestedVirtualization ?? d.nested) : d.nested),
     queues: own ? (s.netQueues ?? d.queues !== "off") : d.queues !== "off"
   };
 }
@@ -3153,7 +3160,8 @@ const LEGACY_IMAGE_IDS = {
 
 function normalizeImageId(id) {
   const key = String(id || "").toLowerCase().trim();
-  if (!key) return "ws2025-datacenter-desktop";
+  // Empty stays empty: a VM without a gold yet (findImage still falls back for its defaults).
+  if (!key) return "";
   return LEGACY_IMAGE_IDS[key] || key;
 }
 
@@ -3309,6 +3317,7 @@ function applyVmTemplate(server, templateId) {
   applyImageProfile(server, preferGoldImage(templateImageId(t, state.templateRelease, state.templateEdition)));
   server.goldLanguage = "";
   server.goldRelease = "";
+  server.goldCis = 0;
   server.goldId = "";
   server.imageSource = "catalog";
   server.imageHint = "";
@@ -3427,7 +3436,8 @@ function createServer(name) {
   const s = {
     _id: uid("s"),
     name: (name || "").toLowerCase(),
-    imageId: preferGoldImage("ws2025-datacenter-desktop"),
+    // No gold until one is picked (2026-10-19): the card asks for it instead of choosing one.
+    imageId: "",
     imageSource: "catalog",
     imageHint: "",
     // Studio-only: which VM_TEMPLATES entry this VM started from. Never written to config.json.
@@ -3495,11 +3505,17 @@ function createVhdSet() {
 /* What a CIS gold's pam_pwquality would refuse (minlen 14, minclass 3, maxrepeat 3,
    maxsequence 3, usercheck), as one sentence - "" when it would take it. The dictionary check
    only the VM can do; the studio's generated passwords are random and pass it. */
-function cisPasswordProblem(pw, user) {
+/* windows: a Windows CIS gold's policy - 14 characters, complexity (3 of 4 kinds, not the
+   user name); the repeat and sequence limits are Linux pwquality's, not Windows'. */
+function cisPasswordProblem(pw, user, windows) {
   const p = String(pw || "");
   if (p.length < 14) return `${p.length} characters - the CIS policy wants 14 at least`;
   const kinds = [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter(r => r.test(p)).length;
   if (kinds < 3) return `only ${kinds} kind${kinds === 1 ? "" : "s"} of character - the CIS policy wants 3 of lower case, upper case, digits and others`;
+  if (windows) {
+    const w = String(user || "").trim().toLowerCase();
+    return w.length >= 3 && p.toLowerCase().includes(w) ? "it contains the user name" : "";
+  }
   if (/(.)\1\1\1/.test(p)) return "the same character 4 times in a row - the CIS policy allows 3";
   for (let i = 0; i + 3 < p.length; i++) {
     const d = [1, 2, 3].map(k => p.charCodeAt(i + k) - p.charCodeAt(i + k - 1));
@@ -6335,9 +6351,10 @@ function renderServerCard(s) {
   const clash = !built && typeof vmNameClash === "function" ? vmNameClash(s) : null;
   const img = findImage(s.imageId);
   const isCustomImage = s.imageSource === "custom";
+  const noGold = !isCustomImage && !s.imageId && !s.goldId;
   const displayImageLabel = isCustomImage
     ? (s.imageHint ? "Custom · " + s.imageHint : "Custom gold image")
-    : img.label;
+    : noGold ? "no gold" : img.label;
   const displayImageIcon = isCustomImage ? "shared-gallery.svg" : img.icon;
   const displayImageIconSrc = isCustomImage ? iconSrcBand("shared-gallery.svg", "deploy") : imageIconSrc(img);
   const dj = s.domainJoin || {};
@@ -6390,7 +6407,7 @@ function renderServerCard(s) {
         <span class="card-chevron">${chevron()}</span>
         <div class="card-icon"><img src="${iconSrcBand("vm.svg", serverGlyphBand(s))}"></div>
         <div>
-          <div class="card-title"><span data-name-title="${esc(s._id)}">${esc(hyperVName)}</span>${titleBadges(`${djBadge}${arcBadge}${licBadge}${clusterBadge}<span class="pill role ${pillClass}">${esc(img.kind)}</span>${built
+          <div class="card-title"><span data-name-title="${esc(s._id)}">${esc(hyperVName)}</span>${titleBadges(`${djBadge}${arcBadge}${licBadge}${clusterBadge}${noGold ? `<span class="pill status off" title="Pick a gold under Identity › Gold">No gold</span>` : `<span class="pill role ${pillClass}">${esc(img.kind)}</span>`}${built
             ? `<span class="pill status ok" title="VM ${esc(built.vmid)} on ${esc(built.node)}">Built</span>`
             : clash ? `<span class="pill status warn" title="${esc(clash.what)} ${esc(clash.vmid)} on ${esc(clash.node)} has this name">Name in use</span>` : ""}`)}</div>
           <div class="card-meta"><span data-name-guest="${esc(s._id)}">${hyperVName !== shortName ? "guest " + esc(shortName) + " · " : ""}</span>${esc(displayImageLabel)}${goldRelease(goldFor(s)) ? " " + esc(goldRelease(goldFor(s))) : ""} · ${esc(s.memoryGB)} GB / ${esc(s.cpuCount)} CPU · ${esc(s.switchName || "no switch")}${s.vlanId != null ? " · VLAN " + esc(s.vlanId) : ""}${disks.length ? " · " + disks.length + " data disk(s)" : ""}<span data-name-folder="${esc(s._id)}">${folderName !== hyperVName ? " · folder " + esc(folderName) + "\\" : ""}</span></div>
@@ -6852,14 +6869,23 @@ function goldRelease(g) {
 function goldReleases(imageId) {
   return RELEASE_ORDER.filter(r => readyGolds().some(g => g.image_id === imageId && goldRelease(g) === r));
 }
-function goldsOfImage(imageId, lang, release) {
+/* A gold's CIS level, 0 for a plain one: part of its line, as the release and language are. */
+function goldCisLevel(g) { return Number(((goldManifest(g) || {}).cis || {}).level) || 0; }
+/* The CIS badge in front of a gold's name: the status pill in the studio's accent colour,
+   amber when the gold's own check failed a rule. */
+function cisPillHtml(level, opts = {}) {
+  return level ? `<${opts.tag || "span"} class="pill status cis${opts.warn ? " warn" : ""}"${opts.attrs || ""}>CIS L${esc(level)}</${opts.tag || "span"}>` : "";
+}
+/* cis undefined: any line (does the image have a gold at all); a number: that line only. */
+function goldsOfImage(imageId, lang, release, cis) {
   const l = String(lang || "").toLowerCase();
-  return readyGolds().filter(g => g.image_id === imageId && (!l || goldLang(g).toLowerCase() === l) && (!release || goldRelease(g) === release)).sort(compareGolds);
+  return readyGolds().filter(g => g.image_id === imageId && (!l || goldLang(g).toLowerCase() === l) && (!release || goldRelease(g) === release)
+    && (cis === undefined || goldCisLevel(g) === cis)).sort(compareGolds);
 }
 /* No release named is the newest release, not the newest build: an Insider flight outnumbers
    every release, so it is only taken when the image has nothing else (golds.rs resolve). */
-function goldOf(imageId, lang, release) {
-  const list = goldsOfImage(imageId, lang, release);
+function goldOf(imageId, lang, release, cis) {
+  const list = goldsOfImage(imageId, lang, release, cis);
   return (release ? list[0] : list.find(g => goldRelease(g) !== INSIDER_RELEASE) || list[0]) || null;
 }
 /* A pinned gold id wins (Build-Vms' -GoldId), then the language and the release, then the
@@ -6867,7 +6893,7 @@ function goldOf(imageId, lang, release) {
 function goldFor(s) {
   if (!s) return null;
   if (s.goldId) return readyGolds().find(g => g.id === s.goldId) || null;
-  return goldOf(s.imageId, s.goldLanguage, s.goldRelease || "");
+  return goldOf(s.imageId, s.goldLanguage, s.goldRelease || "", Number(s.goldCis) || 0);
 }
 function goldLanguages(imageId) {
   return [...new Set(readyGolds().filter(g => g.image_id === imageId).map(goldLang))].sort();
@@ -6906,19 +6932,21 @@ function goldMetaLine(g) {
 function goldPickerField(s, img, isCustomImage, displayImageLabel, displayImageIconSrc) {
                 const pickerOpen = state.imagePickerOpen === s._id;
                 const current = goldFor(s);
+                // A new VM has none yet: a prompt, outlined red like any field still to fill.
+                const noGold = !isCustomImage && !s.imageId && !s.goldId;
                 const groups = goldPickerGroups();
                 const isSel = e => !isCustomImage && (e.pin ? s.goldId === e.pin
-                  : !s.goldId && e.img.id === s.imageId && (s.goldRelease || "") === (e.release || "") && (!e.multi || goldLang(e.gold).toLowerCase() === String(s.goldLanguage || goldLang(current)).toLowerCase()));
+                  : !s.goldId && e.img.id === s.imageId && (s.goldRelease || "") === (e.release || "") && (Number(s.goldCis) || 0) === e.cis && (!e.multi || goldLang(e.gold).toLowerCase() === String(s.goldLanguage || goldLang(current)).toLowerCase()));
                 return `<div class="picker ${pickerOpen ? "open" : ""}">
-                <button type="button" class="picker-btn" data-image-picker-toggle="${esc(s._id)}" aria-expanded="${pickerOpen ? "true" : "false"}">
-                  <img src="${displayImageIconSrc}" alt="">
-                  <span class="picker-label">${esc(displayImageLabel)}${goldRelease(current) ? ` ${esc(goldRelease(current))}` : ""}${s.goldLanguage ? ` · ${esc(s.goldLanguage)}` : ""}</span>
+                <button type="button" class="picker-btn${noGold ? " is-invalid" : ""}" data-image-picker-toggle="${esc(s._id)}" aria-expanded="${pickerOpen ? "true" : "false"}"${noGold ? ' aria-invalid="true"' : ""}>
+                  ${noGold ? `<span class="picker-empty-glyph"></span><span class="picker-label is-placeholder">Select a gold</span>` : `<img src="${displayImageIconSrc}" alt="">
+                  <span class="picker-label">${esc(displayImageLabel)}${goldRelease(current) ? ` ${esc(goldRelease(current))}` : ""}${current ? cisPillHtml(goldCisLevel(current)) : ""}${s.goldLanguage ? ` · ${esc(s.goldLanguage)}` : ""}</span>
                   ${s.goldId ? `<span class="pill status warn" title="Pinned to gold ${esc(s.goldId)} - rebakes are not picked up">Pinned</span>` : ""}
-                  ${goldsLoaded() && !current ? `<span class="pill status off">No gold</span>` : ""}
+                  ${goldsLoaded() && !current ? `<span class="pill status off">No gold</span>` : ""}`}
                   <span class="picker-chevron">${chevron()}</span>
                 </button>
                 ${pickerOpen ? `<div class="picker-list" role="listbox">
-                  ${goldsLoaded() && !current ? `
+                  ${goldsLoaded() && !current && !noGold ? `
                     <div class="opt-group" role="presentation">Current - no gold</div>
                     <button type="button" role="option" aria-selected="true" class="selected" data-image-picker-toggle="${esc(s._id)}">
                       <img src="${displayImageIconSrc}" alt="">
@@ -6933,17 +6961,17 @@ function goldPickerField(s, img, isCustomImage, displayImageLabel, displayImageI
                     ${rel.groups.map(g => `
                       ${g.label ? `<div class="opt-sub" role="presentation">${esc(g.label)}</div>` : ""}
                       ${g.entries.map(e => `
-                    <button type="button" role="option" aria-selected="${isSel(e) ? "true" : "false"}" class="${isSel(e) ? "selected" : ""} ${g.label ? "indented" : ""}${e.pin ? " opt-pin" : ""}" data-image-pick="${esc(s._id)}" data-image-id="${esc(e.img.id)}" data-gold-lang="${e.multi && !e.pin ? esc(e.lang) : ""}" data-gold-release="${esc(e.release || "")}" data-gold-pin="${esc(e.pin)}">
+                    <button type="button" role="option" aria-selected="${isSel(e) ? "true" : "false"}" class="${isSel(e) ? "selected" : ""} ${g.label ? "indented" : ""}${e.pin ? " opt-pin" : ""}" data-image-pick="${esc(s._id)}" data-image-id="${esc(e.img.id)}" data-gold-lang="${e.multi && !e.pin ? esc(e.lang) : ""}" data-gold-release="${esc(e.release || "")}" data-gold-cis="${e.pin ? "" : esc(e.cis || "")}" data-gold-pin="${esc(e.pin)}">
                       ${e.pin ? `<span class="opt-pin-id mono">${esc(goldShortId(e.gold))}</span>` : `<img src="${imageIconSrc(e.img)}" alt="">`}
                       <span class="opt-body">
-                        <span class="opt-label">${e.pin ? esc(goldManifest(e.gold).label || "pin this gold") : esc(e.img.label) + (goldRelease(e.gold) ? " " + esc(goldRelease(e.gold)) : "") + `<span class="opt-tag">latest${e.multi ? " " + esc(e.lang || "image default") : ""}</span>`}</span>
+                        <span class="opt-label">${e.pin ? esc(goldManifest(e.gold).label || "pin this gold") : esc(e.img.label) + (goldRelease(e.gold) ? " " + esc(goldRelease(e.gold)) : "")}<span class="opt-tags">${cisPillHtml(goldCisLevel(e.gold))}${e.pin ? "" : `<span class="opt-tag">latest${e.multi ? " " + esc(e.lang || "image default") : ""}</span>`}</span></span>
                         <span class="opt-meta">${esc(goldMetaLine(e.gold))}${e.pin ? "" : " · " + esc(goldShortId(e.gold))}</span>
                       </span>
                     </button>`).join("")}`).join("")}`).join("")}
                   <button type="button" class="opt-footer" data-goto="golds"><img src="${iconSrc("gold-image.svg")}" alt=""> Bake another gold…</button>
                 </div>` : ""}
               </div>
-              <span class="hint">${current ? `${esc(current.name)} · ${esc(goldMetaLine(current))}${s.goldId ? " · pinned" : s.goldRelease ? ` · follows ${esc(s.goldRelease)} rebakes` : " · follows rebakes"}` : goldsLoaded() ? (s.goldId ? `Pinned gold ${esc(s.goldId)} is gone - pick another` : "Bake a gold for this image under Golds") : esc(img.id)}</span>`;
+              <span class="hint">${noGold ? "The VM builds from the gold you pick here." : current ? `${esc(current.name)} · ${esc(goldMetaLine(current))}${s.goldId ? " · pinned" : s.goldRelease ? ` · follows ${esc(s.goldRelease)} rebakes` : " · follows rebakes"}` : goldsLoaded() ? (s.goldId ? `Pinned gold ${esc(s.goldId)} is gone - pick another` : "Bake a gold for this image under Golds") : esc(img.id)}</span>`;
 }
 
 function goldPickerGroups() {
@@ -6954,7 +6982,9 @@ function goldPickerGroups() {
     const langs = goldLanguages(img.id);
     const all = goldsOfImage(img.id, "", release);
     const stay = release && release !== goldReleases(img.id)[0] ? release : "";
-    const follow = langs.map(lang => ({ img, lang, multi: langs.length > 1, release: stay, gold: goldOf(img.id, langs.length > 1 ? lang : "", release), pin: "" }))
+    // A row per language and CIS level (plain first): each is a line of golds of its own.
+    const levels = [...new Set(all.map(goldCisLevel))].sort();
+    const follow = levels.flatMap(cis => langs.map(lang => ({ img, lang, multi: langs.length > 1, release: stay, cis, gold: goldOf(img.id, langs.length > 1 ? lang : "", release, cis), pin: "" })))
       .filter(e => e.gold);
     const pins = all.length > 1 ? all.map(gold => ({ img, lang: goldLang(gold), multi: langs.length > 1, gold, pin: gold.id })) : [];
     return follow.concat(pins);
@@ -8003,12 +8033,19 @@ function validate() {
     } else if (String(s.localUserPassword).length < 8) {
       warn(`${label} has a password shorter than 8 characters — Windows complexity policy may reject it.`, `Virtual machines › ${label}`);
     }
-    // A CIS gold sets the password through PAM: its policy would refuse a weak one and leave
-    // the account without a password - so it is an error here, before the deploy.
+    // A CIS gold sets the password through PAM (Windows: under its password policy): the
+    // policy would refuse a weak one and leave the account without a password - so it is an
+    // error here, before the deploy.
     {
-      const g = goldsLoaded() && goldFor(s), m = g ? goldManifest(g) : {};
-      const why = m.cis && String(s.localUserPassword || "").trim() ? cisPasswordProblem(s.localUserPassword, s.localUserName) : "";
+      const g = goldsLoaded() && goldFor(s), m = g ? goldManifest(g) : {}, win = !!g && g.os === "windows";
+      const why = m.cis && String(s.localUserPassword || "").trim() ? cisPasswordProblem(s.localUserPassword, s.localUserName, win) : "";
       if (why) err(`${label}'s password does not meet its CIS gold's password policy: ${why}.`, `Virtual machines › ${label}`, `s:${s._id}:localUserPassword`);
+      // Each VM from a Windows CIS gold renames the built-in Administrator (CIS 2.3.1.3).
+      if (m.cis && win && (isBuiltInAdminOnly(s) || String(s.localUserName || "").trim().toLowerCase() === "administrator"))
+        err(`${label} signs in as the built-in Administrator, which its CIS gold renames - give it a local user of its own.`, `Virtual machines › ${label}`, `s:${s._id}:localUserName`);
+      // VBS under nesting leaves 2 vCPU too slow for OOBE (src/vms.rs CIS_VBS_MIN_CORES).
+      if (cisVbsGold(s) && Number(s.cpuCount) > 0 && Number(s.cpuCount) < CIS_VBS_MIN_CORES)
+        err(`${label} has ${Number(s.cpuCount)} vCPU - its W11 CIS gold runs VBS, HVCI and Credential Guard, and Windows' first sign-in needs ${CIS_VBS_MIN_CORES} at least or OOBE stops.`, `Virtual machines › ${label}`, `s:${s._id}:cpuCount`);
     }
 
     // Per-VM assignment integrity is meaningless while the all-VMs mode is on -
@@ -8070,7 +8107,9 @@ function validate() {
       }
     });
 
-    if (s.imageSource === "custom") {
+    if (s.imageSource !== "custom" && !s.imageId && !s.goldId) {
+      err(`${label} has no gold - pick one under Identity › Gold.`, `Virtual machines › ${label}`, `s:${s._id}:gold`);
+    } else if (s.imageSource === "custom") {
       err(`${label} uses a custom Hyper-V image — Proxmox VE builds from golds only. Pick a gold on its card.`, `Virtual machines › ${label}`);
     } else if (goldsLoaded() && !goldFor(s)) {
       err(s.goldId
@@ -8274,7 +8313,53 @@ function renderSshKeyRow(r) {
     </div>`;
 }
 
+/* The GRUB passwords of the Linux CIS golds (2026-10-19): one per gold, the VMs from it share
+   it. Admins only - the studio answers 403 to anyone else and the section stays away. Fetched
+   when the blade opens, at most once a minute. */
+const grubPw = { rows: null, at: 0, busy: false };
+function loadGrubPasswords() {
+  if (grubPw.busy || Date.now() - grubPw.at < 60000) return;
+  grubPw.busy = true;
+  api("GET", "/cis/grub")
+    .then(r => { grubPw.rows = Array.isArray(r) ? r : []; })
+    .catch(e => { grubPw.rows = e.status === 403 ? null : grubPw.rows; })
+    .finally(() => { grubPw.busy = false; grubPw.at = Date.now(); if (state.blade === "passwords") render(); });
+}
+
+function renderGrubRow(g) {
+  const id = "grub:" + g.gold, shown = !!passwordsVisible[id];
+  const owner = g.gold;
+  // The gold in words on hover - name, OS, build, language, when - so nobody has to look it up.
+  const gold = (cluster.golds || []).find(x => x.id === g.gold);
+  const m = gold ? goldManifest(gold) : {};
+  const img = gold ? findImage(gold.image_id) : null;
+  const about = [img && img.id === gold.image_id ? img.label : (m.displayName || m.name || g.image_id), gold ? goldBuildLabel(gold) : "",
+    gold ? goldLang(gold) : "", g.level ? "CIS Level " + g.level : "", m.label || "", "baked " + when(g.created_at), "template " + g.name + (gold && gold.vmid != null ? " (" + gold.vmid + ")" : "")]
+    .filter(Boolean).join(" · ");
+  return `
+    <div class="pw-row" data-pw-row="${esc(id)}">
+      <div class="pw-ico"><img src="${iconSrc("secret.svg")}" alt=""></div>
+      <div class="pw-identity">
+        <button type="button" class="pw-owner pw-gold-link mono" data-goto-gold="${esc(g.gold)}" title="${esc(about)} - open it under Golds">${esc(owner)}</button>
+        <div class="hint" title="${esc((g.vms || []).join(", "))}">${(g.vms || []).length ? "VMs: " + esc(g.vms.join(", ")) : "no VM from it yet"}</div>
+      </div>
+      <div class="pw-usercell">
+        <input class="pw-field pw-user" id="pwuser-${esc(id)}" type="text" value="${esc(g.user)}" readonly tabindex="-1" spellcheck="false" autocomplete="off"
+               aria-label="GRUB user of ${esc(g.name)}">
+        <button class="btn icon" type="button" data-user-copy="${esc(id)}" title="Copy" aria-label="Copy the GRUB user of ${esc(g.name)}">${copyIcon()}</button>
+      </div>
+      <input class="pw-field" id="pw-${esc(id)}" type="${shown ? "text" : "password"}" value="${esc(g.password)}"
+             readonly tabindex="-1" spellcheck="false" autocomplete="off" aria-label="GRUB password of ${esc(g.name)}">
+      <div class="pw-actions">
+        <button class="btn icon" type="button" data-pw-toggle="${esc(id)}" title="${shown ? "Hide" : "Reveal"}"
+          aria-label="${shown ? "Hide" : "Reveal"} the GRUB password of ${esc(g.name)}">${shown ? eyeOffIcon() : eyeIcon()}</button>
+        <button class="btn icon" type="button" data-pw-copy="${esc(id)}" title="Copy" aria-label="Copy the GRUB password of ${esc(g.name)}">${copyIcon()}</button>
+      </div>
+    </div>`;
+}
+
 function renderPasswords() {
+  loadGrubPasswords();
   const rows = credentialRows();
   const missing = rows.filter(r => !r.value).length;
   const anyHidden = rows.some(r => r.value && !passwordsVisible[r.id]);
@@ -8312,7 +8397,11 @@ function renderPasswords() {
       ${sshPending ? `<div class="warn-box">${warnIconSvg()}<span>${sshPending} private key(s) not downloaded yet. They are held in this tab and nowhere else — not in
       the design, not on the server — so after a reload only the public halves remain.</span></div>` : ""}
       <div class="card"><div class="pw-list">${sshRows.map(renderSshKeyRow).join("")}</div></div>` : ""}
-    ${sshRows.length ? gsCard("ov-ssh", "keys.svg", "Using the SSH keys", "Lock the key file down, then connect - Linux, macOS, Windows", renderSshKeyHowto(), "", false) : ""}`;
+    ${sshRows.length ? gsCard("ov-ssh", "keys.svg", "Using the SSH keys", "Lock the key file down, then connect - Linux, macOS, Windows", renderSshKeyHowto(), "", false) : ""}
+    ${grubPw.rows && grubPw.rows.length ? `
+      <div class="pw-section"><img src="${iconSrc("secret.svg")}" alt=""> GRUB passwords${infoTip("GRUB passwords",
+        "A CIS bake of a Linux gold protects its boot menu (the benchmark's bootloader password): editing an entry or reaching the GRUB shell asks for user root and this password. One per gold - every VM from the gold has the same. Admins only; not in the CSV export.")}</div>
+      <div class="card"><div class="pw-list">${grubPw.rows.map(renderGrubRow).join("")}</div></div>` : ""}`;
 }
 
 /* ---------------------------[ Blade: VM overview ]---------------------------
@@ -9138,6 +9227,15 @@ document.getElementById("main").addEventListener("click", e => {
     }
     return;
   }
+  /* A GRUB row's gold id: to that gold under Golds, flashed like a password row. */
+  const gotoGold = e.target.closest("[data-goto-gold]");
+  if (gotoGold) {
+    e.preventDefault();
+    goldsUi.flash = gotoGold.getAttribute("data-goto-gold");
+    state.blade = "golds";
+    render();
+    return;
+  }
   const gotoVm = e.target.closest("[data-goto-vm]");
   if (gotoVm) {
     e.preventDefault();
@@ -9241,6 +9339,8 @@ document.getElementById("main").addEventListener("click", e => {
       s.goldLanguage = imagePick.getAttribute("data-gold-lang") || "";
       /* A release row keeps the VM on that release (26H2 beside 25H2); newest lets go. */
       s.goldRelease = imagePick.getAttribute("data-gold-release") || "";
+      /* A CIS row keeps the VM on that level's golds; a plain row (0) on the plain ones. */
+      s.goldCis = Number(imagePick.getAttribute("data-gold-cis")) || 0;
       /* A pinned row pins that gold (Build-Vms' -GoldId); a newest row lets go of a pin. */
       s.goldId = imagePick.getAttribute("data-gold-pin") || "";
       state.imagePickerOpen = null;

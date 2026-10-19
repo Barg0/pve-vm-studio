@@ -14,7 +14,7 @@
 #   GRUB_CMDLINE_LINUX in /etc/default/grub and /etc/kernel/cmdline (when present) so new
 #   kernels and grub2-mkconfig keep them. Effective after the reboot.
 # - Packages audit + audit-libs; AIDE package aide, config /etc/aide.conf.
-# - Audit rules: deb's rule sets, plus what EL adds - execveat with execve, the b32 time
+# - Audit rules: deb's rule sets, plus what EL adds - execveat with execve on EL9 (AUDIT_EXECVEAT), the b32 time
 #   rules, /etc/sysconfig/network + NetworkManager/system-connections, SELinux policy dirs
 #   (dir= watches; path= accepted too), query_module (EL10).
 # - Audit log group root (log_group = root); EL has no use for adm.
@@ -163,31 +163,66 @@ fix_rsyslog_present_if_chosen() {
     pkg_installed rsyslog || pkg_install rsyslog
 }
 
+# The log-file creation modes rsyslog applies, "<file>: <form> <mode>": the legacy
+# $FileCreateMode, and fileCreateMode= of builtin:omfile (module) or an omfile action. Not
+# imjournal's fileCreateMode - that is its state file - and nothing in a comment.
+e6_rsyslog_fcm() {
+    local f
+    f=$(c6_rsyslog_files)
+    [ -n "$f" ] || return 0
+    # shellcheck disable=SC2086
+    awk '
+        FNR == 1 { st = ""; open_ = 0 }
+        {
+            l = $0; sub(/#.*/, "", l)
+            if (!open_ && match(l, /^[ \t]*\$[Ff][Ii][Ll][Ee][Cc][Rr][Ee][Aa][Tt][Ee][Mm][Oo][Dd][Ee][ \t]+0[0-7][0-7][0-7]/)) {
+                v = substr(l, RSTART, RLENGTH); sub(/.*[ \t]/, "", v)
+                print FILENAME ": $FileCreateMode " v; next
+            }
+            if (!open_ && match(l, /(module|action)[ \t]*\(/)) { open_ = 1; st = "" }
+            if (open_) {
+                st = st " " l
+                if (index(l, ")")) {
+                    open_ = 0; t = tolower(st)
+                    if ((t ~ /load[ \t]*=[ \t]*"builtin:omfile"/ || t ~ /type[ \t]*=[ \t]*"omfile"/) &&
+                        match(t, /filecreatemode[ \t]*=[ \t]*"?0[0-7][0-7][0-7]/)) {
+                        v = substr(t, RSTART, RLENGTH); sub(/.*[="]/, "", v)
+                        print FILENAME ": fileCreateMode " v
+                    }
+                }
+            }
+        }' $f 2>/dev/null
+}
+
 rule rsyslog-creates-files-0640 "rsyslog creates files 0640"
 check_rsyslog_creates_files_0640() {
     c6_rsyslog_used || { ev "rsyslog: not installed"; return 2; }
     local lines v bad=0
-    lines=$(c6_rsyslog_grep '^\h*(\$FileCreateMode\h+|.*\bfileCreateMode\h*=\h*"?)0[0-7]{3}')
-    if [ -z "$lines" ]; then ev "file creation mode: not set (default 0644)"; return 1; fi
+    lines=$(e6_rsyslog_fcm)
+    # RSYSLOG_FCM=legacy (EL10): the benchmark's audit knows only $FileCreateMode.
+    [ "${RSYSLOG_FCM:-any}" = legacy ] && lines=$(grep -F ': $FileCreateMode ' <<<"$lines")
+    if [ -z "$lines" ]; then ev "log file creation mode: not set (default 0644)"; return 1; fi
     ev "$lines"
     while read -r v; do
         (( (8#$v & 8#0137) == 0 )) || bad=1
-    done < <(grep -Pio '(\$FileCreateMode\h+|fileCreateMode\h*=\h*"?)\K0[0-7]{3}' <<<"$lines")
+    done < <(awk '{ print $NF }' <<<"$lines")
     return $bad
 }
 fix_rsyslog_creates_files_0640() {
     c6_rsyslog_used || return 0
     pkg_installed rsyslog || return 1
-    local f v
-    # Only the values that are too open (a stricter one stays).
-    for f in $(c6_rsyslog_files); do
-        while read -r v; do
-            [ -n "$v" ] || continue
-            (( (8#$v & 8#0137) == 0 )) && continue
-            sed -i -E "s/^([[:space:]]*\\\$FileCreateMode[[:space:]]+)${v}\\b/\\10640/I; s/(fileCreateMode[[:space:]]*=[[:space:]]*\"?)${v}\\b/\\10640/I" "$f"
-        done < <(grep -Pio '(\$FileCreateMode\h+|fileCreateMode\h*=\h*"?)\K0[0-7]{3}' "$f" 2>/dev/null | sort -u)
-    done
-    if [ -z "$(c6_rsyslog_grep '^\h*(\$FileCreateMode\h+|.*\bfileCreateMode\h*=\h*"?)0[0-7]{3}')" ]; then
+    local l f v
+    # Only the values that are too open (a stricter one stays); imjournal's state file mode
+    # is left alone.
+    while IFS= read -r l; do
+        [ -n "$l" ] || continue
+        f=${l%%: *}; v=${l##* }
+        (( (8#$v & 8#0137) == 0 )) && continue
+        sed -i -E "s/^([[:space:]]*\\\$FileCreateMode[[:space:]]+)${v}\\b/\\10640/I; /omfile/I s/(fileCreateMode[[:space:]]*=[[:space:]]*\"?)${v}\\b/\\10640/I" "$f"
+    done < <(e6_rsyslog_fcm)
+    l=$(e6_rsyslog_fcm)
+    [ "${RSYSLOG_FCM:-any}" = legacy ] && l=$(grep -F ': $FileCreateMode ' <<<"$l")
+    if [ -z "$l" ]; then
         mkdir -p /etc/rsyslog.d
         printf '# pvs-cis: new log files 0640\n$FileCreateMode 0640\n' > /etc/rsyslog.d/00-pvs-cis.conf
         chown root:root /etc/rsyslog.d/00-pvs-cis.conf
@@ -473,11 +508,6 @@ c6_auditd_is() {
 
 # ---- 6.2.3 / 6.3.3 audit rules (EL rule sets) ----
 
-C6_R_6_2_3_2=(
-    "-a always,exit -F arch=b32 -C euid!=uid -F auid!=unset -S execve,execveat -k user_emulation"
-    "-a always,exit -F arch=b64 -C euid!=uid -F auid!=unset -S execve,execveat -k user_emulation"
-)
-
 C6_R_6_2_3_4=(
     "-a always,exit -F arch=b64 -S adjtimex,settimeofday -k time-change"
     "-a always,exit -F arch=b32 -S adjtimex,settimeofday -k time-change"
@@ -512,20 +542,34 @@ e6_watch_check() {
     return $bad
 }
 
-E6_MAC_DIRS="/etc/selinux /usr/share/selinux /var/lib/selinux"
+# The SELinux policy directories the benchmark names (EL10's has no /var/lib/selinux:
+# AUDIT_MAC_DIRS in its bench.conf).
+E6_MAC_DIRS=${AUDIT_MAC_DIRS:-/etc/selinux /usr/share/selinux /var/lib/selinux}
 rule audit-apparmor-policy-changes "Audit SELinux policy changes"
+# The benchmarks (EL 9/10, SLE 16) write these with path=, not dir=. The rule compare treats the
+# two alike - so does the kernel: auditctl -l prints either as "-w <dir>" - so the path= form is
+# looked for literally in the rules files, where the benchmark's grep reads it.
 check_audit_apparmor_policy_changes() {
-    # shellcheck disable=SC2086
-    e6_watch_check MAC-policy $E6_MAC_DIRS
+    local t bad=0
+    for t in $E6_MAC_DIRS; do
+        c6_audit_check "-a always,exit -F arch=b64 -F path=$t -F perm=wa -k MAC-policy" || bad=1
+        if ! c6_disk_rules | grep -Eq -- "-F path=$t( |$)"; then
+            ev "$t: no path= rule in /etc/audit/rules.d - the benchmark's form"
+            bad=1
+        fi
+    done
+    return $bad
 }
 fix_audit_apparmor_policy_changes() {
-    local t r=()
+    local t r
+    [ -d /etc/audit ] || { echo "auditd not installed"; return 1; }
     for t in $E6_MAC_DIRS; do
-        # Already watched with path=: leave it.
-        c6_audit_check "-a always,exit -F arch=b64 -F path=$t -F perm=wa -k MAC-policy" >/dev/null 2>&1 && continue
-        r+=("-a always,exit -F arch=b64 -F dir=$t -F perm=wa -k MAC-policy")
+        # Added even next to a dir= rule (which the rule compare counts as covering it).
+        c6_disk_rules | grep -Eq -- "-F path=$t( |$)" && continue
+        r=$(c6_form "-a always,exit -F arch=b64 -F path=$t -F perm=wa -k MAC-policy")
+        [ -n "$r" ] && audit_add "$r"
     done
-    [ ${#r[@]} -eq 0 ] || c6_audit_fix "${r[@]}"
+    return 0
 }
 
 E6_R_QUERY_MODULE=("-a always,exit -F arch=b64 -S query_module -F auid>=$C6_UID -F auid!=unset -k kernel_modules")
@@ -565,9 +609,10 @@ fix_audit_log_files_group_adm_or_root() {
     return 0
 }
 
-# EL ships autrace with the other audit tools.
+# EL ships autrace with the other audit tools, and the EL benchmarks list it (SLE 16 does not:
+# AUDIT_AUTRACE=no in its bench.conf).
 C6_AUDIT_TOOLS="/sbin/auditctl /sbin/aureport /sbin/ausearch /sbin/auditd /sbin/augenrules"
-[ -e /sbin/autrace ] && C6_AUDIT_TOOLS="$C6_AUDIT_TOOLS /sbin/autrace"
+[ "${AUDIT_AUTRACE:-yes}" = yes ] && [ -e /sbin/autrace ] && C6_AUDIT_TOOLS="$C6_AUDIT_TOOLS /sbin/autrace"
 
 # ---- 6.3 / 6.1 AIDE ----
 
@@ -579,7 +624,7 @@ c6_aide_tools() {
     local t d
     d=$(readlink -f /sbin)
     for t in auditctl auditd ausearch aureport autrace augenrules; do
-        [ "$t" = autrace ] && [ ! -e "$d/$t" ] && continue
+        [ "$t" = autrace ] && { [ "${AUDIT_AUTRACE:-yes}" = yes ] && [ -e "$d/$t" ] || continue; }
         echo "$d/$t"
     done
 }
@@ -617,7 +662,7 @@ EOF
 # A periodic aide --check/--update: from cron, or from an enabled/active timer.
 check_daily_aide_check_scheduled() {
     local cron t en ac s found=""
-    cron=$(grep -rEis 'aide[[:space:]]+(--check|--update|-C|-u)\b' /var/spool/cron/ /etc/crontab /etc/cron.d /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly 2>/dev/null)
+    cron=$(grep -rPis '^\h*[^#\n]*\baide\h+(--check|--update|-C|-u)\b' /var/spool/cron/ /etc/crontab /etc/cron.d /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly 2>/dev/null)
     [ -n "$cron" ] && { ev "$cron"; found=1; }
     for t in $(systemctl list-unit-files --type=timer --no-legend 2>/dev/null | awk '{ print $1 }'); do
         en=$(systemctl is-enabled "$t" 2>/dev/null)
@@ -632,6 +677,16 @@ check_daily_aide_check_scheduled() {
     done
     [ -n "$found" ] || ev "no scheduled aide check (cron or timer)"
     c6_aide_db
+    # AIDE_SVC=yes (EL10, SLE 16): without a cron job, aidecheck.service and aidecheck.timer
+    # must both be enabled and the timer running - any aide timer is not enough.
+    if [ "${AIDE_SVC:-no}" = yes ] && [ -z "$cron" ]; then
+        local en_s en_t
+        en_s=$(systemctl is-enabled aidecheck.service 2>/dev/null)
+        en_t=$(systemctl is-enabled aidecheck.timer 2>/dev/null)
+        ev "aidecheck.service: ${en_s:-not found}, aidecheck.timer: ${en_t:-not found} ($(systemctl is-active aidecheck.timer 2>/dev/null))"
+        [ "$en_s" = enabled ] && [ "$en_t" = enabled ] && svc_active aidecheck.timer
+        return
+    fi
     [ -n "$found" ]
 }
 fix_daily_aide_check_scheduled() {
@@ -642,9 +697,15 @@ ConditionPathExists=$E6_AIDE_DB
 
 [Service]
 Type=oneshot
+# aide --check exits 1-7 when it finds added/removed/changed files - its report, not a
+# failure of the unit; 14 and up are errors and still fail it.
+SuccessExitStatus=1 2 3 4 5 6 7
 Nice=19
 IOSchedulingClass=idle
 ExecStart=/usr/sbin/aide --check
+
+[Install]
+WantedBy=multi-user.target
 EOF
     cat > /etc/systemd/system/aidecheck.timer <<'EOF'
 [Unit]
@@ -663,6 +724,8 @@ EOF
     systemctl daemon-reload
     systemctl unmask aidecheck.timer aidecheck.service 2>/dev/null
     systemctl --now enable aidecheck.timer 2>/dev/null
+    # EL10 / SLE 16 remediation: the service enabled too (WantedBy=multi-user.target).
+    [ "${AIDE_SVC:-no}" = yes ] && systemctl enable aidecheck.service 2>/dev/null
     svc_active aidecheck.timer
 }
 

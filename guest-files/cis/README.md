@@ -45,6 +45,13 @@ returns:
 | 1 | fail | |
 | 2 | na | does not apply here (the package is not installed, no GDM, ...) |
 | 3 | review | a manual recommendation: the evidence and the studio's decision, for a human |
+| 4 | fail | a fail beyond what the rule's declared exception covers - never shown as the exception |
+
+A declared exception (exceptions.default, or the bake's own) turns only rc 1 into "exception";
+an error or a review stays visible. Its fix is skipped - unless the line has a third column
+`fix`: the deviation is partial (SLE 16 6.3.3: aide cannot apply xattrs, the other attributes
+must still be set), the fix does all it can, and the check fails with rc 4 on anything beyond
+the reason.
 
 A missing check is reported as `error`.
 

@@ -62,11 +62,13 @@ pub fn router() -> Router<AppState> {
         .route("/cis/rules/{image}", get(cis_rules))
         .route("/golds/{id}/cis.html", get(gold_cis_html))
         .route("/golds/{id}/cis/grub", get(gold_cis_grub))
+        .route("/cis/grub", get(cis_grub_passwords))
         .route("/vms", get(list_vms).post(start_deploy))
         .route("/vms/{id}", axum::routing::delete(remove_vm))
         .route("/settings/server", get(get_server).put(put_server))
         .route("/settings/network", get(get_network).put(put_network))
         .route("/settings/timezone", get(get_timezone).put(put_timezone))
+        .route("/settings/cis", get(get_cis_site).put(put_cis_site))
         .route("/settings/cas", get(get_cas).post(post_cas))
         .route("/settings/cas/{fingerprint}", axum::routing::delete(delete_cas))
         .route("/settings/console", get(get_console).put(put_console))
@@ -804,7 +806,7 @@ async fn list_golds(State(app): State<AppState>, _user: User) -> ApiResult<impl 
         let state: serde_json::Value = serde_json::from_str(&full.state).unwrap_or_default();
         for s in state["servers"].as_array().into_iter().flatten() {
             let str_of = |k: &str| s[k].as_str().unwrap_or("");
-            if let Some(g) = golds::resolve(&rows, str_of("imageId"), str_of("goldLanguage"), str_of("goldId"), str_of("goldRelease")) {
+            if let Some(g) = golds::resolve(&rows, str_of("imageId"), str_of("goldLanguage"), str_of("goldId"), str_of("goldRelease"), s["goldCis"].as_u64().unwrap_or(0) as u8) {
                 picked.entry(g.id.clone()).or_default().push(format!("{}: {}", full.name, str_of("name")));
             }
         }
@@ -936,6 +938,9 @@ async fn start_bake(
             return Err(ApiError::bad_request(format!("CIS exception '{}': a recommendation number and a reason", e.id)));
         }
     }
+    if let Some(c) = &mut req.options.cis {
+        c.site = settings::load(&app.db, "cis_site").await?;
+    }
     let bake: BakeSettings = settings::load(&app.db, "bake").await?;
 
     let gold_id = golds::new_build_id(&app.db, &app.pve).await?;
@@ -995,6 +1000,9 @@ async fn gold_cis_report(State(app): State<AppState>, _user: User, Path(id): Pat
 
 /// A benchmark's rules as the studio runs them - the bake form's rules overlay.
 async fn cis_rules(_user: User, Path(image): Path<String>) -> ApiResult<Json<serde_json::Value>> {
+    if let Some(b) = cis::win_benchmark_for(&image) {
+        return Ok(Json(json!({ "benchmark": b.name, "version": b.version, "rules": cis::win_rules(b) })));
+    }
     let b = cis::benchmark_for(&image).ok_or_else(|| ApiError::not_found(format!("no CIS benchmark for {image}")))?;
     Ok(Json(json!({ "benchmark": b.name, "version": b.version, "rules": cis::rules(b) })))
 }
@@ -1015,6 +1023,24 @@ async fn gold_cis_grub(State(app): State<AppState>, user: User, Path(id): Path<S
     }
     let pw = tokio::fs::read_to_string(cis::grub_path(&app.config.data_dir, &id)).await.map_err(|_| ApiError::not_found("no GRUB password kept for this gold"))?;
     Ok(Json(json!({ "user": "root", "password": pw.trim() })))
+}
+
+/// Every GRUB password a CIS bake kept, for the Passwords blade - for admins only. One per
+/// gold; the VMs from it share it (the boot menu is the gold's).
+async fn cis_grub_passwords(State(app): State<AppState>, user: User) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    let mut out = Vec::new();
+    for g in golds::list(&app.db).await? {
+        let Ok(pw) = tokio::fs::read_to_string(cis::grub_path(&app.config.data_dir, &g.id)).await else { continue };
+        let m: serde_json::Value = serde_json::from_str(&g.manifest).unwrap_or_default();
+        let vms: Vec<(String,)> = sqlx::query_as("SELECT name FROM vms WHERE gold_id = ? AND status != 'removed' ORDER BY name").bind(&g.id).fetch_all(&app.db).await?;
+        out.push(json!({
+            "gold": g.id, "name": g.name, "image_id": g.image_id, "status": g.status, "created_at": g.created_at,
+            "level": m["cis"]["level"], "user": "root", "password": pw.trim(),
+            "vms": vms.into_iter().map(|(n,)| n).collect::<Vec<_>>(),
+        }));
+    }
+    Ok(Json(out))
 }
 
 async fn remove_gold(State(app): State<AppState>, user: User, Path(id): Path<String>) -> ApiResult<impl IntoResponse> {
@@ -1153,6 +1179,32 @@ async fn get_server(State(app): State<AppState>, _user: User) -> ApiResult<impl 
 }
 
 /// The studio's time zone - its container's, in PVE.
+/// Image settings → CIS settings: the values a benchmark leaves to the site (logon message,
+/// the built-in accounts' new names, Linux banner and time servers). New bakes take them.
+async fn get_cis_site(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
+    let s: cis::CisSite = settings::load(&app.db, "cis_site").await?;
+    Ok(Json(json!({ "site": s, "defaults": cis::CisSite::default() })))
+}
+
+async fn put_cis_site(State(app): State<AppState>, user: User, Json(s): Json<cis::CisSite>) -> ApiResult<impl IntoResponse> {
+    require_admin(&app, &user).await?;
+    if let Some(p) = s.problem() {
+        return Err(ApiError::bad_request(p));
+    }
+    let trimmed = cis::CisSite {
+        windows: cis::WinSite {
+            legal_caption: s.windows.legal_caption.trim().into(),
+            legal_text: s.windows.legal_text.trim().into(),
+            admin_name: s.windows.admin_name.trim().into(),
+            guest_name: s.windows.guest_name.trim().into(),
+        },
+        linux: cis::LinuxSite { banner: s.linux.banner.trim().into(), ntp: s.linux.ntp.split_whitespace().collect::<Vec<_>>().join(" ") },
+    };
+    settings::save(&app.db, "cis_site", &trimmed).await?;
+    tracing::info!("CIS settings changed by {}", user.session.user);
+    Ok(Json(trimmed))
+}
+
 async fn get_timezone(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
     Ok(Json(selfnet::read_timezone(&app.pve).await?))
 }
@@ -1756,6 +1808,28 @@ async fn delete_windows_iso(State(app): State<AppState>, user: User, axum::extra
     Ok(StatusCode::NO_CONTENT)
 }
 
+// The CIS benchmark the studio has for a Windows gold id, for the bake form's Hardening row,
+// with the baked-in policies each level contradicts (the form turns them off), the ones it
+// turns on (on and greyed out), and the rules a policy makes exceptions of.
+fn win_cis_json(image_id: &str, i: &wim::WimImage) -> serde_json::Value {
+    let (client, core) = (i.installation_type == "Client", i.installation_type == "Server Core");
+    cis::win_benchmark_for(image_id).map_or(serde_json::Value::Null, |b| {
+        let off = |level| windows::cis_conflicting_features(client, core, b, level).into_iter().map(|(f, rules)| json!({ "id": f, "rules": rules })).collect::<Vec<_>>();
+        let forced = |level| windows::cis_forced_features(b, level).into_iter().map(|(f, why)| json!({ "id": f, "why": why })).collect::<Vec<_>>();
+        let excepts = |level| {
+            windows::WIN_FEATURES
+                .iter()
+                .filter_map(|f| {
+                    let e = windows::cis_feature_exceptions(&[f.id.to_owned()], b, level);
+                    (!e.is_empty()).then(|| json!({ "id": f.id, "rules": e.iter().map(|x| x.id.clone()).collect::<Vec<_>>(), "reason": e[0].reason }))
+                })
+                .collect::<Vec<_>>()
+        };
+        json!({ "name": b.name, "version": b.version, "dir": b.dir,
+            "conflicts": { "1": off(1), "2": off(2) }, "forced": { "1": forced(1), "2": forced(2) }, "excepts": { "1": excepts(1), "2": excepts(2) } })
+    })
+}
+
 async fn windows_images(State(app): State<AppState>, _user: User, axum::extract::Query(q): axum::extract::Query<IsoQuery>) -> ApiResult<impl IntoResponse> {
     let path = iso_path(&app, &q.volid).ok_or_else(|| ApiError::bad_request("not an ISO volume"))?;
     if !path.exists() {
@@ -1776,11 +1850,12 @@ async fn windows_images(State(app): State<AppState>, _user: User, axum::extract:
                 "installation_type": i.installation_type, "language": i.language, "build": i.build, "version": i.version,
                 "size_gb": (i.total_bytes as f64 / (1u64 << 30) as f64 * 10.0).round() / 10.0,
                 "image_id": windows::image_id(i),
+                "cis": win_cis_json(&windows::image_id(i), i),
                 // The virtual editions this index can be baked as, with the gold id each gives.
                 // ...unless the ISO holds that edition as an image of its own: then that index
                 // is the honest way to it, and the upgrade would only bake the same gold twice.
                 "virtual": windows::VIRTUAL_EDITIONS.iter().filter(|v| windows::virtual_edition_fits(v.key, i) && !windows::virtual_on_media(v.key, &images))
-                    .map(|v| json!({ "key": v.key, "label": v.display, "image_id": windows::gold_image_id(i, v.key) })).collect::<Vec<_>>(),
+                    .map(|v| json!({ "key": v.key, "label": v.display, "image_id": windows::gold_image_id(i, v.key), "cis": win_cis_json(&windows::gold_image_id(i, v.key), i) })).collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -1836,6 +1911,43 @@ pub async fn prepare_windows_bake(app: &AppState, opt: &mut windows::WinBakeOpti
         }
     }
     let image_id = windows::gold_image_id(&img, &opt.edition_upgrade);
+    if let Some(c) = &mut opt.cis
+        && c.level > 0
+    {
+        if c.level > 2 {
+            return Err(ApiError::bad_request("CIS is Level 1 or Level 2"));
+        }
+        let Some(b) = cis::win_benchmark_for(&image_id) else {
+            return Err(ApiError::bad_request(format!("the studio has no CIS benchmark for {image_id}")));
+        };
+        // The level's own policies (Prefer IPv4 for the IPv6 rule it keeps as an exception),
+        // and the exceptions a chosen policy brings (Remote Desktop over W11 Level 2).
+        for (f, _) in windows::cis_forced_features(b, c.level) {
+            if !opt.features.iter().any(|x| x == f) {
+                opt.features.push(f.to_owned());
+            }
+        }
+        for e in windows::cis_feature_exceptions(&opt.features, b, c.level) {
+            if !c.exceptions.iter().any(|x| x.id == e.id) {
+                c.exceptions.push(e);
+            }
+        }
+        // The site's values as they are now - a rebake takes today's, not the old gold's.
+        c.site = settings::load(&app.db, "cis_site").await?;
+        // CIS wins over a baked-in policy that contradicts it at this level.
+        let clash: Vec<String> = windows::cis_conflicting_features(img.installation_type == "Client", img.installation_type == "Server Core", b, c.level)
+            .into_iter()
+            .filter(|(f, _)| opt.features.iter().any(|x| x == f))
+            .map(|(f, rules)| format!("{} ({})", windows::WIN_FEATURES.iter().find(|w| w.id == f).map_or(f, |w| w.label), rules.join("; ")))
+            .collect();
+        if !clash.is_empty() {
+            return Err(ApiError::bad_request(format!("CIS Level {} contradicts these baked-in policies - leave them out: {}", c.level, clash.join(", "))));
+        }
+        let id_ok = |id: &str| !id.is_empty() && id.len() <= 16 && id.chars().all(|ch| ch.is_ascii_digit() || ch == '.');
+        if let Some(e) = c.exceptions.iter().find(|e| !id_ok(&e.id) || e.reason.trim().is_empty() || e.reason.len() > 300) {
+            return Err(ApiError::bad_request(format!("CIS exception '{}': a recommendation number and a reason", e.id)));
+        }
+    }
     sqlx::query(
         "INSERT INTO golds (id, image_id, os, name, node, storage, status, options, created_at) \
          VALUES (?, ?, 'windows', ?, '', '', 'baking', ?, ?)",
@@ -2754,8 +2866,16 @@ async fn deploy_lab(State(app): State<AppState>, user: User, Path(id): Path<Stri
         let lang = s["goldLanguage"].as_str().unwrap_or("");
         let pin = s["goldId"].as_str().unwrap_or("");
         let rel = s["goldRelease"].as_str().unwrap_or("");
-        let Some(gold) = golds::resolve(&golds, image, lang, pin, rel) else {
-            let what = if !pin.is_empty() { format!("pinned gold {pin}") } else { [image, rel, lang].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" ") };
+        // The VM's gold line: a CIS level is part of it (0 = the plain golds).
+        let cis = s["goldCis"].as_u64().unwrap_or(0) as u8;
+        // A new VM starts without a gold until one is picked on its card.
+        if image.is_empty() && pin.is_empty() {
+            problems.push(format!("{name}: no gold picked - pick one under Identity › Gold"));
+            continue;
+        }
+        let Some(gold) = golds::resolve(&golds, image, lang, pin, rel, cis) else {
+            let cis_txt = if cis > 0 { format!("CIS L{cis}") } else { String::new() };
+            let what = if !pin.is_empty() { format!("pinned gold {pin}") } else { [image, rel, lang, &cis_txt].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" ") };
             problems.push(format!("{name}: no ready gold for {what} - bake one under Golds"));
             continue;
         };
@@ -2767,6 +2887,15 @@ async fn deploy_lab(State(app): State<AppState>, user: User, Path(id): Path<Stri
         let m: serde_json::Value = serde_json::from_str(&gold.manifest).unwrap_or_default();
         if m["requiresTpm"].as_bool().unwrap_or(false) {
             spec.vtpm = true;
+        }
+        // A W11 CIS gold turns VBS on (18.9.5): nested and a vTPM whatever the defaults say.
+        if vms::cis_needs_vbs(&m) {
+            spec.nested = true;
+            spec.vtpm = true;
+        }
+        if let Err(e) = vms::win_cis_hardware_ok(&m, &spec) {
+            problems.push(format!("{name}: {e:#}"));
+            continue;
         }
         if let Err(e) = spec.validate() {
             problems.push(format!("{name}: {e:#}"));

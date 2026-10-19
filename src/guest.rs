@@ -87,8 +87,11 @@ fn sudoers_token(group: &str, domain: &str) -> String {
     if n.is_empty() { String::new() } else { format!("%{}", n.replace(' ', "\\ ")) }
 }
 
-/// The runcmd lines that join the domain and hand out sudo.
-pub fn linux_join_commands(dj: &DomainJoin, family: &str) -> Vec<String> {
+/// The runcmd lines that join the domain and hand out sudo. On a clone of a CIS gold (`cis`),
+/// what the join changed is brought back under CIS: sshd's AllowGroups gets the permitted
+/// domain groups, and the PAM rules run again (the join rewrites PAM: authselect, pam-config,
+/// pam-auth-update).
+pub fn linux_join_commands(dj: &DomainJoin, family: &str, cis: bool) -> Vec<String> {
     let mut c = Vec::new();
     let domain = dj.domain.trim();
     let user = realm_login_user(&dj.user);
@@ -108,6 +111,12 @@ pub fn linux_join_commands(dj: &DomainJoin, family: &str) -> Vec<String> {
     // still enabled the socket units fail on the spot.
     if family == "debian" {
         c.push("systemctl disable --now sssd-nss.socket sssd-pam.socket sssd-pam-priv.socket sssd-pac.socket 2>/dev/null; true".into());
+    }
+    // A CIS Level 2 Debian/Ubuntu clone denies outgoing traffic (UFW) but DNS, NTP and the
+    // mirrors: realmd cannot reach the domain's LDAP/Kerberos ("Can't contact LDAP server").
+    // The AD client ports go out; the benchmark leaves outbound rules to site policy.
+    if cis && family == "debian" {
+        c.push("if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; then for p in 88/tcp 88/udp 389/tcp 389/udp 464/tcp 464/udp 636/tcp 3268/tcp 3269/tcp; do ufw allow out $p comment 'pve-vm-studio domain join' >/dev/null; done; echo UFW-AD-OUT; fi".into());
     }
     // The clock first: a join before NTP has stepped fails with "Cannot contact any KDC".
     c.push(r#"i=0; until [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" = yes ] || [ $i -ge 90 ]; do sleep 1; i=$((i+1)); done; echo "TIME-SYNC $(timedatectl show -p NTPSynchronized --value 2>/dev/null) after ${i}s""#.into());
@@ -180,6 +189,31 @@ pub fn linux_join_commands(dj: &DomainJoin, family: &str) -> Vec<String> {
         p += "echo DOMAIN-LOGIN-RESTRICTED";
         c.push(p);
     }
+    if cis {
+        // sshd refuses whom AllowGroups does not name, before PAM asks sssd: the groups that
+        // may log in (all domain users when no list is given) and the sudo groups, by the name
+        // the joined box gives them (sshd compares case-sensitively).
+        let mut groups = if logins.is_empty() { vec![linux_group_name("domain users", domain)] } else { logins.clone() };
+        for g in &dj.sudo_groups {
+            let n = linux_group_name(g, domain);
+            if !n.is_empty() && !groups.contains(&n) {
+                groups.push(n);
+            }
+        }
+        let mut sc = "f=/etc/pvs-cis/ssh-groups; : > $f; chmod 0600 $f; ".to_owned();
+        for g in &groups {
+            sc += &format!(
+                "n=$(getent group {} | cut -d: -f1); if [ -n \"$n\" ]; then echo \"$n\" >> $f; else echo {}; fi; ",
+                shq(g),
+                shq(&format!("SSH-GROUP-UNRESOLVED {g}"))
+            );
+        }
+        // What the join's packages bring along is brought back under CIS too: sssd's AppArmor
+        // profile (complain mode), new log files, setuid helpers (krb5's ksu) - their audit
+        // rules load at the next boot, which the studio's power-off and start give the clone.
+        sc += r#"ids=$(/usr/local/sbin/pvs-cis list | awk -F'\t' '$1 ~ /^5\.3\./ || $5 ~ /^(sshd-login-limited-to-allowed-groups|apparmor-every-profile-enforcing|log-files-in-var-log-restricted|audit-use-of-suid-sgid-programs)$/ { print $1 }' | paste -sd,); /usr/local/sbin/pvs-cis fix --level "$(cat /etc/pvs-cis/level)" --exceptions /etc/pvs-cis/exceptions --only "$ids" | grep -E '^CIS-FIX-(FAILED|DONE)' | sed 's/^CIS-FIX/DOMAIN-CIS-FIX/'"#;
+        c.push(sc);
+    }
     c
 }
 
@@ -234,9 +268,39 @@ mod tests {
             login_groups: vec![],
             mode: String::new(),
         };
-        let c = linux_join_commands(&dj, "debian");
+        let c = linux_join_commands(&dj, "debian", false);
         assert!(c.iter().any(|l| l.contains("realm join --install=/ --unattended --user='Administrator' 'ad.example'")));
         assert!(c.iter().any(|l| l.contains("visudo -cf")));
         assert!(!c.iter().any(|l| l.contains("realm permit")));
+        assert!(!c.iter().any(|l| l.contains("ssh-groups")));
+    }
+
+    /// A CIS clone: the permitted groups reach sshd's AllowGroups, sudo groups too, and the
+    /// sshd and PAM rules run again after the join rewrote PAM.
+    #[test]
+    fn join_cis() {
+        let dj = DomainJoin {
+            domain: "ad.example".into(),
+            user: "Administrator".into(),
+            password: "pw".into(),
+            ou: String::new(),
+            sudo_groups: vec!["Linux Admins".into()],
+            login_groups: vec![],
+            mode: String::new(),
+        };
+        let c = linux_join_commands(&dj, "rhel", true);
+        let l = c.last().unwrap();
+        assert!(l.contains("getent group 'domain users@ad.example'") && l.contains("getent group 'Linux Admins@ad.example'"));
+        assert!(l.contains("/etc/pvs-cis/ssh-groups") && l.contains("sshd-login-limited-to-allowed-groups") && l.contains(r"/^5\.3\./"));
+        assert!(l.contains("audit-use-of-suid-sgid-programs") && l.contains("apparmor-every-profile-enforcing"));
+        // UFW's outbound policy opened for AD on a Debian/Ubuntu CIS clone only, before the join
+        assert!(!c.iter().any(|x| x.contains("UFW-AD-OUT")));
+        let d = linux_join_commands(&dj, "debian", true);
+        let u = d.iter().position(|x| x.contains("UFW-AD-OUT")).unwrap();
+        assert!(u < d.iter().position(|x| x.contains("realm join")).unwrap() && d[u].contains("389/tcp") && d[u].contains("88/udp"));
+        assert!(!linux_join_commands(&dj, "debian", false).iter().any(|x| x.contains("UFW-AD-OUT")));
+        let dj = DomainJoin { login_groups: vec!["AD\\Web Ops".into()], ..dj };
+        let l = linux_join_commands(&dj, "suse", true).last().unwrap().clone();
+        assert!(l.contains("'Web Ops@ad.example'") && !l.contains("domain users"));
     }
 }

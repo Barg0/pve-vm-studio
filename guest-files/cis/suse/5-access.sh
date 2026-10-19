@@ -39,8 +39,9 @@
 #   pam-config loses use_authtok on its next rewrite, so c5_pam_update puts it back (the
 #   studio's domain join does the same after its pam-config --add --sss).
 # - pam_unix: `-d --unix-nullok`, `-d --unix-remember`, `-a --unix --unix-sha512` (pam-config
-#   has no yescrypt). use_authtok comes from pam-config itself while pam_pwquality is enabled:
-#   the fix installs pam_pwquality and runs `-a --pwquality` (values stay in conf.d).
+#   has no yescrypt). pam-config has no use_authtok for pam_unix: it goes on the password line
+#   of common-password-pc directly, after every pam-config call (s5_unix_authtok), with
+#   pam_pwquality enabled before it (`-a --pwquality`, values stay in conf.d).
 # - login.defs: kv_set copies the vendor file first (lib.sh). ENCRYPT_METHOD SHA512, the same
 #   hash pam_unix uses.
 # - 5.4.2.7/5.4.2.8: valid shells = /etc/shells (or its vendor copy) minus */nologin and
@@ -305,7 +306,24 @@ c5_pam_update() {
     fi
     rm -rf "$d"
     s5_pwh_authtok
+    s5_unix_authtok
     return 0
+}
+
+# pam-config has no use_authtok option for pam_unix at all (--unix-use_first_pass is a
+# different thing), and every rewrite builds the line from its own options: the argument goes
+# on the password line in the file pam-config writes, after every call. pam_pwquality and
+# pam_pwhistory before it ask for and check the new password; pam_unix then takes that one.
+s5_unix_authtok() {
+    local f
+    # The file itself: common-password is a link to pam-config's common-password-pc, and
+    # sed -i on the link would replace it with a copy pam-config no longer writes.
+    f=$(readlink -f "$(s5_pam_eff common-password)")
+    grep -Pq '^\h*password\h+\S+\h+pam_unix\.so\b' "$f" 2>/dev/null || return 0
+    grep -Pq '^\h*password\h+\S+\h+pam_unix\.so\b.*\buse_authtok\b' "$f" && return 0
+    grep -Pq '^\h*password\h+.*\bpam_pwquality\.so\b' "$f" || { echo "use_authtok on pam_unix needs pam_pwquality before it"; return 1; }
+    sed -E -i 's/^([[:space:]]*password[[:space:]]+[^[:space:]]+[[:space:]]+pam_unix\.so)([[:space:]]|$)/\1 use_authtok\2/' "$f"
+    c5_pam_sane
 }
 
 # pam-config writes use_authtok on the pam_pwhistory line but does not read it back: its
@@ -461,7 +479,11 @@ c5_valid_shells() {
 check_sshd_config_files_0600_root() {
     local rc=0 f
     c5_ssh_here || return 2
-    perm_ok "$(effective_file /etc/ssh/sshd_config)" 600 root root || rc=1
+    # Both main files, as the benchmark's stat lists them - the vendor one too, in effect or not.
+    for f in /usr/etc/ssh/sshd_config /etc/ssh/sshd_config; do
+        [ -e "$f" ] || continue
+        perm_ok "$f" 600 root root || rc=1
+    done
     while IFS= read -r -d '' f; do
         ev "$f: $(stat -Lc '%a %U:%G' "$f")"
         rc=1
@@ -488,10 +510,16 @@ fix_sshd_config_files_0600_root() {
         chmod u-x,og-rwx "$f"
         chown root:root "$f"
     done < <(find /etc/ssh/sshd_config.d -type f -print0 2>/dev/null)
+    # The vendor files the audit lists as well (rpm verify then reports their mode; an openssh
+    # update resets it and the check shows that).
+    if [ -f /usr/etc/ssh/sshd_config ]; then
+        chmod u-x,og-rwx /usr/etc/ssh/sshd_config
+        chown root:root /usr/etc/ssh/sshd_config
+    fi
     while IFS= read -r -d '' f; do
-        echo "$f: $(stat -Lc '%a %U:%G' "$f") - vendor file, not changed"
-        rc=1
-    done < <(find /usr/etc/ssh/sshd_config.d/ -xdev -type f -name '*.conf' \( -perm /177 -o ! -user root -o ! -group root \) -print0 2>/dev/null)
+        chmod u-x,og-rwx "$f"
+        chown root:root "$f"
+    done < <(find /usr/etc/ssh/sshd_config.d/ -xdev -type f -name '*.conf' -print0 2>/dev/null)
     return $rc
 }
 
@@ -756,9 +784,9 @@ check_pam_unix_uses_the_token_already_given() {
     ev "${out:-$f: pam_unix password line without use_authtok}"
     [ -n "$out" ]
 }
-# pam-config writes use_authtok on pam_unix's password line itself while pam_pwquality is on.
 fix_pam_unix_uses_the_token_already_given() {
     s5_pwquality_on || return 1
+    s5_unix_authtok || return 1
     check_pam_unix_uses_the_token_already_given >/dev/null
 }
 

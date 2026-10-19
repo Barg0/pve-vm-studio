@@ -202,7 +202,10 @@ e1_cp_add() {
         [[ "$mods:" == *":$m:"* ]] || mods="$mods:$m"
     done
     # Always re-applied: our module files may have changed under an unchanged name.
-    update-crypto-policies --set "$base$mods" >/dev/null 2>&1 || { ev "update-crypto-policies --set $base$mods failed"; return 1; }
+    # --no-reload: crypto-policies 2026 restarts sshd from reload-cmds.sh on every --set, and
+    # the four or five subpolicy fixes in a row hit sshd's start limit - sshd then stays down.
+    # The bake reboots after the fixes; the new policy is in effect from then on.
+    update-crypto-policies --no-reload --set "$base$mods" >/dev/null 2>&1 || { ev "update-crypto-policies --set $base$mods failed"; return 1; }
     ev "crypto policy: $base$mods"
 }
 
@@ -347,7 +350,8 @@ check_grub_superuser_password() {
 fix_grub_superuser_password() {
     local pw hash e
     command -v grub2-mkpasswd-pbkdf2 >/dev/null 2>&1 || { ev "grub2-mkpasswd-pbkdf2 missing"; return 1; }
-    if ! { [ -s "$E1_GRUB_PWDIR/grub-password" ] && grep -q '^GRUB2_PASSWORD=grub\.pbkdf2\.sha512\.' "$E1_GRUB_USERCFG" 2>/dev/null; }; then
+    # A password once set stays (deb's fix says why: the studio holds the one of the bake).
+    if ! grep -q '^GRUB2_PASSWORD=grub\.pbkdf2\.sha512\.' "$E1_GRUB_USERCFG" 2>/dev/null; then
         pw=$(head -c 1024 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 24)
         [ "${#pw}" -eq 24 ] || { ev "password generation failed"; return 1; }
         hash=$(printf '%s\n%s\n' "$pw" "$pw" | grub2-mkpasswd-pbkdf2 --iteration-count=600000 --salt=64 2>/dev/null \
@@ -486,7 +490,11 @@ check_crypto_policy_ssh_no_cbc() {
     else
         ev "SSH ciphers: no CBC"
     fi
-    grep -Piq -- '^\h*cipher\h*=.*-CBC\b' "$E1_CP_POL" && ev "global cipher list keeps CBC (TLS, Kerberos) - by decision"
+    # EL9/EL10 (CP_CBC_GLOBAL=yes): the audit also wants CBC off system-wide - the global
+    # cipher line, not only SSH's. SLE 16 asks for SSH only.
+    if grep -Piq -- '^\h*cipher\h*=\h*([^#\n\r]+)?-CBC\b' "$E1_CP_POL"; then
+        if [ "${CP_CBC_GLOBAL:-no}" = yes ]; then ev "global cipher list keeps CBC"; bad=1; else ev "global cipher list keeps CBC (only SSH's is audited here)"; fi
+    fi
     for f in /etc/crypto-policies/back-ends/opensshserver.config /etc/crypto-policies/back-ends/openssh.config; do
         [ -f "$f" ] || continue
         if grep -Eiq -- '-cbc' "$f"; then ev "$f: CBC cipher"; bad=1; fi
@@ -495,7 +503,12 @@ check_crypto_policy_ssh_no_cbc() {
 }
 fix_crypto_policy_ssh_no_cbc() {
     e1_cp_module NO-SSHCBC 'cipher@SSH = -*-CBC'
-    e1_cp_add NO-SSHCBC
+    e1_cp_add NO-SSHCBC || return 1
+    [ "${CP_CBC_GLOBAL:-no}" = yes ] || return 0
+    # CBC off everywhere, except that Kerberos gets AES-CBC back: crypto-policies derives the
+    # aes*-cts enctypes from it, and Active Directory needs aes256-cts-hmac-sha1-96.
+    e1_cp_module PVS-NO-CBC 'cipher = -*-CBC' 'cipher@kerberos = +AES-256-CBC +AES-128-CBC'
+    e1_cp_add PVS-NO-CBC
 }
 
 rule crypto-policy-ssh-chacha-reviewed "Crypto policy: SSH chacha20 reviewed"

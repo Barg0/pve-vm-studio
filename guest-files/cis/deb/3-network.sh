@@ -11,7 +11,8 @@
 #   drivers of any wireless NIC, in /etc/modprobe.d/pvs-cis-wireless.conf. The check fails on
 #   a wireless interface or on any of those modules loaded (the benchmark's own after-check:
 #   lsmod | grep 80211/wifi/wireless must be empty). virtio_net / e1000 live elsewhere.
-# - 3.1.3: bluez is purged if present; if the purge fails, bluetooth.service is stopped+masked.
+# - 3.1.3: bluez handled like a chapter 2 server (c2_off_check/c2_off_fix): removed through the
+#   family's guarded removal; kept and masked only when another installed package needs it.
 # - 3.2.7 (manual): studio deny list (env PVS_CIS_NET_DENY overrides at fix time) written to
 #   /etc/modprobe.d/60-pvs-cis-net-deny.conf: esp4 esp6 rxrpc af_key appletalk ax25 netrom
 #   rose x25 phonet ieee802154 caif nfc kcm qrtr. This breaks IPsec (strongSwan) and AFS on
@@ -26,6 +27,9 @@
 #   fixes ran (or a ufw upgrade rewrites the conffile), 3.3.1.16/17 fail - ufw must be
 #   installed before chapter 3's fixes run (it is in the Ubuntu cloud image).
 # - 3.3.1.12/13 rp_filter = 1 (strict): fine for a single-NIC VM; asymmetric routing breaks.
+#   NetworkManager (EL, SUSE) loosens it to 2 on activation for MPTCP: its MPTCP handling is
+#   turned off by default (/etc/NetworkManager/conf.d/60-pvs-cis.conf), which also means no
+#   MPTCP subflow endpoints on the clones.
 # - Per interface, not only all/default: the kernel reads each interface's own value too
 #   (rp_filter takes the higher of all and the interface, IPv6 uses the interface's alone), and
 #   a NIC brought up in the initramfs never sees conf.default. Ubuntu's own
@@ -199,24 +203,11 @@ $(basename "$m")"
 }
 
 rule bluetooth-not-in-use "Bluetooth not in use"
-check_bluetooth_not_in_use() {
-    if ! pkg_installed bluez; then
-        ev "bluez: not installed"
-        return 0
-    fi
-    local bad=0
-    ev "bluez: installed"
-    ev "bluetooth.service: $(systemctl is-enabled bluetooth.service 2>/dev/null || true) / $(systemctl is-active bluetooth.service 2>/dev/null || true)"
-    svc_enabled bluetooth.service && bad=1
-    svc_active bluetooth.service && bad=1
-    return $bad
-}
-fix_bluetooth_not_in_use() {
-    pkg_installed bluez || return 0
-    systemctl stop bluetooth.service 2>/dev/null
-    pkg_purge bluez && return 0
-    svc_off bluetooth.service
-}
+# The same as a chapter 2 server: not installed, or needed by an installed package with the
+# service neither enabled nor active (the benchmark's "required as a dependency" branch);
+# removed through the family's guarded removal, masked when the removal is refused.
+check_bluetooth_not_in_use() { c2_off_check bluez bluetooth.service; }
+fix_bluetooth_not_in_use() { c2_off_fix bluez bluetooth.service; }
 
 # ---- 3.2 network kernel modules ----
 
@@ -326,13 +317,48 @@ rule gateway-redirects-refused-default "Gateway redirects refused (default)"
 check_gateway_redirects_refused_default() { c3_conf_is ipv4 secure_redirects 0; }
 fix_gateway_redirects_refused_default() { c3_conf_set ipv4 secure_redirects 0; }
 
+# NetworkManager loosens a strict rp_filter (1) to 2 on every interface it gives MPTCP
+# endpoints - and it does that by default while net.mptcp.enabled is 1 (nm-settings(5),
+# connection.mptcp-flags). It activates the NIC after systemd-sysctl, so the interface ends at 2
+# whatever sysctl.d says; rp_filter takes the higher of all and the interface: loose. MPTCP
+# handling off as NetworkManager's default for every profile keeps the interface strict.
+C3_NM_CONF=/etc/NetworkManager/conf.d/60-pvs-cis.conf
+c3_nm_mptcp_off() {
+    command -v NetworkManager >/dev/null 2>&1 || return 0
+    if NetworkManager --print-config 2>/dev/null | grep -Eq '^[[:space:]]*connection\.mptcp-flags[[:space:]]*=[[:space:]]*(0x1|1|disabled)[[:space:]]*$'; then
+        ev "NetworkManager: MPTCP handling off (rp_filter left strict)"
+        return 0
+    fi
+    ev "NetworkManager: MPTCP handling on - it loosens rp_filter to 2 on activation"
+    return 1
+}
+c3_nm_mptcp_set() {
+    command -v NetworkManager >/dev/null 2>&1 || return 0
+    mkdir -p "${C3_NM_CONF%/*}"
+    printf '# pvs-cis 3.3.1.12/13: MPTCP handling would loosen rp_filter to 2.\n[connection]\nconnection.mptcp-flags=0x1\n' > "$C3_NM_CONF"
+    chmod 0644 "$C3_NM_CONF"
+    command -v restorecon >/dev/null 2>&1 && restorecon "$C3_NM_CONF" 2>/dev/null
+    nmcli general reload conf >/dev/null 2>&1
+    return 0
+}
+
 rule strict-reverse-path-filter-all "Strict reverse path filter (all)"
-check_strict_reverse_path_filter_all() { c3_sysctl_is net.ipv4.conf.all.rp_filter 1; }
-fix_strict_reverse_path_filter_all() { c3_sysctl_set net.ipv4.conf.all.rp_filter 1; }
+check_strict_reverse_path_filter_all() {
+    local rc=0
+    c3_sysctl_is net.ipv4.conf.all.rp_filter 1 || rc=1
+    c3_nm_mptcp_off || rc=1
+    return $rc
+}
+fix_strict_reverse_path_filter_all() { c3_nm_mptcp_set && c3_sysctl_set net.ipv4.conf.all.rp_filter 1; }
 
 rule strict-reverse-path-filter-default "Strict reverse path filter (default)"
-check_strict_reverse_path_filter_default() { c3_conf_is ipv4 rp_filter 1; }
-fix_strict_reverse_path_filter_default() { c3_conf_set ipv4 rp_filter 1; }
+check_strict_reverse_path_filter_default() {
+    local rc=0
+    c3_conf_is ipv4 rp_filter 1 || rc=1
+    c3_nm_mptcp_off || rc=1
+    return $rc
+}
+fix_strict_reverse_path_filter_default() { c3_nm_mptcp_set && c3_conf_set ipv4 rp_filter 1; }
 
 rule ipv4-source-routing-refused-all "IPv4 source routing refused (all)"
 check_ipv4_source_routing_refused_all() { c3_sysctl_is net.ipv4.conf.all.accept_source_route 0; }

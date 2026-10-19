@@ -1,0 +1,2 @@
+# Studio deviations for this benchmark - recommendation <tab> reason. The fix leaves these
+# alone, the check still runs and reports "exception" with the reason.

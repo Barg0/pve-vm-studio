@@ -5,7 +5,8 @@
 # SUSE package is there).
 #
 # Decisions
-# - c2_off_fix is redefined for zypper: `zypper remove --dry-run --no-clean-deps` first; if the
+# - c2_remove is zypper here (deb's c2_off_fix decides what to remove, el's c2_needed_by which
+#   package another one needs): `zypper remove --dry-run --no-clean-deps` first; if the
 #   transaction would take a protected package (sshd, cloud-init, qemu-guest-agent, systemd,
 #   NetworkManager, zypper/rpm, sudo, kernel/grub2, firewalld, chrony, cronie, audit, SELinux,
 #   PAM, permissions, sssd/krb5, btrfs/xfs/lvm tools, ...), the removal is refused and the
@@ -14,7 +15,8 @@
 # - openSUSE package names: openldap2/openldap2_6 (slapd), nfs-kernel-server, rsync (ships
 #   rsyncd.socket/.service itself), tftp/atftp (the TFTP server lives in "tftp"), apache2,
 #   xwayland, openldap2(_6)-client, ypbind.
-# - 2.1.13 rsync: rsync stays installed, rsyncd.socket and rsyncd.service are masked.
+# - 2.1.13 rsync: removed like every server package. The benchmark keeps it only when another
+#   installed package needs it; nothing in the image does, and the bake copies with tar.
 # - 2.3.1.1 chrony: Leap keeps chrony.conf in /usr/etc (chronyd reads /etc/chrony.conf when it
 #   exists); the sources come in through `include` (/etc/chrony.d), confdir and sourcedir - all
 #   followed. The image's servers are kept; only when there is none, the fix writes
@@ -63,20 +65,7 @@ s2_zypper_remove() {
     zypper -n -q remove --no-clean-deps "$@" >/dev/null
 }
 
-# Stop UNITS and remove the installed PKGS; when the removal is refused, mask UNITS instead.
-c2_off_fix() {
-    local pkgs=$1 units=${2:-} inst
-    # shellcheck disable=SC2086
-    inst=$(c2_installed $pkgs)
-    [ -n "$inst" ] || return 0
-    # shellcheck disable=SC2086
-    [ -n "$units" ] && systemctl stop $units 2>/dev/null
-    # shellcheck disable=SC2086
-    s2_zypper_remove $inst && return 0
-    [ -n "$units" ] || return 1
-    # shellcheck disable=SC2086
-    svc_off $units
-}
+c2_remove() { s2_zypper_remove "$@"; }
 
 # EL's dnf helper must never run here.
 e2_dnf_remove() { echo "e2_dnf_remove: no dnf on openSUSE ($*)"; return 1; }
@@ -93,10 +82,7 @@ fix_nfs_server_removed() { c2_off_fix nfs-kernel-server nfs-server.service; }
 
 rule rsync-daemon-masked "rsync daemon masked"
 check_rsync_daemon_masked() { c2_off_check rsync "rsyncd.socket rsyncd.service"; }
-fix_rsync_daemon_masked() {
-    pkg_installed rsync || return 0
-    svc_off rsyncd.socket rsyncd.service
-}
+fix_rsync_daemon_masked() { c2_off_fix rsync "rsyncd.socket rsyncd.service"; }
 
 s2_TFTP_PKGS="tftp-server tftp atftp"
 s2_TFTP_UNITS="tftp.socket tftp.service atftpd.socket atftpd.service"
@@ -188,35 +174,35 @@ check_chrony_time_server_set() {
         hits=$(grep -HEi '^[[:space:]]*(server|pool)[[:space:]]+[^[:space:]]' "${files[@]}" 2>/dev/null)
         if [ -n "$hits" ]; then ev "$hits"; else ev "chrony: no server/pool line in ${files[*]}"; bad=1; fi
     fi
+    # The benchmark's audit greps /etc/chrony.conf itself - a source only in an include (Leap's
+    # /usr/etc/chrony.d/pool.conf) does not show there.
+    if ! grep -Eq '^(server|pool)' /etc/chrony.conf 2>/dev/null; then
+        ev "/etc/chrony.conf: no server/pool line$([ -e /etc/chrony.conf ] || echo ' (file missing)')"
+        bad=1
+    fi
     opts=$(e2_chrony_opts)
     ev "$E2_CHRONY_SYSCONF OPTIONS: ${opts:-unset}"
     grep -Eq '(^|[[:space:]])-u[[:space:]]+chrony([[:space:]]|$)' <<<"$opts" || bad=1
     return $bad
 }
 fix_chrony_time_server_set() {
-    local srv conf target opts
+    local srv opts
     pkg_installed chrony || pkg_install chrony || return 1
-    # shellcheck disable=SC2046
-    if ! grep -qEi '^[[:space:]]*(server|pool)[[:space:]]+[^[:space:]]' $(s2_chrony_files) /dev/null 2>/dev/null; then
+    # The source line goes into /etc/chrony.conf itself (a copy of the vendor file), as the
+    # audit reads it; the image's own sources stay where they are.
+    vendor_copy /etc/chrony.conf
+    [ -f /etc/chrony.conf ] || { echo "/etc/chrony.conf: no vendor file to copy"; return 1; }
+    if ! grep -Eq '^(server|pool)' /etc/chrony.conf; then
         srv=$(printf '%s' "${PVS_CIS_NTP:-}" | tr -cd 'A-Za-z0-9.:_ -' | xargs)
-        conf=$(effective_file "$S2_CHRONY_CONF")
-        if grep -Eq '^[[:space:]]*include[[:space:]]+/etc/chrony\.d/\*\.conf' "$conf" 2>/dev/null; then
-            mkdir -p /etc/chrony.d
-            target=/etc/chrony.d/60-pvs-cis.conf
-            : > "$target"
-        else
-            vendor_copy "$S2_CHRONY_CONF"
-            target=$S2_CHRONY_CONF
-        fi
-        printf '# pvs-cis: authorized time source(s)\n' >> "$target"
+        printf '# pvs-cis: authorized time source(s)\n' >> /etc/chrony.conf
         if [ -n "$srv" ]; then
             # shellcheck disable=SC2086
-            printf 'server %s iburst\n' $srv >> "$target"
+            printf 'server %s iburst\n' $srv >> /etc/chrony.conf
         else
-            printf 'pool 2.opensuse.pool.ntp.org iburst\n' >> "$target"
+            printf 'pool 2.opensuse.pool.ntp.org iburst\n' >> /etc/chrony.conf
         fi
-        chmod 0644 "$target"
     fi
+    chmod 0644 /etc/chrony.conf
     opts=$(e2_chrony_opts)
     if ! grep -Eq '(^|[[:space:]])-u[[:space:]]+chrony([[:space:]]|$)' <<<"$opts"; then
         getent passwd chrony >/dev/null 2>&1 || { echo "no chrony user"; return 1; }

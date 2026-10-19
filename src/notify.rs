@@ -272,7 +272,7 @@ async fn designs_using(app: &AppState, gold: &crate::golds::GoldRow) -> Vec<Row>
         let state: serde_json::Value = serde_json::from_str(&full.state).unwrap_or_default();
         for s in state["servers"].as_array().into_iter().flatten() {
             let str_of = |k: &str| s[k].as_str().unwrap_or("");
-            if crate::golds::resolve(&golds, str_of("imageId"), str_of("goldLanguage"), str_of("goldId"), str_of("goldRelease")).is_none_or(|g| g.id != gold.id) {
+            if crate::golds::resolve(&golds, str_of("imageId"), str_of("goldLanguage"), str_of("goldId"), str_of("goldRelease"), s["goldCis"].as_u64().unwrap_or(0) as u8).is_none_or(|g| g.id != gold.id) {
                 continue;
             }
             let name = str_of("name").to_lowercase();
@@ -301,13 +301,14 @@ fn bake_option_label(k: &str) -> &str {
         "rdp" => "Remote Desktop",
         "ping" => "Answer ping",
         "suppressServerManagerAtLogon" => "No Server Manager at logon",
-        "blockSignInInputMethods" => "Sign-in keyboard (STIG)",
+        "blockSignInInputMethods" => "Fixed sign-in keyboard",
         "suppressWelcomeExperience" => "No welcome experience",
         "suppressFirstSignInAnimation" => "No first sign-in animation",
         "edgeBaseline" => "Edge baseline",
         "preferIPv4" => "Prefer IPv4",
         "preventDeviceEncryption" => "No auto device encryption",
         "vmPowerPlan" => "VM power plan",
+        "disableSearchBoxSuggestions" => "No search box suggestions",
         other => other,
     }
 }

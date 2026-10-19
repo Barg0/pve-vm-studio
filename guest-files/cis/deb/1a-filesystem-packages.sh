@@ -466,15 +466,25 @@ rule apt-sources-pin-their-keys-signed-by "APT sources pin their keys (Signed-By
 check_apt_sources_pin_their_keys_signed_by() {
     local list stanzas
     shopt -s nullglob
-    list=$(grep -PHn -- '^\h*(deb(-src)?)\h+(\[(?![^\]]*\b[Ss]igned-[Bb]y\b)[^\]]*\]|[^\[])' \
+    # Signed-By as the benchmark greps it (case-sensitive). In a deb822 stanza the field may have
+    # an empty first line, the key block then follows on continuation lines - it counts.
+    list=$(grep -PHn -- '^\h*(deb(-src)?)\h+(\[(?![^\]]*\bSigned-By\b)[^\]]*\]|[^\[])' \
         /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null)
     stanzas=$(for f in /etc/apt/sources.list.d/*.sources; do
         awk 'BEGIN { u = 0; s = 0 }
             /^[[:blank:]]*$/ { if (u && !s) print FILENAME ":" NR ": stanza without Signed-By"; u = 0; s = 0; next }
             tolower($0) ~ /^[[:blank:]]*uris:[[:blank:]]*[^[:blank:]]/ { u = 1 }
-            tolower($0) ~ /^[[:blank:]]*signed-by:[[:blank:]]*[^[:blank:]]/ { s = 1 }
+            /^[[:blank:]]*Signed-By:/ { s = 1 }
             END { if (u && !s) print FILENAME ": last stanza without Signed-By" }' "$f"
     done)
+    # APT_SIGNEDBY_AUDIT=file (Ubuntu 24.04, Debian 12): the benchmark lists every file without
+    # a Signed-By line, an entry-less one too (the comment-only sources.list pointer).
+    if [ "${APT_SIGNEDBY_AUDIT:-entry}" = file ]; then
+        local files
+        files=$(grep -PRiLs -- '^([^#\n\r]+)?\bSigned-By\b' /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources 2>/dev/null)
+        [ -n "$files" ] && { list="${list:+$list
+}$files: no Signed-By line"; }
+    fi
     if [ -z "$list$stanzas" ]; then
         ev "every source entry has Signed-By"
         return 0
@@ -483,6 +493,22 @@ check_apt_sources_pin_their_keys_signed_by() {
     [ -n "$stanzas" ] && head -n 10 <<<"$stanzas"
     ev "decision: review - sources without Signed-By (not added by the studio)"
     return 3
+}
+
+fix_apt_sources_pin_their_keys_signed_by() {
+    local f
+    [ "${APT_SIGNEDBY_AUDIT:-entry}" = file ] || return 0
+    shopt -s nullglob
+    # A sources file with no entry at all (the cloud image's pointer to the deb822 file) is
+    # what the per-file audit still lists: it goes. Files with entries are left to the admin.
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+        [ -f "$f" ] || continue
+        grep -Eq '^[[:space:]]*deb(-src)?[[:space:]]' "$f" && continue
+        grep -Pqi -- '^([^#\n\r]+)?\bSigned-By\b' "$f" && continue
+        rm -f "$f"
+        echo "$f: no source entry - removed"
+    done
+    return 0
 }
 
 rule apt-no-recommends-suggests "APT: no Recommends/Suggests"

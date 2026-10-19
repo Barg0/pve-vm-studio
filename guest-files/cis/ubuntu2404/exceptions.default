@@ -1,0 +1,3 @@
+# Studio deviations for this benchmark - recommendation <tab> reason. The fix leaves these
+# alone, the check still runs and reports "exception" with the reason.
+5.1.24	A gold has no address of its own: sshd cannot be bound to one in the template. The studio binds sshd to the static address of each clone in its first boot (ListenAddress in /etc/ssh/sshd_config.d/01-pvs-cis-listen.conf); a clone on DHCP keeps listening on every address.

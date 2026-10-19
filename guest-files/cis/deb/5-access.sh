@@ -9,8 +9,9 @@
 #   may not have created it yet, and both refuse to run without it).
 # - 5.1.1/5.1.2: sshd_config and every drop-in 0600 root:root, sshd_config.d 0700. cloud-init
 #   writes 50-cloud-init.conf on the clone's first boot - its mode is cloud-init's.
-# - 5.1.5: AllowGroups sudo pvs-ssh (group pvs-ssh created empty). Users outside sudo who need
-#   SSH must join pvs-ssh - this includes domain users/groups after a domain join.
+# - 5.1.5: AllowGroups sudo pvs-ssh (group pvs-ssh created empty) plus, after a domain join,
+#   the domain groups the join permits (/etc/pvs-cis/ssh-groups, written by the studio's join,
+#   which runs this fix again). Other local users who need SSH join pvs-ssh.
 # - 5.1.6: Banner /etc/issue.net; the file gets the studio wording when it has escapes or the
 #   OS id in it (chapter 1 writes the same text).
 # - 5.1.7/5.1.13/5.1.17: subtractive lists ("-weak,...") as the benchmark remediates; sshd does
@@ -122,12 +123,22 @@ c5_sshd() {
 }
 
 # Effective VALUE of a numeric sshd KEY is within MIN..MAX.
+# ... for root from localhost and for every Match context (sshd_contexts), as sshd_is does: a
+# Match block may set its own value and the benchmarks ask for those too.
 c5_sshd_range() {
-    local k=$1 min=$2 max=$3 v
+    local k=$1 min=$2 max=$3 v rc=0 u a
     c5_ssh_here || return 2
     v=$(sshd_val "$k")
     ev "sshd $k: ${v:-unset}"
-    [[ "$v" =~ ^[0-9]+$ ]] && [ "$v" -ge "$min" ] && [ "$v" -le "$max" ]
+    [[ "$v" =~ ^[0-9]+$ ]] && [ "$v" -ge "$min" ] && [ "$v" -le "$max" ] || rc=1
+    while read -r u a; do
+        [ "$u $a" = "root 127.0.0.1" ] && continue
+        v=$(sshd_val_for "$u" "$a" "$k")
+        [[ "$v" =~ ^[0-9]+$ ]] && [ "$v" -ge "$min" ] && [ "$v" -le "$max" ] && continue
+        ev "sshd $k for $u from $a (Match): ${v:-unset}"
+        rc=1
+    done < <(sshd_contexts)
+    return $rc
 }
 
 # A comma list (sshd -T) contains none of the names in the second comma list.
@@ -385,6 +396,26 @@ fix_sshd_drop_in_directory_0700_root() {
     chmod 0700 /etc/ssh/sshd_config.d
 }
 
+# The key files (private|public) the benchmark looks at: the host keys sshd -T names (and
+# their .pub), or with SSH_KEYS_SCAN=all (EL10's bench.conf) every OpenSSH key under /etc/ssh.
+c5_key_files() {
+    local f
+    if [ "${SSH_KEYS_SCAN:-sshd}" = all ]; then
+        while IFS= read -r -d '' f; do
+            ssh-keygen -lf "$f" >/dev/null 2>&1 || continue
+            if grep -q 'PRIVATE KEY' "$f" 2>/dev/null; then
+                [ "$1" = private ] && echo "$f"
+            else
+                [ "$1" = public ] && echo "$f"
+            fi
+        done < <(find -L /etc/ssh -xdev -type f -print0 2>/dev/null)
+        return 0
+    fi
+    while IFS= read -r f; do
+        if [ "$1" = public ]; then echo "$f.pub"; else echo "$f"; fi
+    done < <(c5_sshd_vals hostkey)
+}
+
 rule sshd-private-host-keys-0600-root "sshd: private host keys 0600 root"
 check_sshd_private_host_keys_0600_root() {
     local rc=0 f n=0
@@ -393,8 +424,9 @@ check_sshd_private_host_keys_0600_root() {
         ssh-keygen -lf "$f" >/dev/null 2>&1 || continue
         n=$((n + 1))
         perm_ok "$f" 600 root root || rc=1
-    done < <(c5_sshd_vals hostkey)
-    [ $n -gt 0 ] || ev "no host key found"
+    done < <(c5_key_files private)
+    # sshd without a host key (or sshd -T failing) is no pass.
+    [ $n -gt 0 ] || { ev "no host key found"; rc=1; }
     return $rc
 }
 fix_sshd_private_host_keys_0600_root() {
@@ -404,7 +436,7 @@ fix_sshd_private_host_keys_0600_root() {
         [ -f "$f" ] || continue
         chown root:root "$f"
         chmod 0600 "$f"
-    done < <(c5_sshd_vals hostkey)
+    done < <(c5_key_files private)
     return 0
 }
 
@@ -413,22 +445,21 @@ check_sshd_public_host_keys_0644_root() {
     local rc=0 f n=0
     c5_ssh_here || return 2
     while IFS= read -r f; do
-        f="$f.pub"
         ssh-keygen -lf "$f" >/dev/null 2>&1 || continue
         n=$((n + 1))
         perm_ok "$f" 644 root root || rc=1
-    done < <(c5_sshd_vals hostkey)
-    [ $n -gt 0 ] || ev "no public host key found"
+    done < <(c5_key_files public)
+    [ $n -gt 0 ] || { ev "no public host key found"; rc=1; }
     return $rc
 }
 fix_sshd_public_host_keys_0644_root() {
     local f
     c5_ssh_here >/dev/null || return 0
     while IFS= read -r f; do
-        [ -f "$f.pub" ] || continue
-        chown root:root "$f.pub"
-        chmod 0644 "$f.pub"
-    done < <(c5_sshd_vals hostkey)
+        [ -f "$f" ] || continue
+        chown root:root "$f"
+        chmod 0644 "$f"
+    done < <(c5_key_files public)
     return 0
 }
 
@@ -441,9 +472,24 @@ check_sshd_login_limited_to_allowed_groups() {
     ev "$out"
     return 0
 }
+# The admin group of the family (el: wheel) and the empty pvs-ssh, plus the domain groups a
+# domain join permits: the studio's join writes them to /etc/pvs-cis/ssh-groups, one per line,
+# as the joined box names them (getent), and runs this fix again. sshd compares group names
+# case-sensitively; a name with spaces is quoted.
+c5_SSH_ADMIN=sudo
+c5_ssh_groups() {
+    local g out="$c5_SSH_ADMIN pvs-ssh"
+    if [ -r /etc/pvs-cis/ssh-groups ]; then
+        while IFS= read -r g; do
+            [ -n "$g" ] || continue
+            case $g in *' '*) out="$out \"$g\"" ;; *) out="$out $g" ;; esac
+        done < /etc/pvs-cis/ssh-groups
+    fi
+    echo "$out"
+}
 fix_sshd_login_limited_to_allowed_groups() {
     getent group pvs-ssh >/dev/null || groupadd -r pvs-ssh || return 1
-    c5_sshd AllowGroups sudo pvs-ssh
+    c5_sshd AllowGroups "$(c5_ssh_groups)"
 }
 
 rule sshd-warning-banner-before-login "sshd: warning banner before login"
@@ -465,7 +511,7 @@ fix_sshd_warning_banner_before_login() {
     local id
     id=$(. /etc/os-release && echo "${ID:-ubuntu}")
     if [ ! -s /etc/issue.net ] || grep -Psqi -- "(\\\\v|\\\\r|\\\\m|\\\\s|\\b${id}\\b)" /etc/issue.net; then
-        printf '%s\n' "Authorized use only. Activity on this system is monitored and recorded." > /etc/issue.net
+        printf '%s\n' "${C1B_BANNER:-Authorized use only. Activity on this system is monitored and recorded.}" > /etc/issue.net
         chown root:root /etc/issue.net
         chmod 0644 /etc/issue.net
     fi
@@ -496,12 +542,12 @@ fix_sshd_no_weak_ciphers() { c5_sshd Ciphers "-$C5_WEAK_CIPHERS"; }
 
 rule sshd-client-alive-interval-and-count "sshd: client alive interval and count"
 check_sshd_client_alive_interval_and_count() {
-    local i n
+    local rc=0
     c5_ssh_here || return 2
-    i=$(sshd_val clientaliveinterval)
-    n=$(sshd_val clientalivecountmax)
-    ev "sshd clientaliveinterval: ${i:-unset}, clientalivecountmax: ${n:-unset}"
-    [[ "$i" =~ ^[0-9]+$ ]] && [[ "$n" =~ ^[0-9]+$ ]] && [ "$i" -gt 0 ] && [ "$n" -gt 0 ]
+    # Both above 0, for every context (c5_sshd_range walks the Match blocks).
+    c5_sshd_range clientaliveinterval 1 2147483647 || rc=1
+    c5_sshd_range clientalivecountmax 1 2147483647 || rc=1
+    return $rc
 }
 fix_sshd_client_alive_interval_and_count() { c5_sshd ClientAliveInterval 15 && c5_sshd ClientAliveCountMax 3; }
 
@@ -579,9 +625,18 @@ rule sshd-log-level-info-or-verbose "sshd: log level INFO or VERBOSE"
 check_sshd_log_level_info_or_verbose() {
     local v
     c5_ssh_here || return 2
+    local u a rc=0
     v=$(sshd_val loglevel)
     ev "sshd loglevel: ${v:-unset}"
-    [[ "${v^^}" == VERBOSE || "${v^^}" == INFO ]]
+    [[ "${v^^}" == VERBOSE || "${v^^}" == INFO ]] || rc=1
+    while read -r u a; do
+        [ "$u $a" = "root 127.0.0.1" ] && continue
+        v=$(sshd_val_for "$u" "$a" loglevel)
+        [[ "${v^^}" == VERBOSE || "${v^^}" == INFO ]] && continue
+        ev "sshd loglevel for $u from $a (Match): ${v:-unset}"
+        rc=1
+    done < <(sshd_contexts)
+    return $rc
 }
 fix_sshd_log_level_info_or_verbose() { c5_sshd LogLevel VERBOSE; }
 
@@ -597,13 +652,13 @@ check_sshd_no_weak_macs() {
 fix_sshd_no_weak_macs() { c5_sshd MACs "-$C5_WEAK_MACS"; }
 
 rule sshd-at-most-4-auth-tries "sshd: at most 4 auth tries"
-check_sshd_at_most_4_auth_tries() { c5_sshd_range maxauthtries 1 4; }
+check_sshd_at_most_4_auth_tries() { c5_sshd_range maxauthtries 0 4; }
 fix_sshd_at_most_4_auth_tries() { c5_sshd MaxAuthTries 4; }
 
 rule sshd-at-most-10-sessions "sshd: at most 10 sessions"
 check_sshd_at_most_10_sessions() {
     local rc=0 l
-    c5_sshd_range maxsessions 1 10 || rc=$?
+    c5_sshd_range maxsessions 0 10 || rc=$?
     [ $rc -eq 2 ] && return 2
     l=$(grep -Psi -- '^\h*MaxSessions\h+"?(1[1-9]|[2-9][0-9]|[1-9][0-9][0-9]+)\b' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null)
     [ -n "$l" ] && { ev "$l"; rc=1; }
@@ -649,26 +704,45 @@ fix_sshd_pam_on() { c5_sshd UsePAM yes; }
 # Ubuntu 24.04 / Debian 12 only. The address is the clone's, known at deploy (DHCP or the
 # studio's static IP) - a template cannot name it; binding to a wrong one locks SSH out.
 rule sshd-listen-address "sshd: listen address"
+# Pass when sshd listens on an address of this machine, not only on the wildcards. A gold has
+# no address of its own (the benchmarks' exceptions.default says so); the studio binds each
+# clone with a static address in its first boot (src/linux.rs, 01-pvs-cis-listen.conf).
 check_sshd_listen_address() {
+    local a h bad=1 mine
     c5_ssh_here || return 2
-    ev "sshd listenaddress: $(sshd_val listenaddress | paste -sd' ')"
-    ev "decision: a template has no address of its own yet; bind it per clone where wanted"
-    return 3
+    mine=$(ip -o addr show 2>/dev/null | awk '{ sub(/\/.*/, "", $4); print $4 }')
+    while read -r a; do
+        [ -n "$a" ] || continue
+        h=${a%:*}
+        h=${h#[}
+        h=${h%]}
+        case $h in 0.0.0.0 | :: | "") ev "listenaddress $a: every address"; continue ;; esac
+        if grep -qxF -- "$h" <<<"$mine"; then ev "listenaddress $a: an address of this machine"; bad=0; else ev "listenaddress $a: not an address of this machine"; fi
+    done < <(c5_sshd_vals listenaddress)
+    return $bad
 }
 
 # ======================================================================================
 # 5.2 Privilege escalation
 # ======================================================================================
 
+# SUDO_STYLE (bench.conf): rs - Ubuntu 26.04 / Debian 13: sudo-rs or sudo, sudo-rs preferred,
+# events in the journal (method A) or a logfile (method B, classic sudo), timestamp_timeout
+# set explicitly. classic - Ubuntu 24.04 / Debian 12: sudo or sudo-ldap, a logfile, an unset
+# timestamp_timeout passes when sudo's default (sudo -V) is within 0..15.
+c5_sudo_pkgs() { if [ "${SUDO_STYLE:-rs}" = classic ]; then echo "sudo sudo-ldap"; else echo "sudo-rs sudo"; fi; }
+
 rule sudo-installed "sudo installed"
 check_sudo_installed() {
     local p out=""
-    for p in sudo-rs sudo; do pkg_installed "$p" && out="$out $p"; done
-    ev "installed:${out:- none}"
+    for p in $(c5_sudo_pkgs); do pkg_installed "$p" && out="$out $p"; done
+    ev "installed:${out:- none} (the benchmark asks for one of: $(c5_sudo_pkgs))"
     [ -n "$out" ]
 }
 fix_sudo_installed() {
-    pkg_installed sudo-rs || pkg_installed sudo || pkg_install sudo-rs
+    local p
+    for p in $(c5_sudo_pkgs); do pkg_installed "$p" && return 0; done
+    if [ "${SUDO_STYLE:-rs}" = classic ]; then pkg_install sudo; else pkg_install sudo-rs; fi
 }
 
 rule sudo-commands-run-in-a-pty "sudo: commands run in a pty"
@@ -696,9 +770,18 @@ check_sudo_events_logged() {
         lf=$(c5_sudoers_grep "^\h*Defaults\h+([^#]+,\h*)?logfile\h*=\h*(\"|')?\H+(\"|')?(,\h*\H+\h*)*\h*(#.*)?$")
         if [ -n "$lf" ]; then ev "$lf"; return 0; fi
     fi
+    # Ubuntu 24.04 / Debian 12 know only the logfile.
+    if [ "${SUDO_STYLE:-rs}" = classic ]; then ev "no Defaults logfile="; return 1; fi
     # Method A: a fresh event must reach the journal.
     timeout 20 sudo -n true >/dev/null 2>&1
-    j=$(journalctl -t sudo -t sudo-rs --since=-5min --no-pager -q 2>/dev/null | tail -n 3)
+    # The event reaches the journal through syslog a moment later (at boot, from the scan
+    # service, it took longer than the read once): looked for up to 10 s.
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        j=$(journalctl -t sudo -t sudo-rs --since=-5min --no-pager -q 2>/dev/null | tail -n 3)
+        [ -n "$j" ] && break
+        sleep 1
+    done
     if [ -n "$j" ]; then ev "journal: $j"; return 0; fi
     ev "no sudo event in the journal"
     return 1
@@ -739,6 +822,13 @@ check_sudo_credential_cache_15_min_or_less() {
     local out v rc=0
     [ -n "$(c5_sudo_impl)" ] || { ev "sudo: not installed"; return 2; }
     out=$(c5_sudoers_grep '^\h*Defaults\h+([^#\n\r]+,\h*)?timestamp_timeout\h*=\h*[-0-9]+')
+    if [ -z "$out" ] && [ "${SUDO_STYLE:-rs}" = classic ]; then
+        # Not set: sudo's default counts (sudo -V as root prints it, in minutes).
+        v=$(sudo -V 2>/dev/null | sed -nE 's/^Authentication timestamp timeout: *(-?[0-9.]+) minutes?.*/\1/p' | head -n 1)
+        ev "timestamp_timeout: not set; sudo's default: ${v:-unknown} minutes"
+        [ -n "$v" ] && awk -v v="$v" 'BEGIN { exit !(v >= 0 && v <= 15) }'
+        return
+    fi
     [ -n "$out" ] || { ev "timestamp_timeout: not set"; return 1; }
     ev "$out"
     while read -r v; do
@@ -1045,17 +1135,42 @@ C5_PWH=/etc/security/pwhistory.conf
 # The pwhistory line(s) of common-password.
 c5_pwh_line() { grep -P -- '^\h*password\h+.*\bpam_pwhistory\.so\b' /etc/pam.d/common-password 2>/dev/null; }
 
+# pam_pwhistory reads /etc/security/pwhistory.conf from PAM 1.5.3 on; an older module (Debian 12:
+# 1.5.2) ignores the file - its values must be module arguments. Asked of the module itself.
+c5_pwh_reads_conf() {
+    local so
+    so=$(find /lib /usr/lib /lib64 /usr/lib64 -name pam_pwhistory.so 2>/dev/null | head -n 1)
+    [ -n "$so" ] && grep -aq 'pwhistory\.conf' "$so"
+}
+# ARG (key or key=value) on pam_pwhistory's line of its pam-config profile, then applied.
+c5_pwh_arg_set() {
+    local f=$C5_PAMCFG/pwhistory k=${1%%=*}
+    [ -f "$f" ] || { echo "$f: missing"; return 1; }
+    sed -i -E "/pam_pwhistory\.so/{s/[[:space:]]+${k}(=[^[:space:]]*)?//g; s/(pam_pwhistory\.so)/\1 $1/}" "$f"
+    c5_pam_update --package
+}
+
 rule pwhistory-remember-24-passwords "pwhistory: remember 24 passwords"
 check_pwhistory_remember_24_passwords() {
     local c m
     c=$(kv_get "$C5_PWH" remember)
     m=$(c5_pam_arg /etc/pam.d/common-password password pam_pwhistory.so remember)
+    if ! c5_pwh_reads_conf; then
+        ev "module argument remember: ${m:-unset} (this pam_pwhistory does not read pwhistory.conf${c:+, where it says $c})"
+        [[ "$m" =~ ^[0-9]+$ ]] && [ "$m" -ge 24 ]
+        return
+    fi
     ev "pwhistory.conf remember: ${c:-unset}; module argument: ${m:-unset}"
     if [ -n "$c" ] && [ -n "$m" ]; then ev "set in both places"; return 1; fi
     c=${c:-$m}
     [[ "$c" =~ ^[0-9]+$ ]] && [ "$c" -ge 24 ]
 }
 fix_pwhistory_remember_24_passwords() {
+    if ! c5_pwh_reads_conf; then
+        sed -i -E '/^[[:space:]]*remember[[:space:]]*=/d' "$C5_PWH" 2>/dev/null
+        c5_pwh_arg_set remember=24
+        return
+    fi
     kv_set "$C5_PWH" remember 24 " = "
     if c5_profile_drop_arg pam_pwhistory.so remember; then c5_pam_update --package || return 1; fi
     return 0
@@ -1066,10 +1181,20 @@ check_pwhistory_enforced_for_root() {
     local c=0 m=0
     c5_has_flag "$C5_PWH" enforce_for_root && c=1
     c5_pam_flag /etc/pam.d/common-password password pam_pwhistory.so enforce_for_root && m=1
+    if ! c5_pwh_reads_conf; then
+        ev "module argument enforce_for_root: $m (this pam_pwhistory does not read pwhistory.conf)"
+        [ $m -eq 1 ]
+        return
+    fi
     ev "pwhistory.conf enforce_for_root: $c; module argument: $m"
     [ $((c + m)) -eq 1 ]
 }
 fix_pwhistory_enforced_for_root() {
+    if ! c5_pwh_reads_conf; then
+        sed -i -E '/^[[:space:]]*enforce_for_root\b/d' "$C5_PWH" 2>/dev/null
+        c5_pwh_arg_set enforce_for_root
+        return
+    fi
     c5_add_flag "$C5_PWH" enforce_for_root
     if c5_profile_drop_arg pam_pwhistory.so enforce_for_root; then c5_pam_update --package || return 1; fi
     return 0
@@ -1317,6 +1442,12 @@ fix_root_path_has_only_safe_directories() {
         if [ ! -e "$d" ] && [[ "$d" == /root/* ]]; then
             mkdir -p -m 0700 "$d"
         fi
+        # A system directory the PATH names before its package made it (snapd's /snap/bin
+        # until the first snap, /usr/games on a minimal image): made root's, 0755, as the package
+        # would. Never one under a user-writable tree.
+        if [ ! -e "$d" ] && [[ "$d" == /* ]] && [[ "$d" != /home/* && "$d" != /tmp/* && "$d" != /var/tmp/* && "$d" != /root/* ]]; then
+            mkdir -p -m 0755 "$d" && chown root:root "$d"
+        fi
         [ -d "$d" ] || continue
         chown root "$d"
         chmod go-w "$d"
@@ -1449,7 +1580,23 @@ C5_UMASK=/etc/profile.d/60-pvs-cis-umask.sh
 
 rule default-umask-027 "default umask 027"
 check_default_umask_027() {
-    local out good rc=0 v
+    local out good rc=0 v f
+    # Ubuntu 24.04 / Debian 12 (UMASK_AUDIT=bits): "027 or more restrictive" in a profile.d
+    # *.sh file and in login.defs, by value - their audit has no pattern, only the words.
+    if [ "${UMASK_AUDIT:-regex}" = bits ]; then
+        out=$(c5_weak_umask /etc/profile.d/*.sh)
+        [ -n "$out" ] && { ev "$out"; rc=1; }
+        good=""
+        for f in /etc/profile.d/*.sh; do
+            [ -f "$f" ] && grep -Eqi '^[[:space:]]*umask[[:space:]]+' "$f" && [ -z "$(c5_weak_umask "$f")" ] && { good=$f; break; }
+        done
+        if [ -n "$good" ]; then ev "umask 027 or stricter in $good"; else ev "no umask 027 or stricter in /etc/profile.d/*.sh"; fi
+        [ -n "$good" ] || rc=1
+        v=$(kv_get /etc/login.defs UMASK)
+        ev "login.defs UMASK: ${v:-unset}"
+        [[ "$v" =~ ^[0-7]{1,4}$ ]] && (( (8#$v & 8#027) == 8#027 )) || rc=1
+        return $rc
+    fi
     out=$(grep -PHsi -- '^\h*umask\h+(?!0?[02367]7\b)' /etc/profile /etc/profile.d/*.sh 2>/dev/null)
     [ -n "$out" ] && { ev "$out"; rc=1; }
     good=$(grep -PHsi -- '^\h*umask\h+0?[02367]7\b' /etc/profile /etc/profile.d/*.sh 2>/dev/null | head -n 1)

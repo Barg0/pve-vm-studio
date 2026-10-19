@@ -384,6 +384,10 @@ pub struct WinBakeOptions {
     /// (autoupdate.rs). A gold the auto-update bakes inherits it.
     #[serde(default)]
     pub keep_current: bool,
+    /// CIS Stand-alone benchmark (Level 1 or 2), applied in audit mode - none when None or
+    /// when the image has no benchmark (cis::win_benchmark_for).
+    #[serde(default)]
+    pub cis: Option<crate::cis::CisOptions>,
 }
 
 impl WinBakeOptions {
@@ -423,8 +427,8 @@ pub static WIN_FEATURES: &[WinFeature] = &[
         tip: "Machine policy DoNotOpenAtLogon: Server Manager no longer opens by itself when an administrator signs in." },
     WinFeature { id: "preferipv4", label: "Prefer IPv4", scope: "",
         tip: "DisabledComponents 0x20 (Tcpip6 parameters): Windows prefers IPv4 over IPv6 - ::ffff:0:0/96 ranks above ::/0 in its prefix policies - and IPv6 stays on. Microsoft's recommendation instead of turning IPv6 off. Check on a VM with: netsh interface ipv6 show prefixpolicies." },
-    WinFeature { id: "signinkeyboard", label: "Sign-in keyboard (STIG)", scope: "",
-        tip: "BlockUserInputMethodsForSignIn (STIG WN12-CC-000048): the sign-in screen keeps the baked keyboard - per-user input methods do not appear there." },
+    WinFeature { id: "signinkeyboard", label: "Fixed sign-in keyboard", scope: "",
+        tip: "BlockUserInputMethodsForSignIn (STIG WN12-CC-000048, CIS 18.9.28.1): the sign-in screen keeps the baked keyboard - per-user input methods do not appear there." },
     WinFeature { id: "edge", label: "Edge baseline", scope: "desktop",
         tip: "Microsoft Edge machine policy: Google as the default and only search engine, no first-run experience, no mini menu, a cleared new tab page, required diagnostic data only. A domain GPO overrides it later." },
     WinFeature { id: "noencrypt", label: "No auto device encryption", scope: "client",
@@ -435,6 +439,8 @@ pub static WIN_FEATURES: &[WinFeature] = &[
         tip: "Policy DisableWindowsSpotlightWindowsWelcomeExperience: no Getting Started / Welcome screen at logon." },
     WinFeature { id: "firstlogon", label: "No first sign-in animation", scope: "client",
         tip: "EnableFirstLogonAnimation 0: the first logon lands straight on the desktop, without \"Hi\" and \"We're getting things ready\"." },
+    WinFeature { id: "searchsuggest", label: "No search box suggestions", scope: "client",
+        tip: "Machine policy DisableSearchBoxSuggestions 1 (HKLM\\Software\\Policies\\Microsoft\\Windows\\Explorer): Start menu search shows local results only - no web results or suggestions." },
 ];
 
 /// A reg.exe /d value, quoted for a cmd.exe line: inner quotes as \" for reg.exe, and every
@@ -615,12 +621,28 @@ echo PVS-PASS1-FAILED > COM1
 /// No NIC traffic (the NIC's link is down) - nothing may update between boot and sysprep.
 /// `agent`: false for a Windows Insider gold - its VMs are started to look at a preview and
 /// thrown away, and the agent's VSS registration fails on those builds (2026-10-14).
-pub fn audit_cmd(agent: bool) -> String {
+pub fn audit_cmd(agent: bool, cis: Option<(&str, u8)>) -> String {
     let qga = if agent {
         r"msiexec /i %VIO%\guest-agent\qemu-ga-x86_64.msi /qn /norestart /l*v C:\Windows\Temp\qemu-ga.log
 echo PVS-QGA %ERRORLEVEL% > COM1"
     } else {
         "echo PVS-NO-QGA > COM1"
+    };
+    // CIS: everything but the built-in accounts' names survives generalize (measured
+    // 2026-10-18): applied here, checked, the report sent on the console for the studio. The
+    // bundle stays in C:\Windows\PVS\cis for each VM's own step (SetupComplete).
+    let cis = match cis {
+        Some((bench, level)) => {
+            let ps = r"powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Windows\PVS\cis\pvs-cis.ps1";
+            format!(
+                "echo PVS-CIS-START {bench} level {level} > COM1\r\n\
+                 xcopy /e /i /y %SEED%\\pvs-cis C:\\Windows\\PVS\\cis > nul\r\n\
+                 {ps} fix -Benchmark {bench} -Level {level} -Exceptions C:\\Windows\\PVS\\cis\\exceptions -Markers > COM1 2>&1\r\n\
+                 {ps} check -Benchmark {bench} -Level {level} -Exceptions C:\\Windows\\PVS\\cis\\exceptions -Json C:\\Windows\\PVS\\cis-report.json -Markers > COM1 2>&1\r\n\
+                 {ps} emit -Benchmark {bench} -Json C:\\Windows\\PVS\\cis-report.json > COM1 2>&1\r\n"
+            )
+        }
+        None => String::new(),
     };
     crlf(&format!(
         r#"@echo off
@@ -638,7 +660,7 @@ echo PVS-VIRTIO %ERRORLEVEL% > COM1
 sc qc vioscsi > COM1 2>&1
 if not exist C:\Windows\PVS mkdir C:\Windows\PVS
 copy /y %SEED%\pvs\firstboot.cmd C:\Windows\PVS\firstboot.cmd > COM1 2>&1
-echo PVS-SYSPREP-START > COM1
+{cis}echo PVS-SYSPREP-START > COM1
 rem No /unattend, as in New-Vhdx: a cached answer file that is in use is not replaced by
 rem one, so the audit-mode file would survive into the gold. Pass 2 writes the gold's
 rem answer file offline instead.
@@ -676,6 +698,85 @@ echo PVS-FIRSTBOOT-OK %PVS_NAME% >> %LOG%
 
 /// The offline policies of New-Vhdx's Set-OfflineImageCustomization (doc §4), as reg.exe
 /// writes against the loaded hives KSYS (SYSTEM) and KSOFT (SOFTWARE).
+/// The CIS rules (benchmark `b`, `level`) the picked policies would break: pass 2 writes them
+/// after the gold's check, so the template would differ from its report. "id title" each.
+/// RDP also counts as the policy it needs: the benchmark's Terminal Services policy
+/// (fDenyTSConnections 1, W11 Level 2) outranks the system value pass 2 sets, and the toggle
+/// would quietly do nothing.
+pub fn pass2_cis_conflicts(features: &[String], client: bool, core: bool, b: &crate::cis::WinBenchmark, level: u8) -> Vec<String> {
+    let mut writes: Vec<(String, String, String)> = pass2_policies(features, client, core)
+        .lines()
+        .filter_map(|l| {
+            let rest = l.strip_prefix("reg add \"")?;
+            let (key, rest) = rest.split_once('"')?;
+            let key = if let Some(k) = key.strip_prefix(r"HKLM\KSYS\ControlSet001\") {
+                format!(r"HKLM\SYSTEM\CurrentControlSet\{k}")
+            } else {
+                format!(r"HKLM\SOFTWARE\{}", key.strip_prefix(r"HKLM\KSOFT\")?)
+            };
+            let name = rest.split_once("/v ")?.1.split(' ').next()?.trim_matches('"').to_owned();
+            let data = rest.split_once("/d ")?.1.rsplit_once(" /f")?.0.trim().trim_matches('"').to_owned();
+            Some((key, name, data))
+        })
+        .collect();
+    if features.iter().any(|f| f == "rdp") {
+        writes.push((r"HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services".into(), "fDenyTSConnections".into(), "0".into()));
+    }
+    crate::cis::win_reg_conflicts(b, level, &writes)
+}
+
+/// Each baked-in policy that CIS `level` contradicts, with the rules it breaks - less the rules
+/// the studio has declared exceptions for: its standing ones (exceptions.default) and the ones
+/// a policy brings along (`cis_feature_exceptions`).
+pub fn cis_conflicting_features(client: bool, core: bool, b: &crate::cis::WinBenchmark, level: u8) -> Vec<(&'static str, Vec<String>)> {
+    let standing = crate::cis::win_default_exceptions(b);
+    WIN_FEATURES
+        .iter()
+        .map(|f| {
+            let own = cis_feature_exceptions(&[f.id.to_owned()], b, level);
+            let covered = |r: &String| {
+                let id = r.split(' ').next().unwrap_or("");
+                standing.iter().chain(&own).any(|e| e.id == id)
+            };
+            (f.id, pass2_cis_conflicts(&[f.id.to_owned()], client, core, b, level).into_iter().filter(|r| !covered(r)).collect::<Vec<_>>())
+        })
+        .filter(|(_, c)| !c.is_empty())
+        .collect()
+}
+
+/// The rules a baked-in policy overrules, as the user's choice: Remote Desktop over W11 Level 2,
+/// which denies RDP by policy and disables its three services. Each becomes a declared exception
+/// of the bake: (policy, benchmark, rules, reason) - the ones `b` has at `level`. Per benchmark:
+/// the servers' 18.10.57.3.2.1 is another rule (one session per user).
+const CIS_FEATURE_RULES: &[(&str, &str, &[&str], &str)] = &[(
+    "rdp",
+    "w11sa",
+    &["18.10.57.3.2.1", "5.20", "5.21", "5.22"],
+    "Remote Desktop chosen at bake: RDP stays on with Network Level Authentication, and the Remote Desktop services keep their Windows default.",
+)];
+
+pub fn cis_feature_exceptions(features: &[String], b: &crate::cis::WinBenchmark, level: u8) -> Vec<crate::cis::Exception> {
+    CIS_FEATURE_RULES
+        .iter()
+        .filter(|(f, dir, _, _)| *dir == b.dir && features.iter().any(|x| x == f))
+        .flat_map(|(_, _, ids, why)| {
+            ids.iter().filter(|id| crate::cis::win_has_rule(b, level, id)).map(|id| crate::cis::Exception { id: (*id).to_owned(), reason: (*why).to_owned() })
+        })
+        .collect()
+}
+
+/// The baked-in policies CIS `level` turns on, with why: Prefer IPv4 where the benchmark would
+/// turn IPv6 off (18.6.19.2.1, a standing exception) - IPv4 first, IPv6 kept; the sign-in
+/// keyboard where the benchmark sets the same value itself (18.9.28.1).
+const CIS_FORCED: &[(&str, &str, &str)] = &[
+    ("preferipv4", "18.6.19.2.1", "would turn IPv6 off (18.6.19.2.1). The studio keeps IPv6 on and prefers IPv4 instead - 18.6.19.2.1 is a declared exception in the gold's report."),
+    ("signinkeyboard", "18.9.28.1", "sets this itself (18.9.28.1, BlockUserInputMethodsForSignIn = 1) - the same value the policy writes."),
+];
+
+pub fn cis_forced_features(b: &crate::cis::WinBenchmark, level: u8) -> Vec<(&'static str, &'static str)> {
+    CIS_FORCED.iter().filter(|(_, rule, _)| crate::cis::win_has_rule(b, level, rule)).map(|(f, _, why)| (*f, *why)).collect()
+}
+
 fn pass2_policies(features: &[String], client: bool, core: bool) -> String {
     let fw = r"HKLM\KSYS\ControlSet001\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules";
     let mut p = String::new();
@@ -763,6 +864,10 @@ echo PVS-POLICY power > COM1
         }
         if has("firstlogon") {
             p += "reg add \"HKLM\\KSOFT\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\" /v EnableFirstLogonAnimation /t REG_DWORD /d 0 /f > COM1 2>&1\necho PVS-POLICY firstlogon > COM1\n";
+        }
+        // Machine-wide: the HKLM policy covers every account.
+        if has("searchsuggest") {
+            p += "reg add \"HKLM\\KSOFT\\Policies\\Microsoft\\Windows\\Explorer\" /v DisableSearchBoxSuggestions /t REG_DWORD /d 1 /f > COM1 2>&1\necho PVS-POLICY searchsuggest > COM1\n";
         }
     }
     p
@@ -1236,6 +1341,11 @@ pub(crate) async fn run_pass(
                         }
                         continue;
                     }
+                    // The CIS report comes back on the console as gzip+base64 lines: kept, not logged.
+                    if part.starts_with("PVS-CIS-R ") {
+                        markers.push(part.to_owned());
+                        continue;
+                    }
                     if part.starts_with("PVS-") {
                         if let Some(key) = unit_key(part)
                             && let Some(k) = units.iter().enumerate().skip(at.unwrap_or(0)).find(|(_, (u, _))| *u == key || key.starts_with(&format!("{u} "))).map(|(k, _)| k)
@@ -1292,6 +1402,14 @@ pub(crate) fn pass1_units() -> Vec<(String, f64)> {
 }
 pub(crate) fn audit_units() -> Vec<(String, f64)> {
     [("AUDIT-START", 8.0), ("VIRTIO", 5.0), ("QGA", 1.0), ("SYSPREP-START", 46.0)].iter().map(|(k, w)| (k.to_string(), *w)).collect()
+}
+/// Audit mode with CIS: the fix (secedit, auditpol, ~500 registry values, gpupdate) and the
+/// check take their share before sysprep.
+pub(crate) fn audit_units_cis() -> Vec<(String, f64)> {
+    [("AUDIT-START", 8.0), ("VIRTIO", 5.0), ("QGA", 1.0), ("CIS-START", 2.0), ("CIS-FIX-DONE", 8.0), ("CIS-CHECK-DONE", 4.0), ("SYSPREP-START", 46.0)]
+        .iter()
+        .map(|(k, w)| (k.to_string(), *w))
+        .collect()
 }
 pub(crate) fn pass2_units() -> Vec<(String, f64)> {
     [("PASS2-START", 1.0), ("GENERALIZED", 5.0), ("LOCALE", 2.0), ("TIMEZONE", 4.0), ("ANSWERFILE", 2.0)].iter().map(|(k, w)| (k.to_string(), *w)).collect()
@@ -1379,6 +1497,9 @@ pub async fn bake(
     pr.calibrate("WinPE pass 1").await;
     pr.stage(0.0, 2.0, "creating the bake VM");
     let mut made: Option<u32> = None;
+    // CIS: the Stand-alone benchmark of this image, at the bake's level
+    let cis = opt.cis.as_ref().filter(|c| (1..=2).contains(&c.level)).and_then(|c| crate::cis::win_benchmark_for(&id).map(|b| (b, c)));
+    let mut cis_report: Option<serde_json::Value> = None;
 
     let result: Result<(u32, String, Option<String>)> = async {
         // ---- seeds: one per WinPE pass ----
@@ -1386,18 +1507,18 @@ pub async fn bake(
         let seed_for = |n: u8| format!("pvs-seed-{working}-pass{n}");
         let (s1, s2) = (seed_for(1), seed_for(2));
         // Seeds are small disks now (sata3), not ISOs: built here, attached once the VM exists.
-        let pass1 = SeedDisk::build(
-            b.work,
-            &s1,
-            "PVSSEED",
-            &[
-                ("pvs/pe.cmd", &pe1_cmd(img)),
-                ("pvs/audit.xml", &audit_unattend()),
-                ("pvs/audit.cmd", &audit_cmd(agent)),
-                ("pvs/firstboot.cmd", &firstboot_cmd()),
-            ],
-        )
-        .await?;
+        let audit = audit_cmd(agent, cis.map(|(b, c)| (b.dir, c.level)));
+        let mut files: Vec<(String, Vec<u8>)> = vec![
+            ("pvs/pe.cmd".into(), pe1_cmd(img).into_bytes()),
+            ("pvs/audit.xml".into(), audit_unattend().into_bytes()),
+            ("pvs/audit.cmd".into(), audit.into_bytes()),
+            ("pvs/firstboot.cmd".into(), firstboot_cmd().into_bytes()),
+        ];
+        if let Some((b, c)) = cis {
+            files.extend(crate::cis::win_seed_files(b, c));
+        }
+        let refs: Vec<(&str, &[u8])> = files.iter().map(|(p, c)| (p.as_str(), c.as_slice())).collect();
+        let pass1 = SeedDisk::build_bytes(b.work, &s1, "PVSSEED", &refs).await?;
 
         // ---- the bake VM ----
         pve.ensure_pool(GOLD_POOL, "PVE VM Studio: golds (templates) and the bakes that make them").await?;
@@ -1490,9 +1611,24 @@ pub async fn bake(
         log.run("Audit mode: virtio drivers, guest agent, sysprep /generalize").await;
         pr.stage(39.0, 86.0, "audit mode and sysprep");
         set_boot(pve, node, vmid, "scsi0").await?;
-        let m = run_pass(pve, log, &mut pr, node, vmid, "audit", 60, &audit_units()).await?;
+        let units = if cis.is_some() { audit_units_cis() } else { audit_units() };
+        let m = run_pass(pve, log, &mut pr, node, vmid, "audit", if cis.is_some() { 90 } else { 60 }, &units).await?;
         if !m.iter().any(|l| l == "PVS-SYSPREP-START") {
             bail!("audit mode did not reach sysprep: {}", m.last().cloned().unwrap_or_else(|| "no markers".into()));
+        }
+        if cis.is_some() {
+            // The report is required: a CIS gold without one would claim what nobody checked.
+            let mut r = crate::cis::win_report_from_lines(&m).context("the CIS check's report")?;
+            // The guest's clock is no witness: PVE gives Windows a local-time RTC, and audit
+            // mode still has the image's default time zone and no network for NTP. The host's
+            // clock says when the check ran - it just did.
+            r["checked"] = json!(Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string());
+            for x in r["results"].as_array().into_iter().flatten() {
+                if matches!(x["status"].as_str(), Some("fail" | "error")) {
+                    log.warn(format!("CIS {} {}: {}", x["id"].as_str().unwrap_or(""), x["status"].as_str().unwrap_or(""), x["title"].as_str().unwrap_or(""))).await;
+                }
+            }
+            cis_report = Some(r);
         }
 
         // ---- WinPE pass 2: verify, customize, key ----
@@ -1546,7 +1682,11 @@ pub async fn bake(
             opt.region.keyboard,
             opt.region.timezone,
             if opt.features.is_empty() { "none".into() } else { opt.features.join(", ") },
-        );
+        ) + &cis_report
+            .as_ref()
+            .and_then(|r| crate::cis::summarize(r).ok())
+            .map(|c| format!("| CIS | {} v{} - {} (self-assessed) |\n", c.benchmark, c.version, c.line()))
+            .unwrap_or_default();
         let build = if img.version.is_empty() { &img.build } else { &img.version };
         let tags = vec![crate::tags::GOLD.to_owned(), crate::tags::os("windows", &id, Some(build))];
         pve.vm_set(node, vmid, form![("name", &gold_name), ("tags", tags.join(";")), ("description", notes)]).await?;
@@ -1566,6 +1706,7 @@ pub async fn bake(
                 bake_options["vmPowerPlan"] = json!(has("power"));
                 bake_options["suppressWelcomeExperience"] = json!(has("welcome"));
                 bake_options["suppressFirstSignInAnimation"] = json!(has("firstlogon"));
+                bake_options["disableSearchBoxSuggestions"] = json!(has("searchsuggest"));
             } else {
                 bake_options["suppressServerManagerAtLogon"] = json!(has("svrmgr"));
             }
@@ -1608,6 +1749,20 @@ pub async fn bake(
             )
             .await;
             let mut manifest = manifest;
+            // CIS: the report kept with the gold (as for Linux), its summary in the manifest
+            if let Some(r) = &cis_report {
+                let s = crate::cis::summarize(r)?;
+                if let Some(data) = b.work.parent() {
+                    crate::cis::store(data, gold_id, r.to_string().as_bytes(), None).await?;
+                }
+                manifest["cis"] = json!({
+                    "benchmark": s.benchmark, "version": s.version, "level": s.level, "profile": s.profile,
+                    "checked": s.checked, "score": s.score, "pass": s.pass, "fail": s.fail, "na": s.na,
+                    "review": s.review, "exception": s.exception, "error": s.error,
+                    "exceptions": opt.cis.as_ref().map(|c| c.exceptions.clone()).unwrap_or_default(),
+                    "benchmarkId": cis.map(|(b, _)| b.dir),
+                });
+            }
             if let (Some(v), Some(_)) = (upgrade, &edition_target) {
                 // imageName and imageIndex describe the index that was applied; imageId and
                 // displayName what it became. Both are true, so the sidecar says both.
@@ -1675,6 +1830,8 @@ pub struct WinVmSeed {
     pub join_specialize: Option<crate::guest::DomainJoin>,
     /// A product key from the Windows licenses blade - "" keeps the gold's KMS client key.
     pub product_key: String,
+    /// A CIS gold's benchmark and level (manifest cis.benchmarkId / level): the VM's own step.
+    pub cis: Option<(String, u8)>,
 }
 
 /// A Windows product key: five groups of five letters and digits.
@@ -1878,12 +2035,28 @@ pub fn setupcomplete_cmd(s: &WinVmSeed) -> String {
     // The licence from the Windows licenses blade: installed over the gold's KMS client key,
     // then activated (online - a failure is logged, the VM is not held up). The file deletes
     // itself, the seed disk goes after this boot.
+    // The key is on no command line: with process-creation auditing that logs command lines
+    // (a CIS gold: 17.3.2 and 18.9.3.1) "slmgr /ipk KEY" would leave it in the Security log.
+    // echo is cmd's own (no process); PowerShell reads the file and deletes it.
     if product_key_ok(&s.product_key) {
         ip += &format!(
-            "cscript //nologo %windir%\\system32\\slmgr.vbs /ipk {} >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\ncscript //nologo %windir%\\system32\\slmgr.vbs /ato >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\n",
+            "> \"%TEMP%\\pvs-key.txt\" echo {}\npowershell -NoProfile -ExecutionPolicy Bypass -Command \"$f = Join-Path $env:TEMP 'pvs-key.txt'; $k = (Get-Content $f -Raw).Trim(); Remove-Item $f -Force; (Get-CimInstance SoftwareLicensingService | Invoke-CimMethod -MethodName InstallProductKey -Arguments @{{ ProductKey = $k }}).ReturnValue\" >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\ncscript //nologo %windir%\\system32\\slmgr.vbs /ato >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\n",
             s.product_key.to_uppercase()
         );
     }
+    // CIS: what generalize reset (the built-in accounts' names) before GuestProvision, and the
+    // VM's own check once everything has run - C:\ProgramData\PVS\cis-report.json.
+    let (cis_vm, cis_check) = match &s.cis {
+        Some((bench, level)) => {
+            let ps = r"powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Windows\PVS\cis\pvs-cis.ps1";
+            (
+                format!("{ps} fix -Benchmark {bench} -Level {level} -Phase vm -Exceptions C:\\Windows\\PVS\\cis\\exceptions >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\n"),
+                format!("if not exist C:\\ProgramData\\PVS mkdir C:\\ProgramData\\PVS\n{ps} check -Benchmark {bench} -Level {level} -Phase vm -Exceptions C:\\Windows\\PVS\\cis\\exceptions -Json C:\\ProgramData\\PVS\\cis-report.json >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\n"),
+            )
+        }
+        None => (String::new(), String::new()),
+    };
+    ip += &cis_vm;
     // GuestProvision after the address (Arc and the join need the network), before the
     // marker - the studio waits for the marker, then reads GuestProvision's state.json.
     let guest = if needs_guest(&s.manifest) {
@@ -1900,7 +2073,7 @@ pub fn setupcomplete_cmd(s: &WinVmSeed) -> String {
     // that is gone. GuestProvision removes its own folder after a successful run, so
     // nothing under Setup\Scripts runs again if the VM is ever sysprepped and captured.
     crlf(&format!(
-        "@echo off\n{ip}{cds}{guest}if not exist C:\\ProgramData\\PVS mkdir C:\\ProgramData\\PVS\necho done> C:\\ProgramData\\PVS\\provisioned.txt\n(goto) 2>nul & del \"%~f0\"\n"
+        "@echo off\n{ip}{cds}{guest}{cis_check}if not exist C:\\ProgramData\\PVS mkdir C:\\ProgramData\\PVS\necho done> C:\\ProgramData\\PVS\\provisioned.txt\n(goto) 2>nul & del \"%~f0\"\n"
     ))
 }
 
@@ -2012,6 +2185,51 @@ mod tests {
     }
 
     #[test]
+    fn cis_level_turns_off_the_policies_it_contradicts() {
+        let (w11, ws25) = (crate::cis::win_benchmark_for("w11-enterprise").unwrap(), crate::cis::win_benchmark_for("ws2025-datacenter-core").unwrap());
+        let ids = |c: Vec<(&'static str, Vec<String>)>| c.into_iter().map(|(f, _)| f).collect::<Vec<_>>();
+        // Prefer IPv4 (0x20) contradicts 18.6.19.2.1 (IPv6 off, 0xff), a standing exception; RDP
+        // contradicts W11 Level 2's 18.10.57.3.2.1, an exception RDP brings. The power and OOBE
+        // policies agree with both levels - nothing is left to turn off.
+        assert!(pass2_cis_conflicts(&["preferipv4".into()], false, true, ws25, 2)[0].starts_with("18.6.19.2.1 "));
+        assert!(pass2_cis_conflicts(&["rdp".into()], true, false, w11, 2)[0].starts_with("18.10.57.3.2.1 "));
+        for (client, core, b) in [(false, true, ws25), (true, false, w11)] {
+            for level in [1, 2] {
+                assert!(ids(cis_conflicting_features(client, core, b, level)).is_empty(), "{} L{level}", b.dir);
+            }
+        }
+    }
+
+    #[test]
+    fn cis_level_2_prefers_ipv4_and_rdp_brings_its_exceptions() {
+        let (w11, ws25, ws22) = (
+            crate::cis::win_benchmark_for("w11-enterprise").unwrap(),
+            crate::cis::win_benchmark_for("ws2025-datacenter-core").unwrap(),
+            crate::cis::win_benchmark_for("ws2022-standard").unwrap(),
+        );
+        for b in [w11, ws25, ws22] {
+            assert_eq!(cis_forced_features(b, 2).iter().map(|(f, _)| *f).collect::<Vec<_>>(), ["preferipv4", "signinkeyboard"], "{}", b.dir);
+            assert!(cis_forced_features(b, 1).is_empty());
+            assert!(crate::cis::win_default_exceptions(b).iter().any(|e| e.id == "18.6.19.2.1" && e.reason.contains("0x20")));
+        }
+        let ids = |e: Vec<crate::cis::Exception>| e.into_iter().map(|x| x.id).collect::<Vec<_>>();
+        assert_eq!(ids(cis_feature_exceptions(&["rdp".into()], w11, 2)), ["18.10.57.3.2.1", "5.20", "5.21", "5.22"]);
+        assert!(cis_feature_exceptions(&["rdp".into()], w11, 1).is_empty());
+        assert!(cis_feature_exceptions(&["ping".into()], w11, 2).is_empty());
+        // The servers' 18.10.57.3.2.1 is one session per user - RDP does not touch it.
+        assert!(cis_feature_exceptions(&["rdp".into()], ws25, 2).is_empty());
+    }
+
+    #[test]
+    fn search_box_suggestions_are_a_machine_policy() {
+        let p = pass2_policies(&["searchsuggest".into()], true, false);
+        assert!(p.contains(r#"reg add "HKLM\KSOFT\Policies\Microsoft\Windows\Explorer" /v DisableSearchBoxSuggestions /t REG_DWORD /d 1 "#));
+        assert!(!p.contains("KUSER"));
+        // A client policy: not on a server.
+        assert!(!pass2_policies(&["searchsuggest".into()], false, false).contains("DisableSearchBoxSuggestions"));
+    }
+
+    #[test]
     fn old_options_keep_the_client_policies() {
         let mut o: WinBakeOptions = serde_json::from_str(r#"{"iso":"x","index":1,"region":{"locale":"en-US","keyboard":"","timezone":"UTC"},"features":["rdp"]}"#).unwrap();
         o.upgrade();
@@ -2081,6 +2299,7 @@ mod tests {
                 sudo_groups: vec![], login_groups: vec![], mode: "specialize".into(),
             }),
             product_key: String::new(),
+            cis: None,
         };
         let xml = vm_unattend(&seed, &serde_json::json!({}));
         assert!(xml.contains("<ComputerName>DC-02</ComputerName>"));
@@ -2100,10 +2319,19 @@ mod tests {
         assert!(!setupcomplete_cmd(&seed).contains("slmgr"));
         seed.product_key = "abcde-12345-fghij-67890-klmno".into();
         let sc = setupcomplete_cmd(&seed);
-        assert!(sc.contains("cscript //nologo %windir%\\system32\\slmgr.vbs /ipk ABCDE-12345-FGHIJ-67890-KLMNO >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\r\n"), "{sc}");
+        // the key only in cmd's own echo (no process, no command line in the Security log)
+        assert!(sc.contains("> \"%TEMP%\\pvs-key.txt\" echo ABCDE-12345-FGHIJ-67890-KLMNO\r\n"), "{sc}");
+        assert!(sc.contains("InstallProductKey") && !sc.contains("/ipk"));
+        assert!(sc.lines().filter(|l| l.contains("ABCDE-12345")).all(|l| l.starts_with("> \"%TEMP%")));
         assert!(sc.contains("slmgr.vbs /ato"));
         seed.product_key = "abcde-12345".into();
         assert!(!setupcomplete_cmd(&seed).contains("slmgr"));
+        // A CIS gold: the renames before GuestProvision, the VM's check at the end
+        assert!(!setupcomplete_cmd(&seed).contains("pvs-cis"));
+        seed.cis = Some(("ws2025sa".into(), 2));
+        let sc = setupcomplete_cmd(&seed);
+        let (fix, check) = (sc.find("-Phase vm -Exceptions").unwrap(), sc.find("check -Benchmark ws2025sa -Level 2 -Phase vm").unwrap());
+        assert!(fix < check && check < sc.find("provisioned.txt").unwrap());
     }
 
     #[test]
@@ -2185,7 +2413,10 @@ mod tests {
         assert!(!insider_image(&img("Professional", "Client", "26200"), canary), "a release build");
         assert!(!insider_image(&img("ServerDatacenter", "Server Core", "29683"), crate::uup::product("ws2025")), "not an Insider ISO");
         assert!(!insider_image(&img("Professional", "Client", "29683"), None), "an ISO the studio did not build");
-        assert!(audit_cmd(true).contains("qemu-ga-x86_64.msi") && !audit_cmd(false).contains("qemu-ga"));
+        assert!(audit_cmd(true, None).contains("qemu-ga-x86_64.msi") && !audit_cmd(false, None).contains("qemu-ga"));
+        let c = audit_cmd(true, Some(("w11sa", 2)));
+        let (f, s) = (c.find("pvs-cis.ps1 fix -Benchmark w11sa -Level 2").unwrap(), c.find("PVS-SYSPREP-START").unwrap());
+        assert!(f < s && c.contains("emit -Benchmark w11sa") && !audit_cmd(true, None).contains("pvs-cis"));
     }
 
     #[test]

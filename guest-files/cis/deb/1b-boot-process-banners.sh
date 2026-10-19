@@ -351,11 +351,13 @@ fix_apparmor_every_profile_enforcing() {
 }
 
 rule unconfined-unprivileged-change-profile-off "Unconfined unprivileged change_profile off"
-# An Ubuntu kernel setting (23.10 on): Debian's kernel does not have it.
+# An Ubuntu kernel setting (23.10 on), in Debian's kernel from 6.12 (Debian 13). Debian 12's
+# 6.1 has none; its benchmark has the rule all the same, with no "not applicable" - a fail
+# there, declared in debian12/exceptions.default.
 check_unconfined_unprivileged_change_profile_off() {
     if [ ! -e /proc/sys/kernel/apparmor_restrict_unprivileged_unconfined ]; then
         ev "kernel $(uname -r) has no kernel.apparmor_restrict_unprivileged_unconfined"
-        return 2
+        return 1
     fi
     sysctl_is kernel.apparmor_restrict_unprivileged_unconfined 1
 }
@@ -382,7 +384,9 @@ check_grub_superuser_password() {
 fix_grub_superuser_password() {
     local user=root pw hash
     command -v grub-mkpasswd-pbkdf2 >/dev/null 2>&1 || { ev "grub-mkpasswd-pbkdf2 missing"; return 1; }
-    if ! { [ -s "$C1B_GRUB_PWDIR/grub-password" ] && grep -q '^password_pbkdf2 ' "$C1B_GRUB_USERS" 2>/dev/null; }; then
+    # A password once set stays: the clear text exists only until the studio collected it (the
+    # bake), and a later run (an admin on a clone) must not replace the one the studio holds.
+    if ! grep -q '^password_pbkdf2 ' "$C1B_GRUB_USERS" 2>/dev/null; then
         pw=$(head -c 1024 /dev/urandom | tr -dc 'A-Za-z0-9' | head -c 24)
         [ "${#pw}" -eq 24 ] || { ev "password generation failed"; return 1; }
         hash=$(printf '%s\n%s\n' "$pw" "$pw" | grub-mkpasswd-pbkdf2 --iteration-count=600000 --salt=64 2>/dev/null \
@@ -518,18 +522,43 @@ fix_systemd_coredump_nothing_stored() { c1b_coredump_set Storage none; }
 
 # ---- 1.6 banners ----
 
+# The motd files the benchmark greps. MOTD_ALL=yes (bench.conf: Ubuntu 24.04, Debian 12): also
+# the runtime and vendor ones and the update-motd.d scripts that build the dynamic motd.
+c1b_motd_files() {
+    if [ "${MOTD_ALL:-no}" = yes ]; then
+        c1b_glob /etc/motd /run/motd /usr/lib/motd '/etc/motd.d/*' '/run/motd.d/*' '/usr/lib/motd.d/*' '/etc/update-motd.d/*'
+    else
+        c1b_glob /etc/motd '/etc/motd.d/*'
+    fi
+}
+
 rule motd-shows-no-os-details "MOTD shows no OS details"
 check_motd_shows_no_os_details() {
     local files hits
-    mapfile -t files < <(c1b_glob /etc/motd '/etc/motd.d/*')
+    mapfile -t files < <(c1b_motd_files)
     [ ${#files[@]} -gt 0 ] || { ev "no motd files"; return 0; }
     hits=$(c1b_osinfo "${files[@]}")
     if [ -n "$hits" ]; then ev "$hits"; return 1; fi
     ev "${files[*]}: no OS information"
 }
 fix_motd_shows_no_os_details() {
+    local f
     c1b_banner_write /etc/motd || return 1
     c1b_osinfo_strip $(c1b_glob '/etc/motd.d/*')
+    [ "${MOTD_ALL:-no}" = yes ] || return 0
+    # The benchmark's other remedy, removing the file: an update-motd.d script with OS text
+    # goes (a deleted conffile stays deleted); a vendor file under /usr/lib is diverted out of
+    # the way, so an update does not put it back; /run/motd* is rebuilt at the next login.
+    for f in $(c1b_osinfo $(c1b_glob '/etc/update-motd.d/*' /usr/lib/motd '/usr/lib/motd.d/*' /run/motd '/run/motd.d/*' /run/motd.dynamic) | cut -d: -f1 | sort -u); do
+        case $f in
+            /usr/lib/*)
+                mkdir -p /var/lib/pvs-cis/diverted
+                dpkg-divert --local --rename --divert "/var/lib/pvs-cis/diverted/${f//\//_}" --add "$f" >/dev/null 2>&1 || rm -f "$f"
+                ;;
+            *) rm -f "$f" ;;
+        esac
+    done
+    return 0
 }
 
 rule local-login-banner-shows-no-os-details "Local login banner shows no OS details"

@@ -61,19 +61,22 @@ e2_dnf_remove() {
 # only guards against one that was missed.
 c2_apt() { echo "c2_apt: no apt on Enterprise Linux ($*)"; return 1; }
 
-# Stop UNITS and remove the installed PKGS; when the removal is refused, mask UNITS instead.
-c2_off_fix() {
-    local pkgs=$1 units=${2:-} inst
-    # shellcheck disable=SC2086
-    inst=$(c2_installed $pkgs)
-    [ -n "$inst" ] || return 0
-    # shellcheck disable=SC2086
-    [ -n "$units" ] && systemctl stop $units 2>/dev/null
-    # shellcheck disable=SC2086
-    e2_dnf_remove $inst && return 0
-    [ -n "$units" ] || return 1
-    # shellcheck disable=SC2086
-    svc_off $units
+c2_remove() { e2_dnf_remove "$@"; }
+
+# The installed packages that need PKG: whatever requires the package, one of its provides or
+# one of its programs (file requires), PKG itself left out; empty when none. deb's version
+# asks apt-cache, which rpm systems do not have.
+c2_needed_by() {
+    local p=$1 cap
+    {
+        rpm -q --whatrequires "$p" --qf '%{NAME}\n'
+        rpm -q --provides "$p" | awk '{ print $1 }' | while read -r cap; do
+            rpm -q --whatrequires "$cap" --qf '%{NAME}\n'
+        done
+        rpm -ql "$p" | grep -E '^/(usr/)?s?bin/' | while read -r cap; do
+            rpm -q --whatrequires "$cap" --qf '%{NAME}\n'
+        done
+    } 2>/dev/null | grep -v '^no package' | grep -vx "$p" | sort -u | xargs
 }
 
 e2_major() { local v=${VERSION_ID:-0}; echo "${v%%.*}"; }
@@ -218,7 +221,7 @@ check_time_sync_in_use() {
     if ! pkg_installed chrony; then ev "chrony: not installed"; return 1; fi
     ev "chrony: installed"
     ev "$(c2_unit_line chronyd.service)"
-    [ "$(systemctl is-enabled chronyd.service 2>/dev/null)" = enabled ] && systemctl is-active --quiet chronyd.service
+    svc_enabled chronyd.service && svc_active chronyd.service
 }
 fix_time_sync_in_use() {
     pkg_installed chrony || pkg_install chrony || return 1
@@ -279,6 +282,9 @@ check_chrony_not_root() {
     opts=$(e2_chrony_opts)
     ev "$E2_CHRONY_SYSCONF OPTIONS: ${opts:-unset}"
     grep -Eq '(^|[[:space:]])-u[[:space:]]+root\b' <<<"$opts" && bad=1
+    # Every OPTIONS= line, as the benchmark greps them, not only the one that wins.
+    opts=$(grep -Psi -- '^\h*OPTIONS=\"?\h*([^#\n\r]+\h+)?-u\h+root\b' "$E2_CHRONY_SYSCONF" 2>/dev/null)
+    [ -n "$opts" ] && { ev "$opts"; bad=1; }
     procs=$(ps -eo user:32=,comm= 2>/dev/null | awk '$2 == "chronyd" { print $1 }' | sort -u | xargs)
     ev "chronyd runs as: ${procs:-not running}"
     [[ " $procs " == *" root "* ]] && bad=1
@@ -291,6 +297,8 @@ fix_chrony_not_root() {
     opts=$(sed -E 's/(^|[[:space:]])-u[[:space:]]+[^[:space:]]+//g' <<<"$opts" | xargs)
     getent passwd chrony >/dev/null 2>&1 && opts="${opts:+$opts }-u chrony"
     kv_set "$E2_CHRONY_SYSCONF" OPTIONS "\"$opts\"" =
+    # An earlier OPTIONS= line with -u root (kv_set keeps the last one only).
+    sed -i -E 's/^([[:space:]]*OPTIONS=.*(^|[[:space:]"])-u[[:space:]]+root\b)/# pvs-cis: \1/' "$E2_CHRONY_SYSCONF"
     chmod 0644 "$E2_CHRONY_SYSCONF"
     systemctl try-restart chronyd.service 2>/dev/null
     return 0

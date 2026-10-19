@@ -577,8 +577,24 @@ impl Pve {
         let base = format!("/nodes/{}/qemu/{vmid}/agent", enc(node));
         let form: Form = argv.iter().map(|a| ("command".to_owned(), (*a).to_owned())).collect();
         let started: Started = self.post(&format!("{base}/exec"), form).await?;
+        // A busy guest (VBS under nesting, first boot) lets a status call time out now and then
+        // (500 "got timeout"); the command runs on and the agent keeps its result, so only a run
+        // of failures ends the wait.
+        let mut failed = 0;
         for _ in 0..600 {
-            let s: Status = self.get(&format!("{base}/exec-status?pid={}", started.pid)).await?;
+            let s: Status = match self.get(&format!("{base}/exec-status?pid={}", started.pid)).await {
+                Ok(s) => {
+                    failed = 0;
+                    s
+                }
+                Err(e) if failed < 10 => {
+                    failed += 1;
+                    tracing::debug!("VM {vmid}: exec-status for pid {} failed ({failed} in a row): {e:#}", started.pid);
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
             if s.exited == Some(1) {
                 let out = format!("{}{}", s.out.unwrap_or_default(), s.err.unwrap_or_default());
                 return Ok((s.exitcode.unwrap_or(-1), out));

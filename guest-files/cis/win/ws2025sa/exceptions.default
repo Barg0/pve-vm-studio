@@ -1,0 +1,3 @@
+# Studio deviations for this benchmark - recommendation <tab> reason. The fix leaves these
+# alone, the check still runs and reports "exception" with the reason.
+18.6.19.2.1	IPv6 stays on: the studio prefers IPv4 instead (DisabledComponents 0x20, Microsoft's recommendation in "Configure IPv6 in Windows" rather than disabling IPv6). The Prefer IPv4 policy is baked into every Level 2 gold.

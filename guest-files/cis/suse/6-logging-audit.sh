@@ -159,6 +159,8 @@ C6_R_6_2_3_17=(
     "-a always,exit -F arch=b64 -F dir=/etc/pam.d -F perm=wa -k identity"
     "-a always,exit -F arch=b64 -F dir=/usr/lib/pam.d -F perm=wa -k identity"
 )
+# The benchmark asks for /etc/pam.d only: the vendor locations are written, not required.
+check_audit_pam_config_changes() { c6_audit_check "-a always,exit -F arch=b64 -F dir=/etc/pam.d -F perm=wa -k identity"; }
 
 S6_R_CREATE_QUERY_MODULE=("-a always,exit -F arch=b64 -S create_module,query_module -F auid>=$C6_UID -F auid!=unset -k kernel_modules")
 rule audit-create-query-module-syscalls "Audit create_module/query_module syscalls"
@@ -283,9 +285,15 @@ ConditionPathExists=$db
 
 [Service]
 Type=oneshot
+# aide --check exits 1-7 when it finds added/removed/changed files - its report, not a
+# failure of the unit; 14 and up are errors and still fail it.
+SuccessExitStatus=1 2 3 4 5 6 7
 Nice=19
 IOSchedulingClass=idle
 ExecStart=$aide --check
+
+[Install]
+WantedBy=multi-user.target
 EOF
     cat > /etc/systemd/system/aidecheck.timer <<'EOF'
 [Unit]
@@ -304,8 +312,11 @@ EOF
     systemctl daemon-reload
     systemctl unmask aidecheck.timer aidecheck.service 2>/dev/null
     systemctl --now enable aidecheck.timer 2>/dev/null
+    # EL10 / SLE 16 remediation: the service enabled too (WantedBy=multi-user.target).
+    [ "${AIDE_SVC:-no}" = yes ] && systemctl enable aidecheck.service 2>/dev/null
     svc_active aidecheck.timer
 }
+
 
 fix_aide_protects_audit_tools() {
     vendor_copy "$C6_AIDE_CONF"
@@ -322,9 +333,10 @@ fix_aide_protects_audit_tools() {
 }
 
 # 6.3.3 on Leap: the attributes aide itself applies to each tool (`aide -p`, its "selective
-# rule: '<path> (none) <attrs>'" line), not the config text. Leap's aide is built without
-# xattrs (`aide --version`: "xattrs: no") and drops it with a warning; then xattrs counts
-# when the config line asks for it - there is nothing more the system can do.
+# rule: '<path> (none) <attrs>'" line), not the config text - as the benchmark reads them.
+# Leap's aide is built without xattrs (`aide --version`: "xattrs: no") and drops it: the rule
+# fails then, and leap16/exceptions.default declares why; the evidence says whether the
+# config line asks for xattrs all the same.
 check_aide_protects_audit_tools() {
     local aide conf t out rule line item bad=0 miss noxattrs=0
     aide=$(command -v aide)
@@ -340,15 +352,54 @@ check_aide_protects_audit_tools() {
         miss=""
         for item in p i n u g s b acl xattrs sha512; do
             tr '+' '\n' <<<"$rule" | grep -qx -- "$item" && continue
-            if [ "$item" = xattrs ] && [ "$noxattrs" = 1 ] && tr ' \t+' '\n\n\n' <<<"$line" | grep -qx xattrs; then continue; fi
             miss+=" $item"
         done
         if [ -n "$miss" ]; then
             ev "$t: missing$miss (aide applies: ${rule:-nothing})"
-            bad=1
+            if [ "$miss" = " xattrs" ] && [ "$noxattrs" = 1 ] && tr ' \t+' '\n\n\n' <<<"$line" | grep -qx xattrs; then
+                ev "$t: xattrs is in aide.conf - this aide is built without it"
+                [ $bad -eq 4 ] || bad=1
+            else
+                # Anything but the xattrs the exception declares: a fail it must not hide.
+                bad=4
+            fi
         else
-            ev "$t: ${rule}$([ "$noxattrs" = 1 ] && echo ' (xattrs in aide.conf; this aide is built without it)')"
+            ev "$t: ${rule}"
         fi
     done
     return $bad
+}
+
+# 6.2.1.2 on SLE 16: with the rules immutable (-e 2) a restart of auditd - a package update
+# of audit, or one whose scripts restart it - ends with auditd down until the next boot:
+# ExecStopPost's auditctl -R fails ("immutable mode") and fails the unit, and the start then
+# reruns audit-rules.service, whose augenrules --load fails the same way ("Dependency failed").
+# Drop-ins: the stop rules may fail, and audit-rules stays active once it has loaded at boot.
+fix_auditd_enabled_and_running() {
+    local d
+    if systemctl cat audit-rules.service >/dev/null 2>&1; then
+        d=/etc/systemd/system/audit-rules.service.d
+        mkdir -p "$d"
+        # A failed load does not take auditd down with it: the 6.2.3.x checks compare the
+        # loaded rules with rules.d and show what is missing.
+        printf '%s\n' '# pvs-cis: loaded once at boot; an auditd restart under -e 2 must not fail on it' \
+            '[Service]' 'RemainAfterExit=yes' 'ExecStart=' 'ExecStart=-/sbin/augenrules --load' > "$d/60-pvs-cis.conf"
+        chmod 0644 "$d/60-pvs-cis.conf"
+    fi
+    if systemctl cat auditd.service 2>/dev/null | grep -Eq '^ExecStopPost=/'; then
+        d=/etc/systemd/system/auditd.service.d
+        mkdir -p "$d"
+        { echo '# pvs-cis: audit-stop.rules cannot load under -e 2 - not a failure of the stop'
+          echo '[Service]'
+          echo 'ExecStopPost='
+          systemctl cat auditd.service | sed -n 's/^ExecStopPost=\//ExecStopPost=-\//p'
+        } > "$d/60-pvs-cis.conf"
+        chmod 0644 "$d/60-pvs-cis.conf"
+    fi
+    systemctl daemon-reload 2>/dev/null
+    systemctl unmask auditd 2>/dev/null
+    systemctl enable auditd 2>/dev/null
+    systemctl reset-failed auditd.service audit-rules.service 2>/dev/null
+    systemctl start auditd 2>/dev/null
+    svc_active auditd
 }

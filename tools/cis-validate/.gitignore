@@ -1,0 +1,9 @@
+# Local config and anything a run writes - run output holds CIS text and must not be committed.
+config.toml
+inventory.tsv
+work/
+run-*/
+*.out
+*.txt
+*.pdf
+__pycache__/

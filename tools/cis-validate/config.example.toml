@@ -1,0 +1,30 @@
+# cisv configuration. Copy to config.toml (git-ignored) or point $CISV_CONFIG at it.
+# Every path may start with ~. Nothing in here is CIS text.
+
+[paths]
+pdf_dir = "/srv/cis/pdf"                 # the CIS benchmark PDFs, original file names
+work_dir = "/srv/cis/run-2026-10-17"     # all output: PDF extracts, runners, per-VM results, reviews
+# cis_dir = "/srv/kiln/guest-files/cis"  # default: guest-files/cis of the repo this tool sits in
+# inventory = "/srv/cis/run-2026-10-17/inventory.tsv"   # default: <work_dir>/inventory.tsv
+# thirdparty_dir = "/srv/cis/thirdparty"                # default: <work_dir>/thirdparty
+
+[bin]
+pdftotext = "pdftotext"
+
+[ssh]
+key = "~/.ssh/id_ed25519"
+pve_host = "root@pve-01.testitfirst.dev"
+# options = ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=15"]
+
+[studio]
+ct = 100                                 # the studio's container: gold reports are read from it
+data_dir = "/var/lib/pve-vm-studio"
+
+[guard]
+# VMID 101 and jh-pve-01 are always refused; these add to them.
+vmids = []
+names = []
+
+[audit]
+lockdown_concurrency = 5                 # goss/syver --max-concurrent; RHEL10's audit OOMs at 4 GB with more
+# ssg_dir = "/srv/cis/thirdparty/ssg"    # unpacked ComplianceAsCode release (the *-ds.xml files)
