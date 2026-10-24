@@ -436,7 +436,9 @@ pub static WIN_FEATURES: &[WinFeature] = &[
     WinFeature { id: "power", label: "VM power plan", scope: "client",
         tip: "High performance, display off and sleep set to never, hibernation off - as machine policy, so a domain GPO overrides it later." },
     WinFeature { id: "welcome", label: "No welcome experience", scope: "client",
-        tip: "Policy DisableWindowsSpotlightWindowsWelcomeExperience: no Getting Started / Welcome screen at logon." },
+        tip: "User policy DisableWindowsSpotlightWindowsWelcomeExperience 1, in the Default user's profile: no Getting Started / Welcome screen at logon. Enterprise and Education only - Pro ignores it." },
+    WinFeature { id: "spotlight", label: "No Spotlight", scope: "client",
+        tip: "User policy DisableWindowsSpotlightFeatures 1 (CIS 19.7.8.4), in the Default user's profile: every Windows Spotlight feature off - lock screen images, tips, consumer suggestions and the welcome experience. Enterprise and Education only - Pro ignores it." },
     WinFeature { id: "firstlogon", label: "No first sign-in animation", scope: "client",
         tip: "EnableFirstLogonAnimation 0: the first logon lands straight on the desktop, without \"Hi\" and \"We're getting things ready\"." },
     WinFeature { id: "searchsuggest", label: "No search box suggestions", scope: "client",
@@ -711,6 +713,8 @@ pub fn pass2_cis_conflicts(features: &[String], client: bool, core: bool, b: &cr
             let (key, rest) = rest.split_once('"')?;
             let key = if let Some(k) = key.strip_prefix(r"HKLM\KSYS\ControlSet001\") {
                 format!(r"HKLM\SYSTEM\CurrentControlSet\{k}")
+            } else if let Some(k) = key.strip_prefix(r"HKLM\KUSER\") {
+                format!(r"HKU\{k}")
             } else {
                 format!(r"HKLM\SOFTWARE\{}", key.strip_prefix(r"HKLM\KSOFT\")?)
             };
@@ -767,14 +771,28 @@ pub fn cis_feature_exceptions(features: &[String], b: &crate::cis::WinBenchmark,
 
 /// The baked-in policies CIS `level` turns on, with why: Prefer IPv4 where the benchmark would
 /// turn IPv6 off (18.6.19.2.1, a standing exception) - IPv4 first, IPv6 kept; the sign-in
-/// keyboard where the benchmark sets the same value itself (18.9.28.1).
+/// keyboard where the benchmark sets the same value itself (18.9.28.1); Spotlight likewise
+/// (19.7.8.4), and the welcome experience with it - a Spotlight feature, off once all are.
 const CIS_FORCED: &[(&str, &str, &str)] = &[
     ("preferipv4", "18.6.19.2.1", "would turn IPv6 off (18.6.19.2.1). The studio keeps IPv6 on and prefers IPv4 instead - 18.6.19.2.1 is a declared exception in the gold's report."),
     ("signinkeyboard", "18.9.28.1", "sets this itself (18.9.28.1, BlockUserInputMethodsForSignIn = 1) - the same value the policy writes."),
+    ("spotlight", "19.7.8.4", "sets this itself (19.7.8.4, DisableWindowsSpotlightFeatures = 1) - the same value the policy writes."),
+    ("welcome", "19.7.8.4", "turns every Spotlight feature off (19.7.8.4), the welcome experience among them."),
 ];
 
 pub fn cis_forced_features(b: &crate::cis::WinBenchmark, level: u8) -> Vec<(&'static str, &'static str)> {
-    CIS_FORCED.iter().filter(|(_, rule, _)| crate::cis::win_has_rule(b, level, rule)).map(|(f, _, why)| (*f, *why)).collect()
+    // A client's policy only where the benchmark is a client's (W11), a server's only on servers.
+    let client = b.dir.starts_with("w11");
+    let fits = |f: &str| WIN_FEATURES.iter().find(|x| x.id == f).is_some_and(|x| match x.scope {
+        "client" => client,
+        "server" => !client,
+        _ => true,
+    });
+    CIS_FORCED
+        .iter()
+        .filter(|(f, rule, _)| fits(f) && crate::cis::win_has_rule(b, level, rule))
+        .map(|(f, _, why)| (*f, *why))
+        .collect()
 }
 
 fn pass2_policies(features: &[String], client: bool, core: bool) -> String {
@@ -859,8 +877,19 @@ echo PVS-POLICY power > COM1
             p += &format!("reg add \"HKLM\\KSOFT\\Microsoft\\Windows\\CurrentVersion\\OOBE\" /v {k} /t REG_DWORD /d {v} /f > COM1 2>&1\n");
         }
         p += "echo PVS-POLICY oobe-bypass > COM1\n";
-        if has("welcome") {
-            p += "reg add \"HKLM\\KSOFT\\Policies\\Microsoft\\Windows\\CloudContent\" /v DisableWindowsSpotlightWindowsWelcomeExperience /t REG_DWORD /d 1 /f > COM1 2>&1\necho PVS-POLICY welcome > COM1\n";
+        // User policies (CloudContent.admx, User Configuration): Windows reads them from HKCU
+        // only, so they go into the Default user's NTUSER.DAT - every new profile is copied
+        // from it.
+        let user: Vec<(&str, &str)> = [("spotlight", "DisableWindowsSpotlightFeatures"), ("welcome", "DisableWindowsSpotlightWindowsWelcomeExperience")]
+            .into_iter()
+            .filter(|(f, _)| has(f))
+            .collect();
+        if !user.is_empty() {
+            p += "reg load HKLM\\KUSER W:\\Users\\Default\\NTUSER.DAT > COM1 2>&1 || goto :fail\n";
+            for (f, v) in user {
+                p += &format!("reg add \"HKLM\\KUSER\\Software\\Policies\\Microsoft\\Windows\\CloudContent\" /v {v} /t REG_DWORD /d 1 /f > COM1 2>&1\necho PVS-POLICY {f} > COM1\n");
+            }
+            p += "reg unload HKLM\\KUSER > COM1 2>&1\n";
         }
         if has("firstlogon") {
             p += "reg add \"HKLM\\KSOFT\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\" /v EnableFirstLogonAnimation /t REG_DWORD /d 0 /f > COM1 2>&1\necho PVS-POLICY firstlogon > COM1\n";
@@ -1705,6 +1734,7 @@ pub async fn bake(
                 bake_options["preventDeviceEncryption"] = json!(has("noencrypt"));
                 bake_options["vmPowerPlan"] = json!(has("power"));
                 bake_options["suppressWelcomeExperience"] = json!(has("welcome"));
+                bake_options["disableSpotlight"] = json!(has("spotlight"));
                 bake_options["suppressFirstSignInAnimation"] = json!(has("firstlogon"));
                 bake_options["disableSearchBoxSuggestions"] = json!(has("searchsuggest"));
             } else {
@@ -2207,8 +2237,13 @@ mod tests {
             crate::cis::win_benchmark_for("ws2025-datacenter-core").unwrap(),
             crate::cis::win_benchmark_for("ws2022-standard").unwrap(),
         );
+        let forced = |b| cis_forced_features(b, 2).iter().map(|(f, _)| *f).collect::<Vec<_>>();
+        // Spotlight and the welcome experience are client policies: forced on W11 only.
+        assert_eq!(forced(w11), ["preferipv4", "signinkeyboard", "spotlight", "welcome"]);
         for b in [w11, ws25, ws22] {
-            assert_eq!(cis_forced_features(b, 2).iter().map(|(f, _)| *f).collect::<Vec<_>>(), ["preferipv4", "signinkeyboard"], "{}", b.dir);
+            if b.dir != "w11sa" {
+                assert_eq!(forced(b), ["preferipv4", "signinkeyboard"], "{}", b.dir);
+            }
             assert!(cis_forced_features(b, 1).is_empty());
             assert!(crate::cis::win_default_exceptions(b).iter().any(|e| e.id == "18.6.19.2.1" && e.reason.contains("0x20")));
         }
@@ -2218,6 +2253,23 @@ mod tests {
         assert!(cis_feature_exceptions(&["ping".into()], w11, 2).is_empty());
         // The servers' 18.10.57.3.2.1 is one session per user - RDP does not touch it.
         assert!(cis_feature_exceptions(&["rdp".into()], ws25, 2).is_empty());
+    }
+
+    #[test]
+    fn spotlight_and_welcome_are_user_policies() {
+        let p = pass2_policies(&["spotlight".into(), "welcome".into()], true, false);
+        assert!(p.contains(r"reg load HKLM\KUSER W:\Users\Default\NTUSER.DAT"));
+        for v in ["DisableWindowsSpotlightFeatures", "DisableWindowsSpotlightWindowsWelcomeExperience"] {
+            assert!(p.contains(&format!(r#"reg add "HKLM\KUSER\Software\Policies\Microsoft\Windows\CloudContent" /v {v} /t REG_DWORD /d 1 "#)), "{v}");
+        }
+        assert!(!p.contains(r"KSOFT\Policies\Microsoft\Windows\CloudContent"));
+        assert!(p.find(r"reg unload HKLM\KUSER").unwrap() > p.find("PVS-POLICY welcome").unwrap());
+        // Without either, the Default user's hive stays untouched; on a server too.
+        assert!(!pass2_policies(&["firstlogon".into()], true, false).contains("KUSER"));
+        assert!(!pass2_policies(&["spotlight".into()], false, false).contains("KUSER"));
+        // The conflict check reads the user hive as HKU: 19.7.8.4 agrees with the value.
+        let w11 = crate::cis::win_benchmark_for("w11-enterprise").unwrap();
+        assert!(pass2_cis_conflicts(&["spotlight".into()], true, false, w11, 2).is_empty());
     }
 
     #[test]

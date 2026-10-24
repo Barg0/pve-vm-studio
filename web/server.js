@@ -1059,7 +1059,7 @@ function goldBuildHtml(g, build) {
 }
 const ACTIVATION = { "kms-client": "KMS client key (GVLK)", preview: "Insider preview key", retail: "Retail key", mak: "MAK", none: "None" };
 const BAKE_OPTION = { rdp: "Remote Desktop", ping: "Answers ping", suppressServerManagerAtLogon: "No Server Manager at sign-in",
-  blockSignInInputMethods: "Fixed sign-in keyboard", suppressWelcomeExperience: "No welcome experience", suppressFirstSignInAnimation: "No first sign-in animation",
+  blockSignInInputMethods: "Fixed sign-in keyboard", suppressWelcomeExperience: "No welcome experience", disableSpotlight: "No Spotlight", suppressFirstSignInAnimation: "No first sign-in animation",
   edgeBaseline: "Edge baseline", preferIPv4: "Prefer IPv4", preventDeviceEncryption: "No auto device encryption", vmPowerPlan: "VM power plan", disableSearchBoxSuggestions: "No search box suggestions" };
 const shortHash = h => h ? `${h.slice(0, 8)}…${h.slice(-4)}` : "";
 function goldKv(rows) {
@@ -1491,7 +1491,7 @@ async function bladeGolds(main, stale) {
     if (g.os === "windows") {
       const bo = m.bakeOptions;
       const policies = bo ? [["rdp", "rdp"], ["ping", "ping"], ["blockSignInInputMethods", "signinkeyboard"], ["suppressServerManagerAtLogon", "svrmgr"],
-        ["suppressWelcomeExperience", "welcome"], ["suppressFirstSignInAnimation", "firstlogon"], ["edgeBaseline", "edge"], ["preferIPv4", "preferipv4"], ["disableSearchBoxSuggestions", "searchsuggest"],
+        ["suppressWelcomeExperience", "welcome"], ["disableSpotlight", "spotlight"], ["suppressFirstSignInAnimation", "firstlogon"], ["edgeBaseline", "edge"], ["preferIPv4", "preferipv4"], ["disableSearchBoxSuggestions", "searchsuggest"],
         // A gold from before these two were toggles had both, always.
         ["preventDeviceEncryption", "noencrypt", true], ["vmPowerPlan", "power", true]].filter(([k, , was]) => bo[k] ?? was).map(([, f]) => f) : m.policies;
       const editionKey = { EnterpriseMultiSession: "MultiSession", DatacenterAzureEdition: "AzureEdition", Enterprise: "Enterprise", Education: "Education",
