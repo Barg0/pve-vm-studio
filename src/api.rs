@@ -2678,7 +2678,10 @@ fn winget_capable(image_id: &str) -> bool {
 fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: &str, gold_id: &str, default_bridge: &str) -> VmSpec {
     let defaults = &state["defaults"];
     let str_of = |k: &str| s[k].as_str().unwrap_or("").trim().to_owned();
-    let builtin_admin = s["builtInAdminOnly"].as_bool().unwrap_or(false);
+    // AD DS forces it, as the card shows it (isBuiltInAdminOnly) - the card's own flag stays
+    // as it was, so the role decides here too.
+    let ad_ds = s["windowsFeatures"].as_array().is_some_and(|f| f.iter().any(|x| x.as_str() == Some("AD-Domain-Services")));
+    let builtin_admin = s["builtInAdminOnly"].as_bool().unwrap_or(false) || ad_ds;
     let user = if builtin_admin { "Administrator".to_owned() } else { str_of("localUserName") };
     let bridge = str_of("switchName");
     // Hardware: the design's defaults (VM settings), or the card's own under "Override the
@@ -3109,4 +3112,22 @@ async fn put_notify(State(app): State<AppState>, user: User, Json(b): Json<Notif
         .collect();
     settings::save(&app.db, "notify", &notify::NotifySettings { events }).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_domain_controller_signs_in_as_the_built_in_administrator() {
+        let state = serde_json::json!({ "defaults": {} });
+        let card = |features: serde_json::Value, only: bool| {
+            serde_json::json!({ "name": "DC-01", "_id": "c1", "localUserName": "ops", "builtInAdminOnly": only, "windowsFeatures": features })
+        };
+        // AD DS forces it, though the card's own flag stayed off.
+        assert_eq!(spec_from_design(&card(serde_json::json!(["AD-Domain-Services", "DNS"]), false), &state, "lab", "g", "vmbr0").user, "Administrator");
+        assert_eq!(spec_from_design(&card(serde_json::json!([]), true), &state, "lab", "g", "vmbr0").user, "Administrator");
+        let member = spec_from_design(&card(serde_json::json!(["DNS"]), false), &state, "lab", "g", "vmbr0");
+        assert_eq!((member.user.as_str(), member.name.as_str()), ("ops", "dc-01"));
+    }
 }

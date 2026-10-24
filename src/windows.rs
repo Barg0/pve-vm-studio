@@ -1997,7 +1997,9 @@ pub fn vm_unattend(s: &WinVmSeed, manifest: &serde_json::Value) -> String {
     } else {
         ""
     };
-    let computer = xml_escape(&s.name.to_uppercase());
+    // As the card names it: Windows keeps the NetBIOS name in capitals by itself, the DNS host
+    // name takes this one.
+    let computer = xml_escape(&s.name);
     let specialize = specialize_components(s);
     format!(
         r#"<?xml version="1.0" encoding="utf-8"?>
@@ -2036,7 +2038,7 @@ pub fn vm_unattend(s: &WinVmSeed, manifest: &serde_json::Value) -> String {
 }
 
 pub fn vm_cmd(s: &WinVmSeed) -> String {
-    crlf(&format!("set PVS_NAME={}\n", s.name.to_uppercase()))
+    crlf(&format!("set PVS_NAME={}\n", s.name))
 }
 
 /// Runs as SYSTEM once OOBE is done: the static address (matched by MAC), then the marker.
@@ -2354,7 +2356,7 @@ mod tests {
             cis: None,
         };
         let xml = vm_unattend(&seed, &serde_json::json!({}));
-        assert!(xml.contains("<ComputerName>DC-02</ComputerName>"));
+        assert!(xml.contains("<ComputerName>dc-02</ComputerName>"));
         assert!(xml.contains("<Identifier>BC-24-11-AA-BB-CC</Identifier>"));
         assert!(xml.contains("<IpAddress wcm:action=\"add\" wcm:keyValue=\"1\">10.0.0.12/24</IpAddress>"));
         assert!(xml.contains("<NextHopAddress>10.0.0.1</NextHopAddress>"));
