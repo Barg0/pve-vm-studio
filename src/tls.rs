@@ -237,9 +237,14 @@ const LE_STAGING: &str = "https://acme-staging-v02.api.letsencrypt.org/directory
 
 /// lego's DNS provider codes, from `lego dnshelp`.
 pub async fn dns_providers() -> Vec<String> {
-    // lego's list only changes with lego itself - asked once per run, not per page view.
-    static LIST: tokio::sync::OnceCell<Vec<String>> = tokio::sync::OnceCell::const_new();
-    LIST.get_or_init(read_dns_providers).await.clone()
+    // lego's list only changes with lego itself - asked once per run, not per page view. An
+    // empty answer is not kept: the next call asks again.
+    static LIST: tokio::sync::Mutex<Vec<String>> = tokio::sync::Mutex::const_new(Vec::new());
+    let mut list = LIST.lock().await;
+    if list.is_empty() {
+        *list = read_dns_providers().await;
+    }
+    list.clone()
 }
 
 /// `lego dnshelp`. lego creates its --path (default ./.lego) before any command, even this
@@ -262,12 +267,19 @@ async fn read_dns_providers() -> Vec<String> {
         return vec![];
     };
     let text = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
-    let Some(list) = text.split("All DNS codes:").nth(1) else { return vec![] };
+    dns_codes(&text)
+}
+
+/// The codes in `lego dnshelp`'s answer: the comma list after its heading - "All DNS codes:"
+/// up to 4.2x, "Supported DNS providers:" since (4.35.2 from Debian backports, 2026-10-24) -
+/// up to the next empty line.
+fn dns_codes(text: &str) -> Vec<String> {
+    let Some(list) = ["All DNS codes:", "Supported DNS providers:"].iter().find_map(|h| text.split(h).nth(1)) else { return vec![] };
     list.lines()
         .map(str::trim)
-        .find(|l| !l.is_empty())
-        .unwrap_or("")
-        .split(',')
+        .skip_while(|l| l.is_empty())
+        .take_while(|l| !l.is_empty())
+        .flat_map(|l| l.split(','))
         .map(|c| c.trim().to_owned())
         .filter(|c| !c.is_empty() && c.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-'))
         .collect()
@@ -488,5 +500,19 @@ pub async fn renew_loop(db: SqlitePool, paths: Paths, live: Option<RustlsConfig>
             tracing::error!("certificate renewal: {e}");
         }
         let _ = settings::save(&db, "tls", &s).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dns_codes_read_both_lego_formats() {
+        let old = "Credentials for DNS providers must be passed through environment variables.\n\nAll DNS codes:\n  acme-dns, alidns, inwx, rfc2136\n\nMore information: https://go-acme.github.io/lego/dns\n";
+        let new = "Credentials for DNS providers must be passed through environment variables.\n\nSupported DNS providers:\n  active24, cloudflare, inwx,\n  ionos, rfc2136\n\nMore information: https://go-acme.github.io/lego/dns\n";
+        assert_eq!(dns_codes(old), ["acme-dns", "alidns", "inwx", "rfc2136"]);
+        assert_eq!(dns_codes(new), ["active24", "cloudflare", "inwx", "ionos", "rfc2136"]);
+        assert!(dns_codes("lego: command failed").is_empty());
     }
 }
