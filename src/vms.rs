@@ -409,6 +409,27 @@ async fn deploy_inner(
     // A gold baked without the guest agent (Windows Insider): the VM is started and not
     // followed - nothing in it can report back. Golds from before the flag have the agent.
     let agent = !win || manifest["guestAgent"].as_bool() != Some(false);
+    // Capabilities the gold cannot take (Build-Vms' Test-WantsServerCoreAppCompat and its
+    // client-only RSAT): App Compatibility refuses to install on Desktop Experience, the RSAT
+    // capabilities are Windows 11's - a server has its RSAT as features. A design made for
+    // another gold drops them here instead of failing offline and again online.
+    let fitted;
+    let spec = if win && (spec.app_compat || !spec.rsat.is_empty()) {
+        let mut s = spec.clone();
+        let kind = manifest["installationType"].as_str().unwrap_or("");
+        if s.app_compat && kind != "Server Core" {
+            s.app_compat = false;
+            log.info("Server Core App Compatibility skipped - it installs on Server Core only").await;
+        }
+        if !s.rsat.is_empty() && kind != "Client" {
+            s.rsat.clear();
+            log.info("RSAT capabilities skipped - Windows 11 only, a server has its RSAT as features").await;
+        }
+        fitted = s;
+        &fitted
+    } else {
+        spec
+    };
     let img = if win {
         windows::check_name(&spec.name)?;
         if manifest["cis"].is_object() {
@@ -643,12 +664,14 @@ async fn deploy_inner(
     };
 
     // Roles and features: offline in the deploy pass where Windows' own table knows them
-    // (Install-WindowsFeature -Vhd on Hyper-V); GuestProvision keeps the full list - a
-    // feature already installed is "no change needed" there, one that failed offline gets
-    // its second chance online, and the guest-only ones are installed there for the first time.
+    // (Install-WindowsFeature -Vhd on Hyper-V); GuestProvision gets what is left (guest-only,
+    // not in the table, a part the image lacks) - and the full list through the fallback
+    // manifest when anything failed offline: a feature already installed is "no change
+    // needed" there, one that failed gets its second chance online.
     let feature_plan = if win && pass_media.is_some() && manifest["installationType"].as_str() != Some("Client") {
         let build = manifest["build"].as_str().unwrap_or("");
-        windows::plan_server_features(&spec.windows_features, spec.include_management_tools, build)
+        let core = manifest["installationType"].as_str() == Some("Server Core");
+        windows::plan_server_features(&spec.windows_features, spec.include_management_tools, build, core)
     } else {
         windows::FeaturePlan { dism: vec![], online: spec.windows_features.clone(), groups: vec![] }
     };
@@ -1156,6 +1179,16 @@ async fn guest_provision_result(pve: &Pve, db: &SqlitePool, log: &JobLog, vm_id:
             if st["domainJoin"].is_object() { ", domain join registered (runs in 5 minutes, then reboots)" } else { "" },
         ))
         .await;
+        // A feature Install-WindowsFeature refused (not on this image, no source, no Windows
+        // Update): the build goes on, the role is missing - a warning, never an ok line.
+        for f in st["featuresFailed"].as_array().into_iter().flatten() {
+            log.warn(format!(
+                "Feature {} was not installed: {} - see C:\\ProgramData\\VmDeployLogs in the VM",
+                f["name"].as_str().unwrap_or("?"),
+                f["message"].as_str().unwrap_or("failed")
+            ))
+            .await;
+        }
         for d in st["dataDisks"].as_array().into_iter().flatten().filter(|d| d["success"].as_bool() == Some(false)) {
             log.warn(format!(
                 "Data disk {}: was not provisioned - see C:\\ProgramData\\VmDeployLogs in the VM",

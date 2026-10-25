@@ -1024,8 +1024,12 @@ pub static APP_REMOVAL: &[&str] = &[
 ];
 
 /// Server Manager feature -> DISM feature table for Windows Server 2025 (build 26100), read
-/// from the image's own package manifests by tools/gen-server-features.py.
+/// from the image's own package manifests by tools/gen-server-features.py. One per
+/// installation type: Server Core carries 52 fewer features (the MMC consoles among them -
+/// RSAT-DFS-Mgmt-Con, RSAT-Print-Services) and its roles name no console as their tools, as
+/// Install-WindowsFeature -IncludeManagementTools on Core leaves them out.
 static SERVER_FEATURES_26100: &str = include_str!("../data/server-features-26100.json");
+static SERVER_FEATURES_26100_CORE: &str = include_str!("../data/server-features-26100-core.json");
 
 /// Features Build-Vms never stages offline: their CBS advanced installer runs in Setup's
 /// "Getting ready" phase, before specialize names the machine (Build-Vms'
@@ -1047,53 +1051,83 @@ pub struct FeaturePlan {
     pub groups: Vec<(String, Vec<String>)>,
 }
 
-pub fn plan_server_features(names: &[String], include_tools: bool, build: &str) -> FeaturePlan {
-    static TABLE: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+pub fn plan_server_features(names: &[String], include_tools: bool, build: &str, core: bool) -> FeaturePlan {
+    static DESKTOP: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
+    static CORE: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
     if !build.contains("26100") {
         return FeaturePlan { dism: vec![], online: names.to_vec(), groups: vec![] };
     }
-    let table = TABLE.get_or_init(|| serde_json::from_str(SERVER_FEATURES_26100).unwrap_or_default());
+    let table = if core {
+        CORE.get_or_init(|| serde_json::from_str(SERVER_FEATURES_26100_CORE).unwrap_or_default())
+    } else {
+        DESKTOP.get_or_init(|| serde_json::from_str(SERVER_FEATURES_26100).unwrap_or_default())
+    };
     let (mut dism, mut online, mut groups) = (Vec::<String>::new(), Vec::new(), Vec::<(String, Vec<String>)>::new());
-    let mut seen = std::collections::HashSet::new();
+    // seen: walked for an earlier feature; expanded: walked with its defaults. IIS pulled in
+    // by ADCS-Web-Enrollment is seen, and Web-Server asked for after it still brings its
+    // defaults - the order of the list does not matter.
+    let (mut seen, mut expanded) = (std::collections::HashSet::new(), std::collections::HashSet::new());
     for requested in names {
-        if requested.is_empty() || seen.contains(requested) {
+        if requested.is_empty() || expanded.contains(requested) || online.contains(requested) {
             continue;
         }
         if GUEST_ONLY_FEATURES.contains(&requested.as_str()) || table[requested.as_str()].is_null() {
-            seen.insert(requested.clone());
             online.push(requested.clone());
             continue;
         }
-        // Everything this feature pulls in that no earlier one did.
-        let mut mine = Vec::new();
-        let mut queue: std::collections::VecDeque<(String, bool)> = [(requested.clone(), true)].into();
-        while let Some((name, top)) = queue.pop_front() {
-            if name.is_empty() || !seen.insert(name.clone()) {
+        // Everything this feature pulls in that no earlier one did. The flag: asked for by
+        // name, or a default member of one that was - only those bring their own defaults
+        // (InstallWithParentByDefault), as Install-WindowsFeature does: Web-Server by name
+        // brings Web-Static-Content, IIS pulled in as a parent comes without it.
+        let (mut walked, mut mine, mut missing) = (std::collections::HashSet::<(String, bool)>::new(), Vec::new(), false);
+        let mut queue: std::collections::VecDeque<(String, bool, bool)> = [(requested.clone(), true, true)].into();
+        while let Some((name, top, named)) = queue.pop_front() {
+            let done = if named { expanded.contains(&name) } else { seen.contains(&name) || expanded.contains(&name) };
+            if name.is_empty() || done || !walked.insert((name.clone(), named)) {
                 continue;
             }
             let entry = &table[name.as_str()];
+            // A part the image does not carry (NPAS for RDS-Gateway on Core) or one that
+            // cannot be staged offline: the feature goes to GuestProvision whole, where
+            // Install-WindowsFeature says what is wrong - never enabled half.
             if entry.is_null() || GUEST_ONLY_FEATURES.contains(&name.as_str()) {
-                continue;
+                missing = true;
+                break;
             }
             let list = |k: &str| entry[k].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect::<Vec<_>>()).unwrap_or_default();
             if let Some(parent) = entry["parent"].as_str().filter(|p| !p.is_empty()) {
-                queue.push_back((parent.to_owned(), false));
+                queue.push_back((parent.to_owned(), false, false));
             }
             for d in list("deps") {
-                queue.push_back((d, false));
+                queue.push_back((d, false, false));
+            }
+            if named {
+                for d in list("defaults") {
+                    queue.push_back((d, false, true));
+                }
             }
             if top && include_tools {
                 for t in list("tools") {
-                    queue.push_back((t, false));
+                    queue.push_back((t, false, false));
                 }
             }
             for d in list("dism") {
-                if !dism.contains(&d) {
-                    dism.push(d.clone());
+                if !dism.contains(&d) && !mine.contains(&d) {
                     mine.push(d);
                 }
             }
         }
+        if missing {
+            online.push(requested.clone());
+            continue;
+        }
+        for (name, named) in walked {
+            if named {
+                expanded.insert(name.clone());
+            }
+            seen.insert(name);
+        }
+        dism.extend(mine.iter().cloned());
         groups.push((requested.clone(), mine));
     }
     FeaturePlan { dism, online, groups }
@@ -1288,9 +1322,12 @@ set "p=%~1"
 call :dism /Image:W:\ /Remove-ProvisionedAppxPackage /PackageName:!p! && (echo PVS-APP-REMOVED !p! > COM1) || (echo PVS-APP-FAIL !p! > COM1)
 exit /b 0
 :dism
-rem Back-to-back DISM sessions can collide on the image's mapped hives - two retries.
+rem Back-to-back DISM sessions can collide on the image's mapped hives - two retries. 3010 is
+rem success with a restart to follow: the VM's first boot is that restart.
 for /l %%i in (1,1,3) do (
-    dism /English %* > COM1 2>&1 && exit /b 0
+    dism /English %* > COM1 2>&1
+    if !errorlevel! equ 0 exit /b 0
+    if !errorlevel! equ 3010 exit /b 0
     ping -n 11 127.0.0.1 >nul
 )
 exit /b 1
@@ -2394,6 +2431,7 @@ mod tests {
             &["AD-Domain-Services".to_owned(), "ADCS-Cert-Authority".to_owned(), "RDS-Web-Access".to_owned()],
             true,
             "10.0.26100.4061",
+            false,
         );
         let (dism, online) = (plan.dism, plan.online);
         assert_eq!(plan.groups.len(), 2);
@@ -2404,8 +2442,51 @@ mod tests {
             assert!(dism.iter().any(|d| d == want), "{want} missing from {dism:?}");
         }
         assert_eq!(online, vec!["RDS-Web-Access".to_owned()]);
-        let p = plan_server_features(&["DNS".to_owned()], true, "20348");
+        let p = plan_server_features(&["DNS".to_owned()], true, "20348", false);
         assert!(p.dism.is_empty() && p.online == vec!["DNS".to_owned()]);
+    }
+
+    #[test]
+    fn server_core_plans_without_the_consoles() {
+        // files-01 and print-01 on a Core gold (2026-10-25): DISM knew none of the consoles.
+        let names = ["FS-DFS-Namespace".to_owned(), "Print-Server".to_owned()];
+        let desktop = plan_server_features(&names, true, "26100", false).dism;
+        let core = plan_server_features(&names, true, "26100", true).dism;
+        for console in ["DfsMgmt", "Server-Manager-RSAT-File-Services", "Printing-AdminTools-Collection"] {
+            assert!(desktop.iter().any(|d| d == console), "{console} missing from {desktop:?}");
+            assert!(!core.iter().any(|d| d == console), "{console} in {core:?}");
+        }
+        for want in ["DFSN-Server", "CoreFileServer", "Printing-Server-Role", "ServerCore-WOW64"] {
+            assert!(core.iter().any(|d| d == want), "{want} missing from {core:?}");
+        }
+        // A console asked for by name on Core is left for GuestProvision, which reports it.
+        let p = plan_server_features(&["RSAT-DFS-Mgmt-Con".to_owned()], true, "26100", true);
+        assert!(p.dism.is_empty() && p.online == vec!["RSAT-DFS-Mgmt-Con".to_owned()]);
+        // RDS-Gateway needs NPAS, which Core does not carry: the whole feature goes online,
+        // never the Gateway without it.
+        let p = plan_server_features(&["RDS-Gateway".to_owned()], true, "26100", true);
+        assert!(p.dism.is_empty() && p.online == vec!["RDS-Gateway".to_owned()], "{:?}", p.dism);
+    }
+
+    #[test]
+    fn web_server_by_name_brings_its_defaults() {
+        // The issuing CA's Web-Server: Install-WindowsFeature brings the default role
+        // services (InstallWithParentByDefault); without them IIS 404s every CRL.
+        let iis = ["IIS-WebServer", "IIS-StaticContent", "IIS-DefaultDocument", "IIS-HttpLogging", "IIS-RequestFiltering", "IIS-HttpCompressionStatic"];
+        for names in [vec!["Web-Server"], vec!["Web-Ftp-Server", "Web-Server"]] {
+            let names: Vec<String> = names.into_iter().map(str::to_owned).collect();
+            let dism = plan_server_features(&names, true, "26100", false).dism;
+            for want in iis {
+                assert!(dism.iter().any(|d| d == want), "{want} missing for {names:?}: {dism:?}");
+            }
+        }
+        // IIS that comes in as another feature's parent comes without them.
+        let ftp = plan_server_features(&["Web-Ftp-Server".to_owned()], true, "26100", false).dism;
+        assert!(ftp.iter().any(|d| d == "IIS-WebServerRole") && ftp.iter().any(|d| d == "IIS-FTPSvc"), "{ftp:?}");
+        assert!(!ftp.iter().any(|d| d == "IIS-StaticContent"), "{ftp:?}");
+        // WSUS by name: its database and services, as on Hyper-V.
+        let wsus = plan_server_features(&["UpdateServices".to_owned()], true, "26100", true).dism;
+        assert!(wsus.iter().any(|d| d == "UpdateServices-WidDatabase"), "{wsus:?}");
     }
 
     #[test]

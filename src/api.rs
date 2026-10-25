@@ -2680,7 +2680,8 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
     let str_of = |k: &str| s[k].as_str().unwrap_or("").trim().to_owned();
     // AD DS forces it, as the card shows it (isBuiltInAdminOnly) - the card's own flag stays
     // as it was, so the role decides here too.
-    let ad_ds = s["windowsFeatures"].as_array().is_some_and(|f| f.iter().any(|x| x.as_str() == Some("AD-Domain-Services")));
+    let has_feature = |name: &str| s["windowsFeatures"].as_array().is_some_and(|f| f.iter().any(|x| x.as_str() == Some(name)));
+    let ad_ds = has_feature("AD-Domain-Services");
     let builtin_admin = s["builtInAdminOnly"].as_bool().unwrap_or(false) || ad_ds;
     let user = if builtin_admin { "Administrator".to_owned() } else { str_of("localUserName") };
     let bridge = str_of("switchName");
@@ -2748,10 +2749,11 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
                     .collect()
             })
             .unwrap_or_default(),
-        // Azure Local runs its own hypervisor, Hotpatch needs VBS: nested whatever the
+        // Azure Local and the Hyper-V role run their own hypervisor (Build-Vms'
+        // Test-ServerWantsNestedVirtualization), Hotpatch needs VBS: nested whatever the
         // defaults say.
         hotpatch,
-        nested: str_of("imageId") == "azl" || hotpatch || if own { s["nestedVirtualization"].as_bool().unwrap_or(hw.nested) } else { hw.nested },
+        nested: str_of("imageId") == "azl" || hotpatch || has_feature("Hyper-V") || if own { s["nestedVirtualization"].as_bool().unwrap_or(hw.nested) } else { hw.nested },
         cpu_type: if cpu_type == "auto" { String::new() } else { cpu_type },
         security_flags: hw.security_flags != "off",
         ksm: hw.ksm,
@@ -3129,5 +3131,14 @@ mod tests {
         assert_eq!(spec_from_design(&card(serde_json::json!([]), true), &state, "lab", "g", "vmbr0").user, "Administrator");
         let member = spec_from_design(&card(serde_json::json!(["DNS"]), false), &state, "lab", "g", "vmbr0");
         assert_eq!((member.user.as_str(), member.name.as_str()), ("ops", "dc-01"));
+    }
+
+    #[test]
+    fn the_hyper_v_role_gets_nested_virtualization() {
+        let state = serde_json::json!({ "defaults": {} });
+        let card = |features: serde_json::Value| {
+            serde_json::json!({ "name": "hv-01", "_id": "c1", "localUserName": "ops", "nestedVirtualization": false, "windowsFeatures": features })
+        };
+        assert!(spec_from_design(&card(serde_json::json!(["Hyper-V"])), &state, "lab", "g", "vmbr0").nested);
     }
 }

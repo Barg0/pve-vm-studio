@@ -7,17 +7,23 @@ mapping in its package manifests: every <update name="..."> that is a Server Man
 component carries a <ServerComponent UniqueName="..."> - plus its NonAncestorDependencies
 (what Install-WindowsFeature adds on its own) and, on the management tools, an
 <OptionalCompanionFor Type="RSAT" UniqueName="..."> (what -IncludeManagementTools adds). Role
-services name their role as Parent= (Install-WindowsFeature brings the role along).
+services name their role as Parent= (Install-WindowsFeature brings the role along), and the
+ones marked InstallWithParentByDefault="true" are what Install-WindowsFeature adds when the
+parent itself is asked for by name (Web-Server brings Web-Static-Content; IIS that comes in
+only as another feature's parent comes without them).
 
-Regenerate from a Server ISO (Desktop Experience index - a superset of Core):
+Regenerate from a Server ISO, once per installation type - Core is no subset of Desktop
+Experience: it lacks the MMC consoles, and its roles name none of them as their tools:
     7z e <server.iso> sources/install.wim
     wimlib-imagex extract install.wim 4 /Windows/servicing --dest-dir=svc --no-acls
     tools/gen-server-features.py svc/servicing/Packages > data/server-features-<build>.json
+    (the Core index the same way, into data/server-features-<build>-core.json)
 """
 import glob, json, sys, xml.etree.ElementTree as ET
 
 NS = "{urn:schemas-microsoft-com:asm.v3}"
 comps = {}
+defaults = {}
 for f in glob.glob(sys.argv[1] + "/*.mum"):
     try:
         root = ET.parse(f).getroot()
@@ -33,6 +39,8 @@ for f in glob.glob(sys.argv[1] + "/*.mum"):
             e = comps.setdefault(sc.get("UniqueName"), {"dism": set(), "deps": set(), "tools_for": set(), "parent": ""})
             if sc.get("Parent"):
                 e["parent"] = sc.get("Parent")
+                if sc.get("InstallWithParentByDefault") == "true":
+                    defaults.setdefault(sc.get("Parent"), set()).add(sc.get("UniqueName"))
             # What it deploys, when it says so (<Deploys><Update Name=...>), else the update
             # it is defined in. The *_ua updates are user-assistance (help), not the feature.
             deploys = [d.get("Name") for d in sc.iter() if d.tag.endswith("Update") and d.get("Name")]
@@ -50,7 +58,7 @@ for name, e in comps.items():
     for t in e["tools_for"]:
         tools.setdefault(t, set()).add(name)
 out = {
-    name: {"dism": sorted(e["dism"]), "parent": e["parent"], "deps": sorted(e["deps"]), "tools": sorted(tools.get(name, []))}
+    name: {"dism": sorted(e["dism"]), "parent": e["parent"], "deps": sorted(e["deps"]), "tools": sorted(tools.get(name, [])), "defaults": sorted(d for d in defaults.get(name, []) if d in comps)}
     for name, e in sorted(comps.items())
     if e["dism"]
 }

@@ -1359,7 +1359,7 @@ const ROLE_CATALOG = [
     id: "Hyper-V",
     label: "Hyper-V",
     icon: "role-hyperv.svg",
-    info: "Installs the Hyper-V role (Install-WindowsFeature Hyper-V). Build-Vms also enables nested virtualization and MAC spoofing on this VM.",
+    info: "Installs the Hyper-V role (Install-WindowsFeature Hyper-V). The studio also enables nested virtualization on this VM.",
     hint: "Enables nested virtualization on the VM"
   },
   {
@@ -2322,8 +2322,9 @@ const AUTO_START_ACTIONS = [
 ];
 /* Images that are themselves a hypervisor cannot boot without the extensions exposed,
    so the switch is on and locked rather than merely defaulted on. */
+/* The image (Azure Local) or the Hyper-V role: both run their own hypervisor. */
 function nestedVirtRequired(s) {
-  return !!(s && findImage(s.imageId).requiresNestedVirt);
+  return !!(s && (findImage(s.imageId).requiresNestedVirt || (s.windowsFeatures || []).includes("Hyper-V")));
 }
 /* A W11 CIS gold turns VBS, HVCI and Credential Guard on (CIS 18.9.5): the studio deploys it
    with nesting and a vTPM, which they need on PVE. */
@@ -6615,7 +6616,7 @@ function renderServerCard(s) {
                 <div class="toggle-grid hw-toggles">
                   ${toggle(`data-s="${esc(s._id)}" data-k="nestedVirtualization"`, `Nested virtualization${infoTip("Nested virtualization", NESTED_VIRT_INFO)}`,
                     hw.nested, !hw.own || nestedVirtRequired(s) || (hotpatchCapable(s) && !!s.hotpatchReady),
-                    nestedVirtRequired(s) ? `Required by ${esc(findImage(s.imageId).label)} — it runs its own hypervisor.` : (hotpatchCapable(s) && s.hotpatchReady ? "Required by Hotpatch ready" : ""))}
+                    nestedVirtRequired(s) ? `Required by ${findImage(s.imageId).requiresNestedVirt ? esc(findImage(s.imageId).label) : "the Hyper-V role"} — it runs its own hypervisor.` :(hotpatchCapable(s) && s.hotpatchReady ? "Required by Hotpatch ready" : ""))}
                   ${toggle(`data-s="${esc(s._id)}" data-k="netQueues"`, `Network queues${infoTip("Network queues", "One queue per vCPU (8 at most) for a server. Windows clients keep one.")}`, hw.queues, !hw.own)}
                 </div>
               </div>

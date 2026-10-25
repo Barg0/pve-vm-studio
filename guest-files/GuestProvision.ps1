@@ -568,10 +568,12 @@ function Install-PendingWindowsFeatures {
             }
             else {
                 Write-Log "Feature '$featureName' failed: ExitCode=$($result.ExitCode)" -Tag "Error"
+                $script:featuresFailed += @{ name = $featureName; message = "ExitCode $($result.ExitCode)" }
             }
         }
         catch {
             Write-Log "Feature '$featureName' threw: $($_.Exception.Message)" -Tag "Error"
+            $script:featuresFailed += @{ name = $featureName; message = $_.Exception.Message }
         }
     }
 
@@ -1075,10 +1077,12 @@ Write-Log "$env:COMPUTERNAME | $env:USERNAME | $applicationName" -Tag "Info"
 
 $exitCode = 0
 $restartNeeded = $false
+$script:featuresFailed = @()
 $state = @{
     computerName       = $env:COMPUTERNAME
     startedUtc         = (Get-Date).ToUniversalTime().ToString("o")
     featuresOnline     = @()
+    featuresFailed     = @()
     rsatOnline         = @()
     capabilitiesOnline = @()
     dataDisks          = @()
@@ -1211,6 +1215,8 @@ try {
     }
     Set-PvsProgress -Step "done" -Add ($script:pvsTotal - $script:pvsDone)
 
+    # Each feature that did not install, so the studio warns about it instead of a green build.
+    $state.featuresFailed = @($script:featuresFailed)
     $state.restartNeeded = $restartNeeded
     $state.success       = $true
     $state.completedUtc  = (Get-Date).ToUniversalTime().ToString("o")

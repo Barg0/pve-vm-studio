@@ -488,8 +488,21 @@ impl Pve {
 
     /// Changes a VM's config synchronously (PUT), for settings that need no task.
     pub async fn vm_set(&self, node: &str, vmid: u32, form: Form) -> Result<()> {
-        let _: Value = self.put(&format!("/nodes/{}/qemu/{vmid}/config", enc(node)), form).await?;
-        Ok(())
+        // PVE waits 10 s for the VM's config lock, then answers 500 "can't lock file ... got
+        // timeout" - another task still holds it (seen right after a restart). The PUT changes
+        // nothing until it gets the lock, so trying again is safe.
+        let path = format!("/nodes/{}/qemu/{vmid}/config", enc(node));
+        let mut tries = 0;
+        loop {
+            match self.put::<Value>(&path, form.clone()).await {
+                Err(e) if tries < 5 && format!("{e:#}").contains("can't lock file") => {
+                    tries += 1;
+                    tracing::debug!("VM {vmid}: config locked, try {tries} again: {e:#}");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+                r => return r.map(|_| ()),
+            }
+        }
     }
 
     /// Changes a VM's config through a task (POST) - what disk allocation and imports need.
