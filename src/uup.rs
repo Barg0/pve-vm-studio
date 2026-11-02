@@ -66,12 +66,15 @@ async fn get(web: &reqwest::Client, path: &str, query: &[(&str, &str)]) -> Resul
             wait *= 3;
             continue;
         }
-        let v: serde_json::Value = resp
-            .error_for_status()
-            .with_context(|| format!("the UUP dump catalog refused {path}"))?
-            .json()
-            .await
-            .with_context(|| format!("reading the UUP dump catalog's answer to {path}"))?;
+        // A refusal carries the catalog's reason in its JSON (a build it has not read yet):
+        // into the message, not dropped with the body.
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            let why = serde_json::from_str::<serde_json::Value>(&body).ok().and_then(|v| v["response"]["error"].as_str().map(str::to_owned));
+            bail!("the UUP dump catalog refused {path}: HTTP {}{}", status.as_u16(), why.map(|w| format!(" ({w})")).unwrap_or_default());
+        }
+        let v: serde_json::Value = resp.json().await.with_context(|| format!("reading the UUP dump catalog's answer to {path}"))?;
         match v["response"]["error"].as_str() {
             Some("USER_RATE_LIMITED") if attempt < 3 => {
                 tokio::time::sleep(std::time::Duration::from_secs(wait)).await;

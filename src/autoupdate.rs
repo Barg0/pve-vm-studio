@@ -418,10 +418,38 @@ async fn settle(app: &AppState, run: &mut Run) -> Result<()> {
             }
             return Ok(());
         }
+        // The catalog refused the new build's file list - Future Platforms 29698 on
+        // 2026-10-30, found and built in the same minute, answered 400 and a minute later
+        // nothing. Not the run's fault: back to pending, asked again an hour later in a
+        // window, until the build is CATALOG_PATIENCE old.
+        "iso" if catalog_refused(&err) && !run_too_old(run) => {
+            tracing::warn!("auto-update {}: {err} - asked again in an hour", run.id);
+            run.step = "pending".into();
+            run.error = Some(format!("{CATALOG_WAIT}{err}"));
+        }
         _ if !ok => fail(app, run, err).await?,
         _ => {}
     }
     save_run(&app.db, run).await
+}
+
+/// What a run waiting on the catalog carries in its error, ahead of the catalog's answer.
+const CATALOG_WAIT: &str = "waiting for UUP dump: ";
+/// How long a run waits for the catalog to serve its build before it fails.
+const CATALOG_PATIENCE: chrono::Duration = chrono::Duration::days(3);
+
+fn catalog_refused(err: &str) -> bool {
+    err.contains("the UUP dump catalog") || err.contains("asking the UUP dump catalog")
+}
+
+fn run_too_old(run: &Run) -> bool {
+    chrono::DateTime::parse_from_rfc3339(&run.created_at).is_ok_and(|t| chrono::Utc::now() - t.with_timezone(&chrono::Utc) > CATALOG_PATIENCE)
+}
+
+/// A run back from a catalog refusal starts again an hour after it, not on the next tick.
+fn catalog_wait_over(run: &Run) -> bool {
+    !run.error.as_deref().is_some_and(|e| e.starts_with(CATALOG_WAIT))
+        || chrono::DateTime::parse_from_rfc3339(&run.updated_at).is_ok_and(|t| chrono::Utc::now() - t.with_timezone(&chrono::Utc) >= chrono::Duration::hours(1))
 }
 
 /// The bakes of a run: each follower's job that ended is taken in - its gold, found by the
@@ -489,6 +517,7 @@ async fn start_step(app: &AppState, run: &mut Run) -> Result<()> {
                     .ok_or_else(|| anyhow!("{} is gone - nothing to build its successor from", run.source_iso))?;
                 let q = api::MediaBuild { product: run.product.clone(), uuid: run.to_uuid.clone(), build: run.to_build.clone(), lang: iso.lang.clone(), editions: iso.editions.clone() };
                 let job = api::spawn_media_build(app, "auto-update", q, tag(run)).await.map_err(|e| anyhow!("{e}"))?;
+                run.error = None; // a catalog wait before this try is over
                 // Its bakes go into the queue with it, each waiting for this build to succeed.
                 let mut fl = run.followers();
                 for f in fl.iter_mut() {
@@ -926,7 +955,7 @@ async fn tick(app: &AppState, st: &mut State) -> Result<()> {
     if !runs.iter().any(|r| r.step == "iso") {
         let left = end.map(|e| (e - now).num_seconds()).unwrap_or(0);
         let mut next = None;
-        for (i, r) in runs.iter().enumerate().filter(|(_, r)| r.step == "pending" && r.job_id.is_none()) {
+        for (i, r) in runs.iter().enumerate().filter(|(_, r)| r.step == "pending" && r.job_id.is_none() && (r.force != 0 || catalog_wait_over(r))) {
             let fits = au.iso_after_window || left >= last_took(&app.db, "media", "media", &r.product).await.unwrap_or(2 * 3600);
             if r.force != 0 || (open && fits) {
                 next = Some(i);
@@ -1401,6 +1430,25 @@ async fn mail_done(app: &AppState, run: &Run) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_catalog_refusal_waits_an_hour_then_three_days_at_most() {
+        let at = |h: i64| (chrono::Utc::now() - chrono::Duration::hours(h)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let run = |created: i64, updated: i64, error: Option<&str>| Run {
+            id: "r".into(), source_iso: String::new(), product: "w11-future".into(), from_build: String::new(), to_build: String::new(),
+            to_uuid: String::new(), release: String::new(), step: "pending".into(), new_iso: None, golds: "[]".into(), job_id: None,
+            error: error.map(str::to_owned), failed_step: None, force: 0, created_at: at(created), updated_at: at(updated),
+        };
+        // The night of 2026-10-30, with the reason the catalog gives now in brackets.
+        assert!(catalog_refused("the UUP dump catalog refused get.php: HTTP 400 (EMPTY_FILELIST)"));
+        assert!(catalog_refused("the UUP dump catalog refused get.php: HTTP status client error (400 Bad Request)"));
+        assert!(!catalog_refused("local:iso/x.iso is gone - nothing to build its successor from"));
+        let waiting = format!("{CATALOG_WAIT}the UUP dump catalog refused get.php: HTTP 400");
+        assert!(!catalog_wait_over(&run(1, 0, Some(&waiting))));
+        assert!(catalog_wait_over(&run(2, 1, Some(&waiting))));
+        assert!(catalog_wait_over(&run(0, 0, None)));
+        assert!(!run_too_old(&run(71, 0, None)) && run_too_old(&run(73, 0, None)));
+    }
 
     #[test]
     fn winpe_states() {

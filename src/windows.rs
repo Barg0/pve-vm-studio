@@ -1023,13 +1023,18 @@ pub static APP_REMOVAL: &[&str] = &[
     "Microsoft.XboxIdentityProvider", "Microsoft.XboxSpeechToTextOverlay", "Microsoft.Xbox.TCUI", "MSTeams",
 ];
 
-/// Server Manager feature -> DISM feature table for Windows Server 2025 (build 26100), read
-/// from the image's own package manifests by tools/gen-server-features.py. One per
-/// installation type: Server Core carries 52 fewer features (the MMC consoles among them -
-/// RSAT-DFS-Mgmt-Con, RSAT-Print-Services) and its roles name no console as their tools, as
-/// Install-WindowsFeature -IncludeManagementTools on Core leaves them out.
-static SERVER_FEATURES_26100: &str = include_str!("../data/server-features-26100.json");
-static SERVER_FEATURES_26100_CORE: &str = include_str!("../data/server-features-26100-core.json");
+/// Server Manager feature -> DISM feature tables for Windows Server 2025 (26100) and 2022
+/// (20348), read from the images' own package manifests by tools/gen-server-features.py.
+/// One per installation type: Server Core carries some 50 fewer features (the MMC consoles
+/// among them - RSAT-DFS-Mgmt-Con, RSAT-Print-Services) and its roles name no console as
+/// their tools, as Install-WindowsFeature -IncludeManagementTools on Core leaves them out.
+///   (build, Server Core, table)
+static SERVER_FEATURES: &[(&str, bool, &str)] = &[
+    ("26100", false, include_str!("../data/server-features-26100.json")),
+    ("26100", true, include_str!("../data/server-features-26100-core.json")),
+    ("20348", false, include_str!("../data/server-features-20348.json")),
+    ("20348", true, include_str!("../data/server-features-20348-core.json")),
+];
 
 /// Features Build-Vms never stages offline: their CBS advanced installer runs in Setup's
 /// "Getting ready" phase, before specialize names the machine (Build-Vms'
@@ -1052,16 +1057,12 @@ pub struct FeaturePlan {
 }
 
 pub fn plan_server_features(names: &[String], include_tools: bool, build: &str, core: bool) -> FeaturePlan {
-    static DESKTOP: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
-    static CORE: std::sync::OnceLock<serde_json::Value> = std::sync::OnceLock::new();
-    if !build.contains("26100") {
+    static TABLES: std::sync::OnceLock<Vec<serde_json::Value>> = std::sync::OnceLock::new();
+    let tables = TABLES.get_or_init(|| SERVER_FEATURES.iter().map(|(_, _, t)| serde_json::from_str(t).unwrap_or_default()).collect());
+    let Some(i) = SERVER_FEATURES.iter().position(|(b, c, _)| build.contains(b) && *c == core) else {
         return FeaturePlan { dism: vec![], online: names.to_vec(), groups: vec![] };
-    }
-    let table = if core {
-        CORE.get_or_init(|| serde_json::from_str(SERVER_FEATURES_26100_CORE).unwrap_or_default())
-    } else {
-        DESKTOP.get_or_init(|| serde_json::from_str(SERVER_FEATURES_26100).unwrap_or_default())
     };
+    let table = &tables[i];
     let (mut dism, mut online, mut groups) = (Vec::<String>::new(), Vec::new(), Vec::<(String, Vec<String>)>::new());
     // seen: walked for an earlier feature; expanded: walked with its defaults. IIS pulled in
     // by ADCS-Web-Enrollment is seen, and Web-Server asked for after it still brings its
@@ -2442,8 +2443,15 @@ mod tests {
             assert!(dism.iter().any(|d| d == want), "{want} missing from {dism:?}");
         }
         assert_eq!(online, vec!["RDS-Web-Access".to_owned()]);
-        let p = plan_server_features(&["DNS".to_owned()], true, "20348", false);
+        let p = plan_server_features(&["DNS".to_owned()], true, "29683", false);
         assert!(p.dism.is_empty() && p.online == vec!["DNS".to_owned()]);
+        // Server 2022 has its own tables, Core without the consoles as on 2025.
+        let p = plan_server_features(&["DNS".to_owned()], true, "10.0.20348.5761", false);
+        assert!(p.online.is_empty() && p.dism.iter().any(|d| d == "DNS-Server-Full-Role"), "{:?}", p.dism);
+        let names = ["FS-DFS-Namespace".to_owned()];
+        assert!(plan_server_features(&names, true, "20348", false).dism.iter().any(|d| d == "DfsMgmt"));
+        let core = plan_server_features(&names, true, "20348", true);
+        assert!(core.online.is_empty() && !core.dism.iter().any(|d| d == "DfsMgmt") && core.dism.iter().any(|d| d == "DFSN-Server"), "{:?}", core.dism);
     }
 
     #[test]
