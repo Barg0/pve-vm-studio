@@ -581,6 +581,13 @@ async fn deploy_inner(
     if !spec.ksm {
         hw.push(("allow-ksm".into(), "0".into()));
     }
+    // Windows: PVE pinned the machine version when the gold was baked, and the clone has it
+    // from there. The VM gets the newest one its node has.
+    if win {
+        let machine = pve.newest_machine(&node, "q35").await.context("asking the node for its newest q35 machine version")?;
+        log.info(format!("Machine {machine}")).await;
+        hw.push(("machine".into(), machine));
+    }
     for (i, (n, m)) in spec.extra_nics.iter().zip(&extra_macs).enumerate() {
         let mut v = format!("virtio={m},bridge={}", n.bridge);
         if let Some(t) = n.vlan {
@@ -764,6 +771,7 @@ async fn deploy_inner(
                 .as_str()
                 .zip(manifest["cis"]["level"].as_u64())
                 .map(|(b, l)| (b.to_owned(), l as u8)),
+            grow: spec.disk_gb.is_some_and(|gb| gb > gold_disk_gb),
         };
         let unattend = windows::vm_unattend(&ws, &manifest);
         let vmcmd = windows::vm_cmd(&ws);

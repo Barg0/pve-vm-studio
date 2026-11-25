@@ -515,6 +515,14 @@ impl Pve {
         }
     }
 
+    /// The newest machine version the node's QEMU has of a type ("q35"), as the config takes
+    /// it: "pc-q35-11.1". PVE pins a Windows VM's version when the VM is created, and a clone
+    /// keeps its gold's - the version of the day the gold was baked.
+    pub async fn newest_machine(&self, node: &str, kind: &str) -> Result<String> {
+        let all: Vec<Value> = self.get(&format!("/nodes/{}/capabilities/qemu/machines", enc(node))).await?;
+        newest_machine_of(&all, kind).ok_or_else(|| anyhow!("{node} lists no {kind} machine version"))
+    }
+
     pub async fn vm_action(&self, node: &str, vmid: u32, action: &str) -> Result<()> {
         self.run_task(&format!("/nodes/{}/qemu/{vmid}/status/{action}", enc(node)), vec![], |_| {})
             .await
@@ -1077,6 +1085,21 @@ pub struct VmStatus {
     pub template: Option<u8>,
 }
 
+/// The id of the highest version of `kind` in /capabilities/qemu/machines' answer. A version
+/// is "11.0" or "11.0+pve2" - PVE's own revisions of one QEMU version count upwards.
+fn newest_machine_of(all: &[Value], kind: &str) -> Option<String> {
+    let key = |v: &str| -> Option<(u32, u32, u32)> {
+        let (qemu, rev) = v.split_once("+pve").unwrap_or((v, "0"));
+        let (major, minor) = qemu.split_once('.')?;
+        Some((major.parse().ok()?, minor.parse().ok()?, rev.parse().ok()?))
+    };
+    all.iter()
+        .filter(|m| m["type"].as_str() == Some(kind))
+        .filter_map(|m| Some((key(m["version"].as_str()?)?, m["id"].as_str()?)))
+        .max_by_key(|(k, _)| *k)
+        .map(|(_, id)| id.to_owned())
+}
+
 impl Pve {
     pub async fn version(&self) -> Result<Version> {
         self.get("/version").await
@@ -1124,6 +1147,20 @@ mod endpoint_tests {
             insecure: false,
         })
         .unwrap()
+    }
+
+    #[test]
+    fn the_newest_machine_version() {
+        let all = serde_json::json!([
+            {"id": "pc-i440fx-11.1", "type": "i440fx", "version": "11.1"},
+            {"id": "pc-q35-9.2+pve1", "type": "q35", "version": "9.2+pve1"},
+            {"id": "pc-q35-11.0+pve2", "type": "q35", "version": "11.0+pve2"},
+            {"id": "pc-q35-11.1", "type": "q35", "version": "11.1"},
+            {"id": "pc-q35-10.2", "type": "q35", "version": "10.2"},
+        ]);
+        assert_eq!(super::newest_machine_of(all.as_array().unwrap(), "q35").as_deref(), Some("pc-q35-11.1"));
+        assert_eq!(super::newest_machine_of(&all.as_array().unwrap()[1..3], "q35").as_deref(), Some("pc-q35-11.0+pve2"));
+        assert_eq!(super::newest_machine_of(all.as_array().unwrap(), "virt"), None);
     }
 
     #[test]

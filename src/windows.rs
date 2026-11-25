@@ -580,13 +580,27 @@ echo format quick fs=fat32 label=System
 echo assign letter=S
 echo create partition msr size=128
 echo create partition primary
+echo shrink minimum={winre_mb}
 echo format quick fs=ntfs label=Windows
 echo assign letter=W
+echo create partition primary
+echo format quick fs=ntfs label=Recovery
+echo assign letter=R
+echo set id="de94bba4-06d1-4d40-a16a-bfd50179d6ac"
+echo gpt attributes=0x8000000000000001
 ) > X:\dp.txt
 diskpart /s X:\dp.txt > COM1 2>&1 || goto :fail
 echo PVS-PARTITIONED > COM1
 dism /English /Apply-Image /ImageFile:%SRC% /Index:{index} /ApplyDir:W:\ > COM1 2>&1 || goto :fail
 echo PVS-APPLIED > COM1
+rem WinRE out of the image onto its own partition, as Microsoft's ApplyImage.bat does it:
+rem on C: it is gone with a BitLocker lockout or a damaged volume - when it is needed.
+rem The image's own reagentc, for the same reason as its bcdboot below.
+mkdir R:\Recovery\WindowsRE
+xcopy /h /y W:\Windows\System32\Recovery\Winre.wim R:\Recovery\WindowsRE\ > COM1 2>&1
+if not exist R:\Recovery\WindowsRE\Winre.wim (echo PVS-NO-WINRE > COM1 & goto :fail)
+W:\Windows\System32\Reagentc.exe /Setreimage /Path R:\Recovery\WindowsRE /Target W:\Windows > COM1 2>&1 || (echo PVS-NO-WINRE > COM1 & goto :fail)
+echo PVS-RECOVERY > COM1
 rem The gold boots on virtio-scsi from its first start: the storage, network and serial
 rem drivers go into the image offline.
 dism /English /Image:W:\ /Add-Driver /Driver:%VIO%\vioscsi\{vdir}\amd64 /Driver:%VIO%\NetKVM\{vdir}\amd64 /Driver:%VIO%\vioserial\{vdir}\amd64 > COM1 2>&1 || goto :fail
@@ -615,9 +629,15 @@ goto :eof
 :fail
 echo PVS-PASS1-FAILED > COM1
 "#,
-        index = img.index
+        index = img.index,
+        winre_mb = WINRE_MB
     ))
 }
+
+/// The recovery partition, behind Windows as Microsoft lays a disk out. WinRE is some 700 MB
+/// by now and its updates (the Safe OS ones) want free space beside it - a partition they do
+/// not fit in fails them (KB5034441).
+const WINRE_MB: u32 = 2048;
 
 /// Audit mode, the gold's first boot: virtio drivers and the guest agent, then generalize.
 /// No NIC traffic (the NIC's link is down) - nothing may update between boot and sysprep.
@@ -1464,7 +1484,7 @@ pub fn server_label(image_id: &str) -> Option<String> {
 /// little else; audit mode waits for Windows' own boot (2 min, nothing to measure), then the
 /// drivers, the agent and sysprep (46 s); pass 2 is short.
 pub(crate) fn pass1_units() -> Vec<(String, f64)> {
-    [("PASS1-START", 13.0), ("OS-DISK", 2.0), ("PARTITIONED", 100.0), ("APPLIED", 2.0), ("DRIVERS", 5.0), ("BCDBOOT", 1.0)]
+    [("PASS1-START", 13.0), ("OS-DISK", 2.0), ("PARTITIONED", 100.0), ("APPLIED", 2.0), ("RECOVERY", 2.0), ("DRIVERS", 5.0), ("BCDBOOT", 1.0)]
         .iter().map(|(k, w)| (k.to_string(), *w)).collect()
 }
 pub(crate) fn audit_units() -> Vec<(String, f64)> {
@@ -1900,6 +1920,70 @@ pub struct WinVmSeed {
     pub product_key: String,
     /// A CIS gold's benchmark and level (manifest cis.benchmarkId / level): the VM's own step.
     pub cis: Option<(String, u8)>,
+    /// The VM's system disk is larger than its gold's: C: takes the space on the first boot.
+    pub grow: bool,
+}
+
+/// C: grown into the space a larger disk left behind the gold's partitions (SetupComplete, as
+/// SYSTEM). The recovery partition sits behind C: and is in the way: WinRE is switched off,
+/// Winre.wim comes into the image, the partition is removed and made again at the new end,
+/// Winre.wim goes back onto it and WinRE on again - Microsoft's steps for resizing the
+/// partition (KB5028997). Windows Server 2025's reagentc /disable leaves Winre.wim staged on
+/// the partition and /enable then looks for it there (2026-11-25), hence the copy by hand
+/// and /setreimage. A gold from before the recovery partition has none: C: just grows.
+const GROW_PS1: &str = r#"$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$re = '{de94bba4-06d1-4d40-a16a-bfd50179d6ac}'
+$wim = 'C:\Windows\System32\Recovery\Winre.wim'
+$at = 'C:\Windows\Temp\pvs-re'
+try {
+    $c = Get-Partition -DriveLetter C
+    $n = $c.DiskNumber
+    if ((Get-Disk -Number $n).LargestFreeExtent -lt 1GB) { 'PVS-GROW nothing to grow'; exit 0 }
+    $r = Get-Partition -DiskNumber $n | Where-Object { $_.GptType -eq $re -and $_.Offset -gt $c.Offset }
+    if ($r) {
+        New-Item -ItemType Directory -Path $at -Force | Out-Null
+        reagentc /disable | Out-Null
+        if (-not (Test-Path $wim)) {
+            $r | Add-PartitionAccessPath -AccessPath $at
+            Copy-Item -LiteralPath "$at\Recovery\WindowsRE\Winre.wim" -Destination $wim -Force
+            $r | Remove-PartitionAccessPath -AccessPath $at
+        }
+        if (-not (Test-Path $wim)) { throw 'Winre.wim did not come into the image - the recovery partition stays, C: is not grown' }
+        $r | Remove-Partition -Confirm:$false
+    }
+    $size = (Get-PartitionSupportedSize -DriveLetter C).SizeMax
+    if ($r) { $size -= $r.Size }
+    Resize-Partition -DriveLetter C -Size $size
+    if ($r) {
+        $p = New-Partition -DiskNumber $n -UseMaximumSize -GptType $re
+        $p | Format-Volume -FileSystem NTFS -NewFileSystemLabel Recovery -Confirm:$false | Out-Null
+        "select disk $n", "select partition $($p.PartitionNumber)", 'gpt attributes=0x8000000000000001' | diskpart | Out-Null
+        $p | Add-PartitionAccessPath -AccessPath $at
+        New-Item -ItemType Directory -Path "$at\Recovery\WindowsRE" -Force | Out-Null
+        Move-Item -LiteralPath $wim -Destination "$at\Recovery\WindowsRE\Winre.wim" -Force
+        reagentc /setreimage /path "$at\Recovery\WindowsRE" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "reagentc /setreimage: exit $LASTEXITCODE" }
+        $p | Remove-PartitionAccessPath -AccessPath $at
+        Remove-Item -LiteralPath $at -Force
+        reagentc /enable | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "reagentc /enable: exit $LASTEXITCODE" }
+    }
+    "PVS-GROW-OK C: is $([math]::Round((Get-Partition -DriveLetter C).Size / 1GB)) GB"
+}
+catch {
+    "PVS-GROW-FAILED $($_.Exception.Message)"
+    # Whatever stopped it, WinRE is not left switched off.
+    if ($r) { reagentc /enable }
+}
+"#;
+
+/// A PowerShell script as one -EncodedCommand argument (UTF-16LE, base64): a script that
+/// SetupComplete.cmd carries in itself, with no file beside it and nothing for cmd to quote.
+fn ps_encoded(script: &str) -> String {
+    use base64::Engine;
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    base64::engine::general_purpose::STANDARD.encode(utf16)
 }
 
 /// A Windows product key: five groups of five letters and digits.
@@ -2127,6 +2211,13 @@ pub fn setupcomplete_cmd(s: &WinVmSeed) -> String {
         None => (String::new(), String::new()),
     };
     ip += &cis_vm;
+    // A larger disk than the gold's: C: takes it before GuestProvision or anyone fills it.
+    if s.grow {
+        ip += &format!(
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand {} >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\n",
+            ps_encoded(GROW_PS1)
+        );
+    }
     // GuestProvision after the address (Arc and the join need the network), before the
     // marker - the studio waits for the marker, then reads GuestProvision's state.json.
     let guest = if needs_guest(&s.manifest) {
@@ -2217,6 +2308,12 @@ mod tests {
         assert_eq!(server_label("ws2025-datacenter-az-core").as_deref(), Some("Windows Server 2025 Datacenter Core: Azure Edition"));
         assert_eq!(server_label("ws2022-standard-core").as_deref(), Some("Windows Server 2022 Standard Core"));
         assert_eq!(server_label("w11-enterprise"), None);
+    }
+
+    #[test]
+    fn the_grow_script_fits_a_cmd_line() {
+        // cmd reads 8191 characters of a line at most; the rest of the line is some 130.
+        assert!(ps_encoded(GROW_PS1).len() < 8000, "{}", ps_encoded(GROW_PS1).len());
     }
 
     #[test]
@@ -2392,6 +2489,7 @@ mod tests {
             }),
             product_key: String::new(),
             cis: None,
+            grow: false,
         };
         let xml = vm_unattend(&seed, &serde_json::json!({}));
         assert!(xml.contains("<ComputerName>dc-02</ComputerName>"));

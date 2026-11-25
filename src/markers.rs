@@ -15,6 +15,8 @@ const TEXT: &[(&str, &str)] = &[
     ("OS-DISK", "System disk"),
     ("PARTITIONED", "System disk partitioned"),
     ("APPLIED", "Image applied"),
+    ("RECOVERY", "WinRE on its recovery partition"),
+    ("NO-WINRE", "WinRE did not get onto the recovery partition"),
     ("DRIVERS", "virtio drivers added to the image"),
     ("BCDBOOT", "Boot files written"),
     ("BCDBOOT-WITH", "Boot files with"),
@@ -197,12 +199,12 @@ pub fn tag(line: &str) -> Tag {
         "CIS-FIX-DONE" => if args.ends_with(" 0 failed") { Tag::Ok } else { Tag::Warn },
         "CIS-CHECK-DONE" => if args.contains(" 0 fail,") && args.ends_with(" 0 error") { Tag::Ok } else { Tag::Warn },
         "CIS-FIX-FAILED" => Tag::Warn,
-        "PE-START" | "PARTITIONED" | "APPLIED" | "DRIVERS" | "BCDBOOT" | "EDITION" | "PASS1-OK" | "AUDIT-START"
+        "PE-START" | "PARTITIONED" | "APPLIED" | "RECOVERY" | "DRIVERS" | "BCDBOOT" | "EDITION" | "PASS1-OK" | "AUDIT-START"
         | "GENERALIZED" | "ANSWERFILE" | "TIMEZONE" | "LOCALE" | "POLICY" | "KEY" | "PASS2-OK" | "FIRSTBOOT-OK"
         | "WORKER-START" | "ONLINE" | "WORKER-OK"
         | "OK" | "REGION" | "KEYMAP" | "CIS-BUNDLE" | "CIS-SNAPD-PURGED" | "INITRD-REBUILT" | "LAYOUT" | "RELABEL" => Tag::Ok,
         "PE-NO-SEED" | "EDITION-NOT-CHANGED" | "PASS1-FAILED" | "NOT-GENERALIZED" | "PASS2-FAILED" | "DEPLOY-FAILED"
-        | "NO-VIOSCSI" | "NO-OS-DISK" | "NO-INSTALL-WIM" | "NO-WINDOWS" | "NO-BOOTLOADER" | "NO-FIRSTBOOT" | "NO-VIRTIO-CD"
+        | "NO-VIOSCSI" | "NO-OS-DISK" | "NO-INSTALL-WIM" | "NO-WINDOWS" | "NO-BOOTLOADER" | "NO-WINRE" | "NO-FIRSTBOOT" | "NO-VIRTIO-CD"
         | "NO-CURL" | "NO-STUDIO" | "NO-SCRATCH-DISK" | "SCRATCH-FAILED" | "WORKER-FAILED" | "LAYOUT-FAILED" => Tag::Error,
         "NO-SYSPREP-TAG" | "DISK-READONLY" | "INITRD-FAILED" | "RELABEL-FAILED" => Tag::Warn,
         "PASS1-START" | "PASS2-START" | "DEPLOY-START" | "DEPLOY-OK" | "DISK" | "OS-DISK" | "BCDBOOT-WITH" | "TARGET"
