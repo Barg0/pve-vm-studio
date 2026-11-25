@@ -4008,6 +4008,7 @@ function buildConfig() {
          so it comes back when the toggle goes off; the config just does not carry it. */
       localUserName: isBuiltInAdminOnly(s) ? undefined : s.localUserName,
       localUserPassword: s.localUserPassword,
+      passwordNeverExpires: isLinuxImage(findImage(s.imageId)) ? undefined : s.passwordNeverExpires !== false,
       builtInAdminOnly: isBuiltInAdminOnly(s),
       ipAddress: s.ipAddress,
       prefixLength: Number(s.prefixLength) || 24,
@@ -6372,6 +6373,9 @@ function renderServerCard(s) {
   const localOpen = isNestedOpen(s._id + "-local", true);
   const cpuOpen = isNestedOpen(s._id + "-cpu", true);
   const cpuAdvOpen = isNestedOpen(s._id + "-cpuadv", false);
+  const localAdvOpen = isNestedOpen(s._id + "-localadv", false);
+  /* On unless switched off: a design saved before the toggle has no value. */
+  const pwNeverExpires = s.passwordNeverExpires !== false;
   const hw = hwOf(s);
   loadHwCluster();
   const netOpen = isNestedOpen(s._id + "-net", true);
@@ -6561,6 +6565,19 @@ function renderServerCard(s) {
                 <span class="hint">${passwordLength()} chars · length set in VM settings</span>`;
               })())}
           </div>
+          ${isLinux ? "" : `
+          <div class="section collapsible ${localAdvOpen ? "" : "collapsed"}">
+            <div class="section-head" data-nested="${esc(s._id)}-localadv">
+              <span class="section-chevron">${chevron()}</span>
+              <img src="${iconSrc("security.svg")}"> Additional account options
+              <span class="section-meta">${pwNeverExpires ? "Password never expires" : "Password expires"}</span>
+            </div>
+            <div class="section-body">
+              <div class="toggle-grid hw-toggles">
+                ${toggle(`data-s="${esc(s._id)}" data-k="passwordNeverExpires"`, `Password never expires${infoTip("Password never expires", "On: the account is exempt from the maximum password age. Off: Windows asks for a new password once that age is reached - 42 days by default, up to 365 on a CIS gold - and a VM nobody signs in to interactively then refuses the old one.")}`, pwNeverExpires)}
+              </div>
+            </div>
+          </div>`}
           ${!isLinux ? "" : `
           <div class="grid-1" style="margin-top:12px">
             ${field("SSH authorized key", (() => {
@@ -8079,7 +8096,7 @@ function validate() {
        which needs the VM online. Windows features are in the image - nothing to say. */
     const caps = (img.kind === "client" ? (s.rsatCapabilities || []).length : 0) + (s.appCompatFod ? 1 : 0);
     if (caps && typeof dashFod !== "undefined" && dashFod && dashFod.settings) {
-      const slot = img.kind === "client" ? ["client", "Windows 11"] : /^ws2022/.test(String(s.imageId || "")) ? ["server2022", "Windows Server 2022"] : ["server", "Windows Server 2025"];
+      const slot = img.kind === "client" ? ["client", "Windows 11"] : /^ws2022/.test(String(s.imageId || "")) ? ["server2022", "Windows Server 2022"] : /^ws2019/.test(String(s.imageId || "")) ? ["server2019", "Windows Server 2019"] : ["server", "Windows Server 2025"];
       if (!dashFod.settings[slot[0]]) {
         warn(`${label} installs ${caps} capability(ies) from Windows Update at first boot — there is no Features on Demand ISO for ${slot[1]} under Media, so the VM needs internet access then.`, `Virtual machines › ${label}`);
       }
@@ -10452,6 +10469,7 @@ document.getElementById("main").addEventListener("change", e => {
       }
       if (k === "imageId") { applyImageProfile(s, e.target.value); scheduleRender(); return; }
       if (k === "includeManagementTools") { s.includeManagementTools = e.target.checked; return; }
+      if (k === "passwordNeverExpires") { s.passwordNeverExpires = e.target.checked; scheduleRender(); return; }
       if (k === "removeBuiltInApps") {
         // The all-apps switch: on selects the whole catalog, off clears every pick.
         // A custom pick below shows this switch off; flipping it on from there

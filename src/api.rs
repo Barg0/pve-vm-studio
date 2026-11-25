@@ -1578,7 +1578,7 @@ async fn put_windows(State(app): State<AppState>, user: User, Json(s): Json<virt
 async fn get_fod(State(app): State<AppState>, _user: User) -> ApiResult<impl IntoResponse> {
     let s: fod::FodSettings = settings::load(&app.db, "fod").await?;
     let mut media = serde_json::Map::new();
-    for (family, volid) in [("server", &s.server), ("server2022", &s.server2022), ("client", &s.client)] {
+    for (family, volid) in [("server", &s.server), ("server2022", &s.server2022), ("server2019", &s.server2019), ("client", &s.client)] {
         if volid.is_empty() {
             continue;
         }
@@ -1664,7 +1664,7 @@ pub(crate) async fn fod_job(app: AppState, log: crate::jobs::JobLog, key: String
 
 async fn put_fod(State(app): State<AppState>, user: User, Json(s): Json<fod::FodSettings>) -> ApiResult<impl IntoResponse> {
     user.require(&app, "/vms", "VM.Allocate").await?;
-    for volid in [&s.server, &s.server2022, &s.client].into_iter().filter(|v| !v.is_empty()) {
+    for volid in [&s.server, &s.server2022, &s.server2019, &s.client].into_iter().filter(|v| !v.is_empty()) {
         let path = iso_path(&app, volid).ok_or_else(|| ApiError::bad_request(format!("{volid} is not an ISO volume")))?;
         fod::inspect(&path, &app.config.data_dir.join("fod-cache.json"))
             .await
@@ -1759,7 +1759,7 @@ async fn windows_isos(State(app): State<AppState>, _user: User) -> ApiResult<imp
             // is no Windows install media - nothing to bake a gold from.
             let kind = if file.starts_with("winpe-") || v.volid == pe.volid {
                 "winpe"
-            } else if file.starts_with("fod-") || [&fod.server, &fod.server2022, &fod.client].contains(&&v.volid) {
+            } else if file.starts_with("fod-") || [&fod.server, &fod.server2022, &fod.server2019, &fod.client].contains(&&v.volid) {
                 "fod"
             } else {
                 "windows"
@@ -1795,7 +1795,7 @@ async fn delete_windows_iso(State(app): State<AppState>, user: User, axum::extra
     app.pve.delete_volume(&p.node, &q.volid).await?;
     let mut fod: fod::FodSettings = settings::load(&app.db, "fod").await?;
     let mut emptied = false;
-    for slot in [&mut fod.server, &mut fod.server2022, &mut fod.client] {
+    for slot in [&mut fod.server, &mut fod.server2022, &mut fod.server2019, &mut fod.client] {
         if *slot == q.volid {
             slot.clear();
             emptied = true;
@@ -2717,6 +2717,7 @@ fn spec_from_design(s: &serde_json::Value, state: &serde_json::Value, lab_name: 
         search: String::new(),
         user: if user.is_empty() { "admin".into() } else { user },
         password: str_of("localUserPassword"),
+        password_never_expires: s["passwordNeverExpires"].as_bool().unwrap_or(true),
         ssh_key: str_of("sshAuthorizedKey"),
         packages: s["linuxPackages"].as_array().map(|a| a.iter().filter_map(|d| d.as_str().map(str::to_owned)).collect()).unwrap_or_default(),
         data_disks: s["additionalDisks"]

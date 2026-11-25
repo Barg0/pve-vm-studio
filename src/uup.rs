@@ -143,6 +143,9 @@ pub static PRODUCTS: &[Product] = &[
         support: "Insider Preview - not for production", matches: insider_title },
     Product { id: "w11-future", name: "Windows 11 Insider, Future Platforms", group: "Insider and vNext", kind: Kind::Client, insider: true, ring: Some("Dev"), listed: true, short: "w11-future",
         support: "Insider Preview - not for production", matches: insider_title },
+    // Not a Windows the studio builds: its Features on Demand set is Server 2019's (fod.rs).
+    Product { id: "w10-1809", name: "Windows 10, version 1809", group: "Windows 10", kind: Kind::Client, insider: false, ring: None, listed: false, short: "w10-1809",
+        support: "LTSC 2019 until 2029-01", matches: |t| t.starts_with("Feature update to Windows 10, version 1809 (") },
     // Before the channels: Dev and Beta mixed several build lines - it follows none.
     Product { id: "w11-dev", name: "Windows 11 Insider, Dev and Beta", group: "Insider and vNext", kind: Kind::Client, insider: true, ring: None, listed: false, short: "w11-dev",
         support: "Insider Preview - not for production", matches: |t| t.starts_with("Windows 11 Insider Preview Feature Update (") },

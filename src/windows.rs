@@ -1043,9 +1043,9 @@ pub static APP_REMOVAL: &[&str] = &[
     "Microsoft.XboxIdentityProvider", "Microsoft.XboxSpeechToTextOverlay", "Microsoft.Xbox.TCUI", "MSTeams",
 ];
 
-/// Server Manager feature -> DISM feature tables for Windows Server 2025 (26100) and 2022
-/// (20348), read from the images' own package manifests by tools/gen-server-features.py.
-/// One per installation type: Server Core carries some 50 fewer features (the MMC consoles
+/// Server Manager feature -> DISM feature tables for Windows Server 2025 (26100), 2022
+/// (20348) and 2019 (17763), read from the images' own package manifests by
+/// tools/gen-server-features.py. One per installation type: Server Core carries some 50 fewer features (the MMC consoles
 /// among them - RSAT-DFS-Mgmt-Con, RSAT-Print-Services) and its roles name no console as
 /// their tools, as Install-WindowsFeature -IncludeManagementTools on Core leaves them out.
 ///   (build, Server Core, table)
@@ -1054,12 +1054,23 @@ static SERVER_FEATURES: &[(&str, bool, &str)] = &[
     ("26100", true, include_str!("../data/server-features-26100-core.json")),
     ("20348", false, include_str!("../data/server-features-20348.json")),
     ("20348", true, include_str!("../data/server-features-20348-core.json")),
+    ("17763", false, include_str!("../data/server-features-17763.json")),
+    ("17763", true, include_str!("../data/server-features-17763-core.json")),
 ];
 
 /// Features Build-Vms never stages offline: their CBS advanced installer runs in Setup's
 /// "Getting ready" phase, before specialize names the machine (Build-Vms'
 /// $script:guestOnlyWindowsFeatures, evidence in its comments). GuestProvision installs them.
 pub const GUEST_ONLY_FEATURES: &[&str] = &["RDS-Web-Access", "RDS-Connection-Broker"];
+
+/// Windows Server 2019 (17763) only: IIS and the Windows Process Activation Service, by
+/// their DISM names, and with them every feature that brings one of them along (WSUS, the
+/// AD CS web services). Staged offline, Setup's "Getting ready" runs
+/// `iissetup.exe /install SharedLibraries` before RPC is up: exit code 1753, the rollback,
+/// "Windows could not configure one or more system components" - Core and Desktop
+/// Experience alike (2026-11-25, 17763.3650: Web-Server and WAS, each alone). Server 2022
+/// and 2025 take them offline.
+const GUEST_ONLY_DISM_2019: &[&str] = &["IIS-", "WAS-"];
 
 /// The DISM features the deploy pass enables for a VM's roles and features, as
 /// Install-WindowsFeature would: each feature, its role (Parent), what it pulls in on its
@@ -1133,6 +1144,9 @@ pub fn plan_server_features(names: &[String], include_tools: bool, build: &str, 
                 }
             }
             for d in list("dism") {
+                if build.contains("17763") && GUEST_ONLY_DISM_2019.iter().any(|p| d.starts_with(p)) {
+                    missing = true;
+                }
                 if !dism.contains(&d) && !mine.contains(&d) {
                     mine.push(d);
                 }
@@ -1922,6 +1936,9 @@ pub struct WinVmSeed {
     pub cis: Option<(String, u8)>,
     /// The VM's system disk is larger than its gold's: C: takes the space on the first boot.
     pub grow: bool,
+    /// The sign-in account's password does not expire (the maximum password age: 42 days by
+    /// default, up to 365 on a CIS gold).
+    pub password_never_expires: bool,
 }
 
 /// C: grown into the space a larger disk left behind the gold's partitions (SetupComplete, as
@@ -2211,6 +2228,16 @@ pub fn setupcomplete_cmd(s: &WinVmSeed) -> String {
         None => (String::new(), String::new()),
     };
     ip += &cis_vm;
+    // The answer file's LocalAccount has no setting for it, and the built-in Administrator
+    // is no LocalAccount at all: the flag is set here, on both accounts the answer file gave
+    // the password to - the VM's user and the built-in Administrator, by its SID (a CIS gold
+    // renames it, in the step above).
+    if s.password_never_expires {
+        ip += &format!(
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-LocalUser | Where-Object {{ $_.Name -eq '{}' -or $_.SID.Value -like 'S-1-5-21-*-500' }} | ForEach-Object {{ Set-LocalUser -SID $_.SID -PasswordNeverExpires $true; 'PVS-PASSWORD-NEVER-EXPIRES ' + $_.Name }}\" >> C:\\Windows\\Temp\\pvs-firstboot.log 2>&1\n",
+            s.user.replace('\'', "''").replace('%', "%%")
+        );
+    }
     // A larger disk than the gold's: C: takes it before GuestProvision or anyone fills it.
     if s.grow {
         ip += &format!(
@@ -2490,6 +2517,7 @@ mod tests {
             product_key: String::new(),
             cis: None,
             grow: false,
+            password_never_expires: true,
         };
         let xml = vm_unattend(&seed, &serde_json::json!({}));
         assert!(xml.contains("<ComputerName>dc-02</ComputerName>"));
@@ -2550,6 +2578,21 @@ mod tests {
         assert!(plan_server_features(&names, true, "20348", false).dism.iter().any(|d| d == "DfsMgmt"));
         let core = plan_server_features(&names, true, "20348", true);
         assert!(core.online.is_empty() && !core.dism.iter().any(|d| d == "DfsMgmt") && core.dism.iter().any(|d| d == "DFSN-Server"), "{:?}", core.dism);
+        // Server 2019 the same way. Its Core has no Connection Broker at all, and a guest-only
+        // feature goes online on either.
+        for core in [false, true] {
+            let p = plan_server_features(&["DNS".to_owned(), "RDS-Connection-Broker".to_owned()], true, "10.0.17763.3650", core);
+            assert!(p.dism.iter().any(|d| d == "DNS-Server-Full-Role") && p.online == vec!["RDS-Connection-Broker".to_owned()], "{:?}", p.dism);
+            let p = plan_server_features(&names, true, "17763", core);
+            assert!(p.online.is_empty() && p.dism.iter().any(|d| d == "DFSN-Server") && p.dism.iter().any(|d| d == "DfsMgmt") != core, "{:?}", p.dism);
+            // IIS and WAS break 2019's Setup when staged offline: they and what needs them go
+            // online whole, the rest of the list stays offline.
+            let web = ["DNS", "Web-Server", "WAS", "UpdateServices"].map(str::to_owned);
+            let p = plan_server_features(&web, true, "17763", core);
+            assert_eq!(p.online, web[1..].to_vec());
+            assert!(p.dism.iter().any(|d| d == "DNS-Server-Full-Role") && !p.dism.iter().any(|d| d.starts_with("IIS-") || d.starts_with("WAS-")), "{:?}", p.dism);
+            assert!(plan_server_features(&web, true, "20348", core).online.is_empty());
+        }
     }
 
     #[test]

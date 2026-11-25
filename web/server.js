@@ -1270,30 +1270,47 @@ function wireProvisioning(root, form, storages, rerender) {
 /* Features on Demand media (Build-Vms' FoD ISO): a Languages and Optional Features ISO per
    release. The WinPE deploy pass installs RSAT and the Server Core App Compatibility pack
    from it straight into a new VM's disk - no Windows Update, no internet. Each slot can be
-   built from Microsoft's own update packages (every FoD but the language ones). */
+   built from Microsoft's own update packages (every FoD but the language ones).
+   One row per release, the columns in line: what an ISO holds reads as packages times
+   languages - the one number it used to show (3606 beside 147) was their product, and said
+   "incomplete" where an ISO only lacked languages. */
 const ISO_KIND_TAG = { winpe: "WinPE", fod: "Features on Demand" };
 const FOD_SLOTS = [
-  ["server", "ws2025-datacenter-desktop", "Windows Server 2025", "Build 26100."],
-  ["server2022", "ws2022-datacenter-desktop", "Windows Server 2022", "Build 20348."],
-  ["client", "w11-pro", "Windows 11", "Build 26100 - one set serves 24H2, 25H2 and 26H2."]
+  ["server", "ws2025-datacenter-desktop", "Windows Server 2025", "Build 26100.", "Build 26100"],
+  ["server2022", "ws2022-datacenter-desktop", "Windows Server 2022", "Build 20348.", "Build 20348"],
+  ["server2019", "ws2019-datacenter-desktop", "Windows Server 2019", "Build 17763. Microsoft offers no set of its own: Build from Microsoft takes the Server Core App Compatibility pack from Windows 10, version 1809 - the same build - and nothing else.", "Build 17763 · App Compatibility only"],
+  ["client", "w11-pro", "Windows 11", "Build 26100 - one set serves 24H2, 25H2 and 26H2.", "Build 26100 · 24H2, 25H2, 26H2"]
 ];
 function fodCard(fod, isos) {
   const s = fod.settings || {}, media = fod.media || {};
   const list = (isos.isos || []).filter(i => i.readable && i.kind !== "winpe");
-  const state = key => {
+  const n = v => Number(v || 0).toLocaleString("en-US");
+  /* What the slot's ISO holds. An ISO read before packages and languages were counted
+     (the studio's cache) has only the total. */
+  const holds = key => {
     const m = media[key];
-    if (!s[key]) return `<span class="pill status idle">Windows Update</span>`;
-    if (!m || !m.ok) return `<span class="pill status bad" title="${esc((m && m.error) || "The studio cannot read this ISO")}">Unreadable</span>`;
-    return `<span class="pill status ok">${m.media.fod_packages} packages</span>`;
+    if (!s[key]) return `<div class="fod-has none"><span class="fod-count">No ISO</span><span class="fod-note">Capabilities come from Windows Update at a VM's first boot - it needs internet access then.</span></div>`;
+    if (!m || !m.ok) return `<div class="fod-has bad"><span class="fod-count">${m && m.missing ? "Not in PVE any more" : "Unreadable"}</span><span class="fod-note">${esc((m && m.error) || "The studio cannot read this ISO.")} Until it is back, capabilities come from Windows Update.</span></div>`;
+    const d = m.media, iso = (isos.isos || []).find(i => i.volid === s[key]);
+    const count = d.packages
+      ? `<b>${n(d.packages)}</b> ${d.packages === 1 ? "package" : "packages"} <i aria-hidden="true">×</i><span class="sr-only">in</span> <b>${n(d.languages)}</b> ${d.languages === 1 ? "language" : "languages"}`
+      : `<b>${n(d.fod_packages)}</b> files`;
+    const own = /\/fod-[^/]*\.iso$/.test(s[key]) ? "built by the studio" : "your own ISO";
+    return `<div class="fod-has"><span class="fod-count">${count}</span><span class="fod-note">${n(d.fod_packages)} files${iso ? ` · ${gib(iso.size)} GiB` : ""} · ${own}</span></div>`;
   };
   const set = FOD_SLOTS.filter(([k]) => s[k]).length;
   return gsCard("md-fod", "fod.svg", "Features on Demand", `${set} of ${FOD_SLOTS.length} set`, `
-    <div class="grid-3" style="align-items:start">${FOD_SLOTS.map(([key, imageId, label, tip]) => `<div class="field-like fod-slot">
-      <span class="field-label"><img src="${imageIconSrc(findImage(imageId))}" alt="">${esc(label)}${infoTip(label,
+    <div class="fod-ledger">${FOD_SLOTS.map(([key, imageId, label, tip, sub]) => {
+      const img = findImage(imageId);
+      return `<div class="fod-row${s[key] ? "" : " unset"}${img.kind === "client" ? " client" : ""}">
+      <div class="fod-os"><img src="${imageIconSrc(img)}" alt="">
+        <div><span class="fod-name">${esc(label)}${infoTip(label,
         `${tip} Build from Microsoft puts every Feature on Demand of the newest build on one ISO - App Compatibility, RSAT, OpenSSH, .NET 3.5 and the rest - with their parts for every language, as on Microsoft's Languages and Optional Features ISO, without language packs and language features. None installs from Windows Update at first boot.`)}</span>
-      <select data-fod-slot="${key}">${opts(list.map(i => [i.volid, i.file]), s[key], "None")}</select>
-      <div class="fod-slot-foot">${state(key)}<button class="btn sm" type="button" data-fod-build="${key}"><img src="${iconSrc("download.svg")}" alt=""> Build from Microsoft</button></div>
-    </div>`).join("")}</div>
+        <span class="fod-sub">${esc(sub)}</span></div></div>
+      <select data-fod-slot="${key}" aria-label="${esc(label)} Features on Demand ISO">${opts(list.map(i => [i.volid, i.file]), s[key], "None")}</select>
+      ${holds(key)}
+      <button class="btn sm" type="button" data-fod-build="${key}"><img src="${iconSrc("download.svg")}" alt=""> Build from Microsoft</button>
+    </div>`; }).join("")}</div>
     ${actions(act("fodSave", "save.svg", "Save", true))}`, "", true);
 }
 

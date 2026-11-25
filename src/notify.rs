@@ -543,6 +543,7 @@ pub async fn job_ended(app: AppState, id: String) {
             let f: crate::fod::FodSettings = settings::load(&app.db, "fod").await.unwrap_or_default();
             let volid = match params["fod"].as_str().unwrap_or_default() {
                 "server2022" => f.server2022.clone(),
+                "server2019" => f.server2019.clone(),
                 "client" => f.client.clone(),
                 _ => f.server.clone(),
             };

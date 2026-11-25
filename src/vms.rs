@@ -66,6 +66,9 @@ pub struct VmSpec {
     pub user: String,
     #[serde(default, skip_serializing)]
     pub password: String,
+    /// Windows: the sign-in account is exempt from the maximum password age.
+    #[serde(default = "yes")]
+    pub password_never_expires: bool,
     #[serde(default)]
     pub ssh_key: String,
     #[serde(default)]
@@ -772,6 +775,7 @@ async fn deploy_inner(
                 .zip(manifest["cis"]["level"].as_u64())
                 .map(|(b, l)| (b.to_owned(), l as u8)),
             grow: spec.disk_gb.is_some_and(|gb| gb > gold_disk_gb),
+            password_never_expires: spec.password_never_expires,
         };
         let unattend = windows::vm_unattend(&ws, &manifest);
         let vmcmd = windows::vm_cmd(&ws);

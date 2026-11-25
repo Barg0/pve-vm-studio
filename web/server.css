@@ -600,10 +600,35 @@ table.dp-plan .row-actions .btn:disabled { opacity: .4; }
 .le-name-add input { width: 260px; height: 30px; }
 .le-name-add .btn.sm { height: 30px; width: 30px; justify-content: center; padding: 0; font-size: 16px; }
 
-/* Features on Demand: one slot per release - the ISO, its state, a build from Microsoft. */
-.fod-slot select { width: 100%; }
-.fod-slot-foot { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
-.fod-slot-foot .btn { margin-left: auto; }
+/* Features on Demand: a ledger, one row per release - the release, its ISO, what the ISO
+   holds, a build from Microsoft. The columns line up so the rows compare; the left edge is
+   the release's band (server, client), grey while the slot is empty. */
+.fod-ledger { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.fod-row { --band: var(--role-server); display: grid; grid-template-columns: minmax(190px, 1fr) minmax(210px, 1.2fr) minmax(250px, 1.5fr) auto;
+  gap: 6px 18px; align-items: center; padding: 12px 14px 12px 13px; background: var(--bg-subtle);
+  border-top: 1px solid var(--divider); border-left: 3px solid var(--band); }
+.fod-row:first-child { border-top: 0; }
+.fod-row.client { --band: var(--role-client); }
+.fod-row.unset { --band: var(--border-strong); }
+.fod-os { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.fod-os > img { width: 22px; height: 22px; flex: none; }
+.fod-name { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13.5px; }
+.fod-sub, .fod-note { display: block; color: var(--fg-muted); font-size: 12px; line-height: 1.35; }
+.fod-row select { width: 100%; min-width: 0; }
+.fod-has { min-width: 0; }
+.fod-count { display: block; font-size: 13px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.fod-count b { font-size: 17px; font-weight: 600; color: var(--fg); letter-spacing: -0.01em; }
+.fod-count i { font-style: normal; padding: 0 3px; color: var(--border-strong); }
+.fod-has.none .fod-count { color: var(--fg); font-weight: 600; }
+.fod-has.bad .fod-count { color: var(--danger-text); font-weight: 600; }
+.fod-row .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 1180px) {
+  .fod-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); row-gap: 10px; }
+  .fod-row > .btn { justify-self: start; }
+}
+@media (max-width: 640px) {
+  .fod-row { grid-template-columns: minmax(0, 1fr); }
+}
 
 /* CIS: the gold's badge and its report. */
 .gold-flag.ok { color: var(--success-text); border-color: color-mix(in srgb, var(--success) 45%, var(--border)); background: color-mix(in srgb, var(--success) 12%, transparent); }
@@ -828,7 +853,6 @@ a.btn, a.btn:hover { text-decoration: none; }
   .gold-card .card-head { grid-template-columns: minmax(0, 1fr); }
   .gold-card .gold-acts { grid-column: 1; grid-row: auto; justify-content: flex-start; }
   .gs-actions { flex-wrap: wrap; }
-  .fod-slot-foot { flex-wrap: wrap; }
 }
 
 /* The menu button: a drawer below 900px, the nav folded to a rail of icons above. */

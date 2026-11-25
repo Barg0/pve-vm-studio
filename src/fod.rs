@@ -19,12 +19,13 @@ use crate::{jobs::JobLog, progress::Progress, pve::Pve, uup, winpe::run};
 
 /// Which FoD ISO each release uses (PVE volids; empty = none - capabilities then come from
 /// Windows Update at first boot). `server` is Windows Server 2025; Server 2022 (build 20348)
-/// has its own FoD set.
+/// and Server 2019 (build 17763) have their own FoD sets.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FodSettings {
     pub server: String,
     pub server2022: String,
+    pub server2019: String,
     pub client: String,
 }
 
@@ -36,6 +37,8 @@ impl FodSettings {
             &self.client
         } else if build.split('.').any(|p| p == "20348") {
             &self.server2022
+        } else if build.split('.').any(|p| p == "17763") {
+            &self.server2019
         } else {
             &self.server
         }
@@ -45,6 +48,7 @@ impl FodSettings {
         match key {
             "server" => Some(&mut self.server),
             "server2022" => Some(&mut self.server2022),
+            "server2019" => Some(&mut self.server2019),
             "client" => Some(&mut self.client),
             _ => None,
         }
@@ -58,12 +62,18 @@ pub struct Source {
     pub product: &'static str,
     pub short: &'static str,
     pub name: &'static str,
+    /// "" for every Feature on Demand of the set, else only the packages with this in their
+    /// name. Server 2019 has no set of its own in the catalog: Windows 10, version 1809 is
+    /// the same build (17763) and its set carries the server's App Compatibility package -
+    /// the one capability a server takes from a FoD ISO. The rest of that set is Windows 10's.
+    pub only: &'static str,
 }
 
 pub static SOURCES: &[Source] = &[
-    Source { key: "server", product: "ws2025", short: "ws2025", name: "Windows Server 2025" },
-    Source { key: "server2022", product: "ws2022", short: "ws2022", name: "Windows Server 2022" },
-    Source { key: "client", product: "w11-26h2", short: "w11", name: "Windows 11" },
+    Source { key: "server", product: "ws2025", short: "ws2025", name: "Windows Server 2025", only: "" },
+    Source { key: "server2022", product: "ws2022", short: "ws2022", name: "Windows Server 2022", only: "" },
+    Source { key: "server2019", product: "w10-1809", short: "ws2019", name: "Windows Server 2019", only: "Microsoft-Windows-Server-AppCompat-" },
+    Source { key: "client", product: "w11-26h2", short: "w11", name: "Windows 11", only: "" },
 ];
 
 pub fn source(key: &str) -> Option<&'static Source> {
@@ -96,6 +106,13 @@ pub struct FodMedia {
     pub marker: String,
     pub cabs: usize,
     pub fod_packages: usize,
+    /// The packages themselves (X~...~amd64~~.cab) and the languages their satellites
+    /// (X~...~amd64~de-DE~.cab) come in: fod_packages is roughly one times the other, and
+    /// says little by itself.
+    #[serde(default)]
+    pub packages: usize,
+    #[serde(default)]
+    pub languages: usize,
     pub language_packs: usize,
 }
 
@@ -107,7 +124,7 @@ pub async fn inspect(iso: &Path, cache_file: &Path) -> Result<FodMedia> {
         meta.len(),
         meta.modified().ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()).unwrap_or(0)
     );
-    let key = format!("v2|{key}");
+    let key = format!("v3|{key}");
     let mut cache: HashMap<String, FodMedia> =
         tokio::fs::read(cache_file).await.ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     if let Some(hit) = cache.get(&key) {
@@ -142,12 +159,19 @@ fn classify(paths: &[String]) -> Result<FodMedia> {
     if fod == 0 {
         bail!("no Features on Demand packages on this ISO - it is not a Languages and Optional Features ISO");
     }
+    // A canonical name: <package>~<key token>~<arch>~<language>~.cab, the language empty
+    // for the package itself.
+    let lang_of = |p: &str| p.rsplit('/').next().unwrap_or(p).split('~').nth(3).map(str::to_lowercase);
+    let packages = cabs.iter().filter(|p| lang_of(p).is_some_and(|l| l.is_empty())).count();
+    let languages = cabs.iter().filter_map(|p| lang_of(p)).filter(|l| !l.is_empty()).collect::<std::collections::HashSet<_>>().len();
     let marker = cabs.iter().find(|p| p.contains("FoD-Package")).or(cabs.first()).map(|p| p.to_string()).unwrap_or_default();
     Ok(FodMedia {
         root,
         marker,
         cabs: cabs.len(),
         fod_packages: fod,
+        packages,
+        languages,
         language_packs: cabs.iter().filter(|p| p.contains("Language-Pack")).count(),
     })
 }
@@ -185,25 +209,31 @@ fn payloads(xml: &str) -> (Vec<(String, u64)>, Option<String>) {
     for chunk in xml.split("<PayloadItem ").skip(1) {
         let tag = &chunk[..chunk.find('>').unwrap_or(chunk.len())];
         let (Some(path), Some(size)) = (attr(tag, "Path"), attr(tag, "PayloadSize").and_then(|v| v.parse().ok())) else { continue };
-        if let Some(name) = path.strip_prefix("FeaturesOnDemand\\neutral\\cabs\\")
-            && name.to_lowercase().ends_with(".cab")
+        // Without case: build 17763's lists spell it \Neutral\Cabs\ for a third of the packages.
+        const DIR: &str = "FeaturesOnDemand\\neutral\\cabs\\";
+        if path.len() > DIR.len()
+            && path.is_char_boundary(DIR.len())
+            && path[..DIR.len()].eq_ignore_ascii_case(DIR)
+            && path.to_lowercase().ends_with(".cab")
         {
-            out.push((name.to_owned(), size));
+            out.push((path[DIR.len()..].to_owned(), size));
         }
     }
     (out, version)
 }
 
 /// The languages Microsoft lists FoD satellites for: one <Prefix>BaselessCompDB_FOD_<lang>
-/// per language in the extracted AggregatedMetadata. en-us when there is none.
+/// per language in the extracted AggregatedMetadata - <Prefix>BaselessCompDB_<lang> in
+/// build 17763's, which has no FoD lists of their own. en-us when there is none.
 fn fod_languages(agg: &Path) -> Vec<String> {
     let mut out: Vec<String> = std::fs::read_dir(agg)
         .map(|rd| {
             rd.filter_map(|e| e.ok())
                 .filter_map(|e| {
                     let n = e.file_name().to_string_lossy().to_lowercase();
-                    let i = n.find("baselesscompdb_fod_")?;
-                    n[i + "baselesscompdb_fod_".len()..].strip_suffix(".compdb.xml.cab").filter(|l| l.contains('-') && *l != "neutral").map(str::to_owned)
+                    let i = n.find("baselesscompdb_")? + "baselesscompdb_".len();
+                    let rest = n[i..].strip_suffix(".compdb.xml.cab")?;
+                    Some(rest.strip_prefix("fod_").unwrap_or(rest)).filter(|l| l.contains('-') && !l.contains('_')).map(str::to_owned)
                 })
                 .collect()
         })
@@ -219,6 +249,14 @@ fn fod_languages(agg: &Path) -> Vec<String> {
 /// <Prefix>BaselessCompDB_FOD_<lang>.CompDB.xml.cab in the extracted AggregatedMetadata.
 fn baseless_lang_cab(agg: &Path, lang: &str) -> Option<PathBuf> {
     let want = format!("baselesscompdb_fod_{lang}.compdb.xml.cab");
+    std::fs::read_dir(agg).ok()?.filter_map(|e| e.ok().map(|e| e.path())).find(|p| {
+        p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.to_lowercase().ends_with(&want))
+    })
+}
+
+/// <Prefix>TargetCompDB_<lang>.xml.cab in the extracted AggregatedMetadata.
+fn target_lang_cab(agg: &Path, lang: &str) -> Option<PathBuf> {
+    let want = format!("targetcompdb_{lang}.xml.cab");
     std::fs::read_dir(agg).ok()?.filter_map(|e| e.ok().map(|e| e.path())).find(|p| {
         p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.to_lowercase().ends_with(&want))
     })
@@ -478,10 +516,14 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
             .map(|f| (f.name[..f.name.len() - 4].to_lowercase(), f))
             .collect();
         let mut wanted: Vec<(String, uup::File)> = Vec::new();
-        let (mut skipped_n, mut missing) = (0, Vec::new());
+        let (mut skipped_n, mut other_n, mut missing) = (0, 0, Vec::new());
         for (canonical, size) in &listed {
             if skipped(canonical) {
                 skipped_n += 1;
+                continue;
+            }
+            if !src.only.is_empty() && !canonical.contains(src.only) {
+                other_n += 1;
                 continue;
             }
             match by_key.get(&uup_key(canonical)) {
@@ -510,6 +552,12 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
             ranges.push((lang_l.clone(), start, wanted.len()));
         }
         let satellites = wanted.len() - packages;
+        if packages == 0 {
+            bail!("{} lists no Features on Demand package for {}", build.title, src.name);
+        }
+        if other_n > 0 {
+            log.info(format!("{other_n} package(s) of {} left out - they are not {}'s", build.title, src.name)).await;
+        }
         if let Some(f) = all.iter().find(|f| f.name.eq_ignore_ascii_case("FoDMetadata_Client.cab")) {
             wanted.push(("FoDMetadata_Client.cab".into(), f.clone()));
         }
@@ -572,7 +620,15 @@ pub async fn build_uup(pve: &Pve, log: &JobLog, web: &reqwest::Client, work: &Pa
                     tokio::fs::copy(&cab, root.join("metadata").join(&n)).await?;
                     listed_n += 1;
                 }
-                Ok(None) => unlisted.push(lang_l.clone()),
+                // Build 17763: no Baseless FoD list, but the canonical list of the language's
+                // satellites itself - as that release's FoD ISO carries it.
+                Ok(None) => match target_lang_cab(&agg, lang_l) {
+                    Some(cab) => {
+                        tokio::fs::copy(&cab, root.join("metadata").join(cab.file_name().unwrap())).await?;
+                        listed_n += 1;
+                    }
+                    None => unlisted.push(lang_l.clone()),
+                },
                 Err(e) => log.warn(format!("The {lang_l} satellites' list could not be made: {e:#}")).await,
             }
         }
@@ -699,5 +755,29 @@ mod tests {
         let (list, v) = payloads(xml);
         assert_eq!(list, vec![("OpenSSH-Server-Package~31bf3856ad364e35~amd64~~.cab".to_owned(), 2329588)]);
         assert_eq!(v.as_deref(), Some("10.0.26100.1"));
+        // Build 17763 (Windows 10 1809's set, Server 2019's FoD): the folder in another case.
+        let xml = r#"<CompDB Product="Desktop" OSVersion="10.0.17763.1" Type="Build"><Packages>
+          <PayloadItem PayloadHash="x" PayloadSize="241368901" Path="FeaturesOnDemand\Neutral\Cabs\Microsoft-Windows-Server-AppCompat-FoD-Package~31bf3856ad364e35~AMD64~~.cab" PayloadType="Canonical" />
+          <PayloadItem PayloadHash="y" PayloadSize="5876997" Path="FeaturesOnDemand\en-us\Cabs\Microsoft-Windows-Server-AppCompat-FoD-Package~31bf3856ad364e35~AMD64~en-us~.cab" PayloadType="Canonical" /></Packages></CompDB>"#;
+        let (list, _) = payloads(xml);
+        assert_eq!(list, vec![("Microsoft-Windows-Server-AppCompat-FoD-Package~31bf3856ad364e35~AMD64~~.cab".to_owned(), 241368901)]);
+        assert_eq!(uup_key(&list[0].0), "microsoft-windows-server-appcompat-fod-package-amd64");
+    }
+
+    #[test]
+    fn server_2019_has_its_own_slot() {
+        let s = FodSettings { server: "a".into(), server2022: "b".into(), server2019: "c".into(), client: "d".into() };
+        assert_eq!((s.for_gold(false, "10.0.17763.3650"), s.for_gold(false, "10.0.20348.1"), s.for_gold(false, "10.0.26100.1"), s.for_gold(true, "10.0.26100.1")), ("c", "b", "a", "d"));
+        let src = source("server2019").unwrap();
+        assert!(crate::uup::product(src.product).is_some_and(|p| !p.listed));
+        // Its languages: build 17763 names the lists without _FOD.
+        let d = std::env::temp_dir().join(format!("pvs-fod-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        for n in ["DesktopBaselessCompDB_Neutral.CompDB.xml.cab", "DesktopBaselessCompDB_de-de.CompDB.xml.cab", "DesktopBaselessCompDB_en-us.CompDB.xml.cab", "DesktopTargetCompDB_de-de.xml.cab"] {
+            std::fs::write(d.join(n), b"").unwrap();
+        }
+        assert_eq!(fod_languages(&d), ["de-de", "en-us"]);
+        assert!(target_lang_cab(&d, "de-de").is_some() && target_lang_cab(&d, "en-us").is_none());
+        let _ = std::fs::remove_dir_all(&d);
     }
 }
