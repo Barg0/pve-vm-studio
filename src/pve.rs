@@ -910,11 +910,33 @@ pub struct Resource {
     pub pool: Option<String>,
     pub cpu: Option<f64>,
     pub maxcpu: Option<f64>,
+    #[serde(default, deserialize_with = "not_negative")]
     pub mem: Option<u64>,
+    #[serde(default, deserialize_with = "not_negative")]
     pub maxmem: Option<u64>,
+    #[serde(default, deserialize_with = "not_negative")]
     pub disk: Option<u64>,
+    #[serde(default, deserialize_with = "not_negative")]
     pub maxdisk: Option<u64>,
+    #[serde(default, deserialize_with = "not_negative")]
     pub uptime: Option<u64>,
+}
+
+/// PVE's counters go below zero at times (a container's memory is its usage less its page
+/// cache, read at two moments). Such a value is unknown - it must not cost the whole list.
+fn not_negative<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    Ok(Option::<i64>::deserialize(d)?.and_then(|n| u64::try_from(n).ok()))
+}
+
+#[cfg(test)]
+mod resource_tests {
+    use super::*;
+
+    #[test]
+    fn a_negative_counter_is_unknown_not_an_error() {
+        let r: Vec<Resource> = serde_json::from_str(r#"[{"id":"lxc/100","type":"lxc","mem":-330948608,"maxmem":2147483648,"disk":null},{"id":"/pool/p","type":"pool"}]"#).unwrap();
+        assert_eq!((r[0].mem, r[0].maxmem, r[0].disk, r[1].mem), (None, Some(2147483648), None, None));
+    }
 }
 
 impl Resource {
